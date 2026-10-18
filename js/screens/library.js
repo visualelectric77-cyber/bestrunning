@@ -175,17 +175,33 @@ function categoryView(state, cat, minutes) {
   return `${head}<div class="lb-grid">${ws.map(tile).join('')}</div>`;
 }
 
-function searchView(state, q, cat, minutes) {
+/** Plantillas que encajan con todas las palabras de la búsqueda (sin tildes ni mayúsculas). */
+function searchHits(state, q, cat) {
   const hasIncline = !!state.treadmill?.hasIncline;
   const words = norm(q).split(/\s+/).filter(Boolean);
   const pool = (Array.isArray(TEMPLATES) ? TEMPLATES : []).filter(
     (t) => (hasIncline || !t.requiresIncline) && (cat === 'all' || t.category === cat)
   );
-  const hits = pool.filter((t) => {
+  return pool.filter((t) => {
     const hay = norm([t.title, t.subtitle, t.focus, t.description, CATEGORIES[t.category]?.name].join(' '));
     return words.every((w) => hay.includes(w));
   });
-  const ws = hits.map((t) => buildFor(t, minutes, state)).filter(Boolean);
+}
+
+function searchView(state, q, cat, minutes) {
+  const ws = searchHits(state, q, cat).map((t) => buildFor(t, minutes, state)).filter(Boolean);
+  if (!ws.length && cat !== 'all') {
+    // La categoría elegida se recuerda entre visitas: si hay resultados fuera de ella, ofrece buscar en todas
+    const n = searchHits(state, q, 'all').length;
+    if (n) {
+      return emptyState({
+        icon: 'grid',
+        title: `Nada en ${CATEGORIES[cat]?.name || 'esta categoría'}`,
+        text: `Hay ${n} ${n === 1 ? 'clase' : 'clases'} para «${q}» en otras categorías.`,
+        action: '<button type="button" class="btn btn--secondary" data-cat="all">Buscar en todas</button>',
+      });
+    }
+  }
   if (!ws.length) {
     return emptyState({
       icon: 'grid',

@@ -26,6 +26,10 @@ export const BEATMIX_MAX_DELTA = 0.06;
 /** Sprint: se acepta el BPM nativo en este rango. */
 export const SPRINT_NATIVE = [148, 190];
 export const END_FADE_SEC = 8;
+/** Variedad entre sesiones: se evitan las pistas que sonaron en las últimas N sesiones (si hay otras en el tramo). */
+export const RECENT_SESSIONS = 5;
+/** Penalización por sesión de una pista reciente cuando no queda otra: la de la última sesión pesa más y gana la más antigua. */
+const RECENT_STEP = 2;
 const RESUME_MIN_SEC = 30;
 const PHRASE_BARS = 16;
 const MIX_BARS = 8;
@@ -319,13 +323,69 @@ function rampLength(g, rate, from, avail) {
 }
 
 const validTrack = (t) => t && typeof t === 'object' && t.id && num(t.bpm) > 40 && num(t.duration) > 30;
-const preferred = (t, zone) => (ZONE_POOLS[zone] || []).some((p) => p === t.tier || p === t.curatedTier);
+/** ¿La pista pertenece a un tramo musical preferido para la zona? (tramo medido o curado). */
+export const preferred = (t, zone) => (ZONE_POOLS[zone] || []).some((p) => p === t.tier || p === t.curatedTier);
+
+const sessionTrackIds = (ses) => {
+  const raw = Array.isArray(ses?.music?.tracks) ? ses.music.tracks : Array.isArray(ses?.music) ? ses.music : [];
+  const ids = [];
+  for (const x of raw) {
+    const id = typeof x === 'string' ? x : x && typeof x === 'object' && x.id != null ? String(x.id) : '';
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+};
+const sessionTime = (ses) => {
+  for (const k of ['startedAt', 'endedAt', 'date']) {
+    const ms = Date.parse(ses?.[k] || '');
+    if (Number.isFinite(ms)) return ms;
+  }
+  return NaN;
+};
+
+/**
+ * Pistas de las últimas `n` sesiones con música de la app (session.music.tracks: ids o { id }), para la variedad
+ * entre sesiones. Devuelve un Map id → antigüedad (0 = la última sesión, n−1 = la más antigua que se recuerda).
+ * El historial se ordena por fecha (startedAt/endedAt/date) y, sin fecha, por su orden (se añade al final).
+ */
+export function recentTracksFromHistory(history, n = RECENT_SESSIONS) {
+  const ages = new Map();
+  const list = (Array.isArray(history) ? history : [])
+    .map((s, i) => ({ s, i, t: sessionTime(s), ids: sessionTrackIds(s) }))
+    .filter((x) => x.ids.length);
+  list.sort((a, b) => (Number.isFinite(a.t) && Number.isFinite(b.t) && a.t !== b.t ? b.t - a.t : b.i - a.i));
+  const keep = Math.max(0, Math.floor(num(n, RECENT_SESSIONS)));
+  list.slice(0, keep).forEach((x, age) => { for (const id of x.ids) if (!ages.has(id)) ages.set(id, age); });
+  return ages;
+}
+
+/**
+ * Normaliza la memoria de sesiones anteriores: Map/objeto id → antigüedad, lista de sesiones (la más reciente
+ * primero; cada una, lista de ids) o lista plana de ids (antigüedad 0). Sin ella, el campo `recentAge` de cada pista
+ * (lo pone loadLibrary() a partir del historial).
+ */
+function recentAges(recent, lib) {
+  const ages = new Map();
+  const put = (id, age) => {
+    const a = Math.max(0, num(age, 0));
+    if (id == null || id === '') return;
+    const k = String(id);
+    if (!ages.has(k) || ages.get(k) > a) ages.set(k, a);
+  };
+  if (recent instanceof Map) for (const [id, a] of recent) put(id, a);
+  else if (Array.isArray(recent)) recent.forEach((x, i) => { if (Array.isArray(x)) x.forEach((id) => put(id, i)); else put(x, 0); });
+  else if (recent && typeof recent === 'object') for (const [id, a] of Object.entries(recent)) put(id, a);
+  else if (recent == null) for (const t of lib) if (t.recentAge != null && Number.isFinite(Number(t.recentAge))) put(t.id, t.recentAge);
+  return ages;
+}
 
 /**
  * Plan musical de la clase. tracks: [{ id, bpm, duration, barOffset, energy, cues, tier, … }].
- * opts: { seed, announceLead = 10, prefs: { energy: 'normal'|'max' } }.
+ * opts: { seed, announceLead = 10, prefs: { energy: 'normal'|'max' }, recent }.
+ * recent: pistas de las últimas sesiones (ver recentAges); se evitan mientras el tramo tenga otras sin estrenar.
+ * `false` desactiva la memoria (y también la que traigan las pistas en `recentAge`).
  */
-export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs = {} } = {}) {
+export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs = {}, recent } = {}) {
   const segs = normSegments(workout);
   const lib = (Array.isArray(tracks) ? tracks : []).filter(validTrack);
   const energy = prefs?.energy === 'max' ? 'max' : 'normal';
@@ -333,6 +393,9 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
   const totalSec = segs.reduce((a, s) => a + s.sec, 0);
   const plan = { version: PLAN_VERSION, seed: sd, energy, totalSec, endFadeSec: END_FADE_SEC, cues: [], trackIds: [] };
   if (!segs.length || !lib.length) return plan;
+  const ages = recent === false ? new Map() : recentAges(recent, lib);
+  const isRecent = (t) => ages.has(t.id);
+  const span = Math.max(RECENT_SESSIONS, ...ages.values(), 0) + 1;
 
   const lead = clamp(num(announceLead, 10), 3, 20);
   const rng = makeRng(hashStr(`dj|${workout?.templateId || workout?.id || ''}|${sd}|${energy}`));
@@ -360,14 +423,20 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
   const posAt = (T) => cuePosition(active.cue, T);
   const rateAt = (T) => cueRate(active.cue, T);
 
-  /** Elige una pista nueva para la zona (sin repetir mientras haya alternativas). */
+  /**
+   * Elige una pista nueva para la zona: sin repetir dentro de la sesión mientras haya alternativas y, dentro del
+   * tramo preferido, sin repetir las de las últimas sesiones (si todas son recientes, la que sonó hace más tiempo).
+   */
   function chooseTrack(zone, target, needSec, exclude) {
     const cand = lib.filter((t) => !exclude.has(t.id));
     const pool = cand.length ? cand : lib.filter((t) => t.id !== active?.track?.id);
     const fits = pool.filter((t) => isCandidate(t, target, zone));
+    const fresh = fits.filter((t) => !lastUse.has(t.id));
     const groups = [
-      fits.filter((t) => !lastUse.has(t.id) && preferred(t, zone)),
-      fits.filter((t) => !lastUse.has(t.id)),
+      fresh.filter((t) => preferred(t, zone) && !isRecent(t)),
+      fresh.filter((t) => preferred(t, zone)),
+      fresh.filter((t) => !isRecent(t)),
+      fresh,
       fits,
       pool,
       lib,
@@ -392,6 +461,8 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       const usable = (g.outro - g.mixIn) / rate;
       s += Math.min(1, usable / Math.max(60, Math.min(needSec, 300))) * 0.6;
       s += (jitter.get(t.id) || 0) * 0.9;
+      // Sonó en una sesión reciente (solo cuenta si no quedaba otra): cuanto más reciente, peor
+      if (isRecent(t)) s -= RECENT_STEP * (span - ages.get(t.id));
       // Ya usadas: la menos reciente primero (y nunca la que suena)
       if (reuse && lastUse.has(t.id)) s -= (lastUse.get(t.id) / Math.max(1, useCounter)) * 3;
       if (t.id === active?.track?.id) s -= 100;
@@ -454,9 +525,11 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
     const segEnd = starts[i] + segs[i].sec;
     const room = Math.max(0, atSec - Math.max(prevEnd, out ? out.cue.atSec : 0) - 1);
     // Tempo de la saliente al empezar la mezcla (estimado y refinado con el instante real de entrada)
-    let outRate = out ? rateAt(atSec - Math.min(room, (MIX_BARS / 2) * barEff)) : 1;
+    // (con los compases de entrada de ESTA mezcla: una intra-zona corta entra más tarde, quizá con la saliente aún en rampa)
+    const leadEst = Math.ceil(mixBars / 2);
+    let outRate = out ? rateAt(atSec - Math.min(room, leadEst * barEff)) : 1;
     if (out) {
-      const est = Math.min(MIX_BARS / 2, Math.floor(room / (g.barSec / ((outG.bpm * outRate) / g.bpm)) + EPS));
+      const est = Math.min(leadEst, Math.floor(room / (g.barSec / ((outG.bpm * outRate) / g.bpm)) + EPS));
       outRate = rateAt(atSec - est * (g.barSec / ((outG.bpm * outRate) / g.bpm)));
     }
     const outEff = out ? outG.bpm * outRate : g.bpm * rate;

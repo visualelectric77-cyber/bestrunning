@@ -9,6 +9,10 @@ Para cada pista de audio/music-src/ (con metadatos en picks.tsv):
   4. Escribe audio/music/library.json, que usa el motor de música de la app.
 
 Uso: python3 tools/music/analyze.py [--force]
+     python3 tools/music/analyze.py --new [--force] [--only=id1,id2]
+       --new: modo incremental. Conserva tal cual las pistas que ya están en library.json y añade (o rehace, con
+              --only) las de audio/music-src/nuevas/manifest.json (lista de { file, title, artist, url, tier,
+              stated_bpm }). FORCE_BPM fija el tempo de las pistas que el detector dobla o parte por la mitad.
 Requiere ffmpeg/ffprobe y numpy.
 """
 import json
@@ -29,6 +33,39 @@ FR = SR / HOP  # frames por segundo de la envolvente
 # Rangos de BPM esperados por tramo (prior suave para resolver dobles/mitades de tempo).
 TIER_PRIOR = {"calm": 110, "jog": 123, "run": 128, "fast": 138, "sprint": 165}
 TIER_RANGES = [("calm", 0, 118), ("jog", 118, 126), ("run", 126, 134), ("fast", 134, 148), ("sprint", 148, 999)]
+TIER_ORDER = [name for name, _lo, _hi in TIER_RANGES]
+NEW_MANIFEST = SRC / "nuevas" / "manifest.json"
+
+# Tempo impuesto por pista (id → BPM) cuando el detector cae en el doble o la mitad del tempo real.
+# Se revisa con el BPM declarado por el autor y con el peine por bandas (bombo / caja / agudos).
+FORCE_BPM = {
+    # Declarado 160, pero no hay periodicidad a 160: el peine marca 95 (caja a medio tiempo) y 190 → DnB a 190
+    "twinfish-pivot-drum-and-bass-twinfishaudio": 190.0,
+}
+
+# Tramo corregido (id → tramo) cuando el BPM medido contradice la estimación de docs/musica-nueva/candidatas.md.
+TIER_OVERRIDE = {
+    # Estimada «~174 (est.)» como neurofunk; medida 120 (agudos clavados a la rejilla de 120): es un tema de trote
+    "neurobeat-soundreality": "jog",
+    # Declarada 160 (sprint nativo según el doc): medida 95/190 → sprint nativo a 190
+    "twinfish-pivot-drum-and-bass-twinfishaudio": "sprint",
+}
+
+# Rejilla desplazada medio tiempo (id): el peine de onsets se engancha a los platos abiertos a contratiempo y el bombo
+# cae a +1/2 tiempo (flujo del bombo a contratiempo ≥ 3× y ataques del subgrave concentrados en esa fase).
+HALF_BEAT_SHIFT = {
+    "funky-summer-house-berrydeep",
+    "pulse-check-128-german-techno-djfunkypharmacist",
+    "techno-prettyjohn1",
+    "midnight-drift-pwlpl",
+    # Mismo patrón con ataques del subgrave en la segunda mitad del tiempo (flujo del bombo a contratiempo ≥ 2×)
+    "feelings-122-bpm-house-instrum-thisisbeatkitchen",
+    "modern-deep-house-artissizm",
+    "afro-house-artissizm",
+    "inception-inspired-dark-melodic-t-saturn-3-music",
+    "241029-techno-dark-minimal-welc0me-0",
+    "eurodance-hyperpop-type-beat-140-bpm-van-wiese",
+}
 
 
 def run(cmd, **kw):
@@ -141,7 +178,7 @@ def beat_features(S, beat_times):
     return np.array(feats)
 
 
-def analyze(path: Path, prior_bpm, force_bpm=None):
+def analyze(path: Path, prior_bpm, force_bpm=None, half_beat=False):
     y = decode_mono(path)
     dur = len(y) / SR
     S = stft_mag(y)
@@ -153,6 +190,9 @@ def analyze(path: Path, prior_bpm, force_bpm=None):
         _, phase = comb_score(env, bpm, phases=np.arange(0, 60 * FR / bpm, 0.25))
         first_beat = phase / FR
     spb = 60 / bpm
+    if half_beat:
+        # El bombo cae medio tiempo después de la fase del peine: se mueve la rejilla (y con ella compás y cues)
+        first_beat = (first_beat + spb / 2) % spb
     beat_times = np.arange(first_beat, dur, spb)
     feats = beat_features(S, beat_times)  # (beats-1, 3)
     nb = len(feats)
@@ -214,7 +254,113 @@ def tier_for(bpm):
     return "sprint"
 
 
+def track_id(title, artist):
+    """Id estable «título-artista» (≤ 48 caracteres); si no cabe, se recorta el título y se conserva el artista."""
+    tid = slugify(f"{title}-{artist}")
+    a = re.sub(r"[^a-z0-9]+", "-", artist.lower()).strip("-")
+    full = re.sub(r"[^a-z0-9]+", "-", f"{title}-{artist}".lower()).strip("-")
+    if len(full) > 48 and a and len(a) < 30:
+        t = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:47 - len(a)].strip("-")
+        tid = f"{t}-{a}"
+    return tid
+
+
+def build_entry(src, tier, title, artist, page, force, prior_bpm=None, tid=None):
+    tid = tid or slugify(f"{title}-{artist}")
+    dst = OUT / f"{tid}.m4a"
+    if force or not dst.exists():
+        normalize_encode(src, dst)
+    forced = FORCE_BPM.get(tid)
+    half = tid in HALF_BEAT_SHIFT
+    prior = prior_bpm or TIER_PRIOR[tier]
+    a = analyze(dst, prior, force_bpm=forced, half_beat=half)
+    bpm = a["bpm"]
+    # DnB/hard: si el detector cae en la mitad (≈85–95) y se eligió para sprint, doblar y rehacer la rejilla.
+    if not forced and tier == "sprint" and bpm < 100:
+        a = analyze(dst, prior, force_bpm=round(bpm * 2, 2), half_beat=half)
+        bpm = a["bpm"]
+    entry = {
+        "id": tid,
+        "file": f"audio/music/{tid}.m4a",
+        "title": title,
+        "artist": artist,
+        "source": "Pixabay",
+        "page": page,
+        "license": "Pixabay Content License",
+        "curatedTier": tier,
+        "tier": tier_for(bpm),
+        "sizeBytes": dst.stat().st_size,
+        **a,
+    }
+    if forced:
+        entry["forcedBpm"] = True
+    if half:
+        entry["gridShift"] = "half-beat"
+    return entry
+
+
+def log_entry(e, extra=""):
+    print(f"{e['curatedTier']:6s} → {e['tier']:6s} {e['bpm']:7.2f} BPM conf {e['confidence']:4.2f}  "
+          f"{e['duration']:6.1f}s  bar {e['barOffset']:5.2f}  mixIn {e['cues']['mixIn']:6.1f}  "
+          f"drops {e['cues']['drops'][:3]}  outro {e['cues']['outro']:6.1f}  {e['title']} · {e['artist']}{extra}",
+          flush=True)
+
+
+def main_new():
+    """Modo incremental: library.json actual + pistas de nuevas/manifest.json."""
+    force = "--force" in sys.argv
+    only = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--only="):
+            only = {x.strip() for x in arg.split("=", 1)[1].split(",") if x.strip()}
+    lib_path = OUT / "library.json"
+    lib = json.loads(lib_path.read_text()) if lib_path.exists() else {"version": 1, "tracks": []}
+    tracks = list(lib.get("tracks", []))
+    by_id = {t["id"]: i for i, t in enumerate(tracks)}
+    manifest = json.loads(NEW_MANIFEST.read_text())
+    seen = set()
+    for m in manifest:
+        tid = track_id(m["title"], m["artist"])
+        tier = TIER_OVERRIDE.get(tid, m["tier"])
+        if tid in seen:
+            raise SystemExit(f"id repetido en el manifiesto: {tid}")
+        seen.add(tid)
+        if only is not None and tid not in only:
+            continue
+        if only is None and tid in by_id and not force:
+            continue
+        src = NEW_MANIFEST.parent / m["file"]
+        stated = m.get("stated_bpm")
+        e = build_entry(src, tier, m["title"], m["artist"], m["url"], force,
+                        prior_bpm=float(stated) if stated else None, tid=tid)
+        if stated:
+            e["statedBpm"] = float(stated)
+        if tid in by_id:
+            tracks[by_id[tid]] = e
+        else:
+            by_id[tid] = len(tracks)
+            tracks.append(e)
+        log_entry(e, f"  (declarado {stated})" if stated else "")
+        # Guardado tras cada pista: si se corta, lo hecho no se pierde
+        _write_library(tracks, lib_path)
+    _write_library(tracks, lib_path)
+    total = sum(t["sizeBytes"] for t in tracks)
+    print(f"\n{len(tracks)} pistas · {total/1e6:.1f} MB · audio/music/library.json")
+
+
+def _write_library(tracks, lib_path):
+    # Orden estable: por tramo curado (calma → sprint) y, dentro de cada uno, en el orden de alta
+    order = {k: i for i, k in enumerate(TIER_ORDER)}
+    ranked = sorted(enumerate(tracks), key=lambda p: (order.get(p[1].get("curatedTier"), 9), p[0]))
+    out = {"version": 1, "generated": "tools/music/analyze.py", "lufs": -14, "tracks": [t for _, t in ranked]}
+    tmp = lib_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    tmp.replace(lib_path)
+
+
 def main():
+    if "--new" in sys.argv:
+        return main_new()
     force = "--force" in sys.argv
     OUT.mkdir(parents=True, exist_ok=True)
     rows = [l.rstrip("\n").split("\t") for l in (SRC / "picks.tsv").read_text().splitlines() if l.strip()]

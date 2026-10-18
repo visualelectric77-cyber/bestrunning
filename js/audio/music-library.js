@@ -1,7 +1,8 @@
 // BestRunning · biblioteca musical: pistas integradas (audio/music/library.json) + importadas por el usuario
 // (IndexedDB a través de music-import.js, que puede no estar disponible). Descarga para usar sin conexión con
 // Cache API ('br-music'). No toca window/document al importarse.
-import { trackGrid } from './music-plan.js';
+import { trackGrid, recentTracksFromHistory, RECENT_SESSIONS } from './music-plan.js';
+import { getState } from '../core/store.js';
 
 export const MUSIC_CACHE = 'br-music';
 const LIBRARY_URL = new URL('../../audio/music/library.json', import.meta.url);
@@ -140,12 +141,27 @@ async function userTracks() {
   return out.sort((a, b) => String(a.addedAt || '').localeCompare(String(b.addedAt || '')));
 }
 
+/** Historial de sesiones guardado (para la variedad entre sesiones); [] si el estado no está disponible. */
+function savedHistory() {
+  try {
+    const h = getState()?.history;
+    return Array.isArray(h) ? h : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Biblioteca activa: integradas + importadas (activas), sin las desactivadas, con `url` lista para descargar.
+ * Cada pista lleva `recentAge`: hace cuántas sesiones sonó (0 = la última; null si no sonó en las últimas
+ * RECENT_SESSIONS), sacado de session.music.tracks del historial (o de `history`, si se pasa). buildMusicPlan() lo usa
+ * para no repetir pistas de una sesión a otra.
  * Nunca lanza: si algo falla devuelve lo que haya podido cargar.
  */
-export async function loadLibrary({ useBuiltIn = true, useImported = true, disabled = [] } = {}) {
+export async function loadLibrary({ useBuiltIn = true, useImported = true, disabled = [], history } = {}) {
   const off = new Set(Array.isArray(disabled) ? disabled.map(String) : []);
+  let ages = new Map();
+  try { ages = recentTracksFromHistory(Array.isArray(history) ? history : savedHistory(), RECENT_SESSIONS); } catch { ages = new Map(); }
   const [a, b] = await Promise.all([
     useBuiltIn !== false ? builtInTracks().catch(() => []) : [],
     useImported !== false ? userTracks().catch(() => []) : [],
@@ -156,6 +172,7 @@ export async function loadLibrary({ useBuiltIn = true, useImported = true, disab
     if (off.has(t.id) || seen.has(t.id)) continue;
     seen.add(t.id);
     trackGrid(t);
+    t.recentAge = ages.has(t.id) ? ages.get(t.id) : null;
     out.push(t);
   }
   return out;

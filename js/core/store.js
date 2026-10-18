@@ -132,6 +132,12 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
   for (const k of ['tvMode', 'strideBob', 'ghost', 'captions']) vz[k] = typeof vz[k] === 'boolean' ? vz[k] : dv[k];
   st.visuals = vz;
   if (Array.isArray(st.history)) st.history = st.history.map(normalizeSession);
+  // [temporada] Objeto de temporada de 52 semanas en plan.season (js/training/season.js). Solo metadatos: el calendario
+  // de fases se deriva siempre de plan.startDate, así que los usuarios existentes conservan su plan y su fecha.
+  if (isPlainObject(st.plan)) {
+    const sz = isPlainObject(st.plan.season) ? st.plan.season : {};
+    st.plan.season = { v: 1, weeks: 52, mesoWeeks: 4, testEvery: 6, ...sz, startDate: st.plan.startDate || null };
+  }
   st.version = STATE_VERSION;
   return st;
 }
@@ -252,7 +258,8 @@ export function importState(json) {
   }
 }
 
-export function saveActiveSession(snap) {
+/** `savedAt` (ms epoch, opcional): conserva la hora del guardado original (p. ej. al deshacer un «Descartar»). */
+export function saveActiveSession(snap, { savedAt = null } = {}) {
   if (!hasLS) return;
   try {
     if (snap == null) {
@@ -260,7 +267,7 @@ export function saveActiveSession(snap) {
       localStorage.removeItem(ACTIVE_TS_KEY);
     } else {
       localStorage.setItem(ACTIVE_KEY, JSON.stringify(snap));
-      localStorage.setItem(ACTIVE_TS_KEY, String(Date.now()));
+      localStorage.setItem(ACTIVE_TS_KEY, String(Number(savedAt) > 0 ? Number(savedAt) : Date.now()));
     }
   } catch (error) {
     emitStorageError(error);

@@ -15,7 +15,10 @@ import { ZONES, LEVEL_KEYS } from '../training/levels.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, round1,
 } from '../core/utils.js';
-import { openSwapSheet } from './plan.js';
+import {
+  openSwapSheet, seasonOf, seasonLine, seasonChips, sessionsOn, sessionRow, ensureSeasonStyles, eventIntro,
+} from './plan.js';
+import { eventOn } from '../training/season.js';
 
 const INSTALL_KEY = 'br.td.installDismissed';
 
@@ -147,7 +150,12 @@ function trainHero(day, state, today, animate) {
       ? '<span class="td-hero__status is-test">Test VAM</span>'
       : day.isOverride
         ? '<span class="td-hero__status">Editada</span>'
-        : '';
+        : day.event
+          ? `<span class="td-hero__status">${icon('star', 12)} ${esc(day.event.name || 'Especial')}</span>`
+          : day.surprise
+            ? `<span class="td-hero__status">${icon('sparkles', 12)} Sorpresa</span>`
+            : '';
+  const intro = day.intro || w.intro || '';
   const play = `#/play/${enc(w.id)}?date=${day.date}`;
   const detail = `#/workout/${enc(w.id)}?date=${day.date}&from=today`;
   const km = w.estDistanceKm ? `<span>${icon('route', 15)} ~${fmt.dec1(w.estDistanceKm)} km</span>` : '';
@@ -161,6 +169,7 @@ function trainHero(day, state, today, animate) {
     </div>
     <h2 class="td-hero__title">${esc(w.title)}</h2>
     ${w.subtitle || w.focus ? `<p class="td-hero__sub">${esc(w.subtitle || w.focus)}</p>` : ''}
+    ${intro ? `<p class="td-hero__intro">${esc(intro)}</p>` : ''}
     <div class="td-hero__meta">
       <span>${icon('timer', 15)} ${mins(w)} min</span>${km}${kcal}
       <span class="td-hero__dots" aria-label="Intensidad ${w.intensity || 1} de 3">${intensityDots(w.intensity || 1, '#fff')}</span>
@@ -302,7 +311,7 @@ function cycleCard(state, today) {
   if (!ci) return '';
   const w = ci.weekInCycle || 1;
   const segs = [1, 2, 3, 4]
-    .map((n) => `<span class="td-cycle__seg${n < w ? ' is-past' : ''}${n === w ? ' is-current' : ''}${n === 4 ? ' is-test' : ''}"></span>`)
+    .map((n) => `<span class="td-cycle__seg${n < w ? ' is-past' : ''}${n === w ? ' is-current' : ''}${n === w && ci.isTestWeek ? ' is-test' : ''}"></span>`)
     .join('');
   const nt = safe(() => nextTestDate(state, today), null);
   let testLine = '';
@@ -314,8 +323,9 @@ function cycleCard(state, today) {
         ? `${icon('gauge', 14)} Test el ${esc(fmt.weekdayName(weekdayOf(nt)))}`
         : `${icon('gauge', 14)} Test: ${esc(fmt.dateShort(nt))}`;
   }
-  return `<button type="button" class="card card--pressable td-mini td-cycle${ci.isDeload ? ' is-deload' : ''}" data-href="#/plan" aria-label="Ciclo ${ci.cycleIndex + 1}, semana ${w} de 4: ${esc(ci.weekName || '')}">
-    <span class="eyebrow">Ciclo ${ci.cycleIndex + 1}</span>
+  const blk = ci.mesoNumber ? `Bloque ${ci.mesoNumber}/13` : `Ciclo ${ci.cycleIndex + 1}`;
+  return `<button type="button" class="card card--pressable td-mini td-cycle${ci.isDeload ? ' is-deload' : ''}" data-href="#/plan" aria-label="${blk}, semana ${w} de 4: ${esc(ci.weekName || '')}">
+    <span class="eyebrow">${blk}</span>
     <div class="td-cycle__week"><span class="num">${w}</span><span class="td-cycle__of">/4</span></div>
     <div class="td-cycle__name">${esc(ci.weekName || CYCLE_WEEKS[w - 1] || '')}</div>
     <div class="td-cycle__bar" aria-hidden="true">${segs}</div>
@@ -345,6 +355,45 @@ function installBanner() {
     </div>
     <button type="button" class="btn-icon td-install__close" data-dismiss-install aria-label="Ocultar">${icon('close', 18)}</button>
   </div>`;
+}
+
+/** «Semana 6 de 52 · Construcción · Mes de cuestas» + chips (abre Mi plan). */
+function seasonBar(si) {
+  if (!si) return '';
+  return `<button type="button" class="br-season" data-href="#/plan" aria-label="${esc(`${seasonLine(si)}. Ver mi plan`)}">
+    <span class="br-season__line">${icon('flag', 15)}<span>${esc(seasonLine(si))}</span></span>
+    ${seasonChips(si)}
+  </button>`;
+}
+
+/** Banner del evento de temporada (Navidad, Verano, Aniversario) de esta semana. */
+function eventBanner(si, today) {
+  const ev = si?.event;
+  if (!ev) return '';
+  const wd = fmt.weekdayName(weekdayOf(ev.date));
+  let text = eventIntro(ev.key);
+  if (ev.date === today) text = 'Hoy toca tu clase especial. ¡A disfrutarla!';
+  else if (ev.date > today) text += ` Tu clase especial: el ${wd}.`;
+  else if (ev.date < today) {
+    if (eventOn(today)?.key !== ev.key) return '';
+    text = `Seguimos de celebración. Tu clase especial de esta semana fue el ${wd}.`;
+  }
+  return `<div class="br-event" role="note">${icon('star', 20)}<span><b>Especial ${esc(ev.name)}</b>${esc(text)}</span></div>`;
+}
+
+/** Todas las sesiones hechas el día elegido (planificada y extra), cada una con su resumen. */
+function sessionsBlock(state, day, dateKey, today) {
+  const list = sessionsOn(state, dateKey);
+  if (!list.length) return '';
+  const heroId = day?.status === 'done' ? day.session?.id : null;
+  if (list.length === 1 && list[0].id === heroId) return '';
+  const min = Math.round(list.reduce((a, s) => a + (Number(s.elapsedSec) || 0), 0) / 60);
+  const km = list.reduce((a, s) => a + (Number(s.distanceKm) || 0), 0);
+  const title = dateKey === today ? 'Hoy has hecho' : `Hecho el ${fmt.weekdayName(weekdayOf(dateKey))}`;
+  return `<section class="td-section br-sessions" aria-label="${esc(title)}">
+    <div class="br-sessions__head"><h3>${esc(title)}</h3><span>${list.length} ${list.length === 1 ? 'sesión' : 'sesiones'} · ${min} min · ${fmt.dec1(km)} km</span></div>
+    ${list.map((s) => sessionRow(s, { planned: !!s.planDate })).join('')}
+  </section>`;
 }
 
 /* ───────────── Hoja «Entrenar igualmente» ───────────── */
@@ -423,6 +472,7 @@ export function mount(el) {
   })}<div class="container td"></div>`;
   const root = el.querySelector('.td');
   const cleanupHeader = enableCollapsingHeader(el);
+  ensureSeasonStyles();
 
   function render() {
     const state = getState();
@@ -431,14 +481,18 @@ export function mount(el) {
     let day = list?.find((d) => d.date === selected) || null;
     if (!day) day = safe(() => planDay(state, selected), null);
     const streak = typeof stats.streakWeeks === 'function' ? safe(() => stats.streakWeeks(state, new Date()), 0) : 0;
+    const si = seasonOf(state, today);
 
     const blocks = [
       `<div class="td-head">
         <span class="td-date">${esc(capitalize(fmt.dateLong(today)))}</span>
         ${streak > 0 ? `<span class="td-streak">${icon('flame', 14)} ${streak} ${streak === 1 ? 'semana' : 'semanas'}</span>` : ''}
       </div>`,
+      seasonBar(si),
       list ? weekStrip(list, today, selected, state) : '',
+      eventBanner(si, today),
       heroBlock(day, state, today, heroAnim),
+      safe(() => sessionsBlock(state, day, selected, today), ''),
       speedsBlock(state, today),
       `<div class="td-duo">${weekCard(state, list || [], today)}${cycleCard(state, today)}</div>`,
       coachCard(state),

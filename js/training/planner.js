@@ -1,37 +1,59 @@
-// BestRunning · plan semanal y ciclos de 4 semanas (sin DOM).
-// Estructura: L intervalos · M tempo · X suave (cuestas en semanas pares si hay inclinación) · J resistencia larga ·
-// V fartlek/reto (test VAM en descarga) · finde: largo variado · otro día del finde: descanso.
-// La rotación es determinista por (semana, día) y nunca repite plantilla en el mismo día de semanas consecutivas,
-// ni dentro de la misma semana (así jueves y finde nunca coinciden).
-import { clamp, todayKey, addDays, weekdayOf, mondayOf, daysBetween, weekDates, hashStr, makeRng } from '../core/utils.js';
+// BestRunning · planificador de temporada (sin DOM).
+// Temporada de 52 semanas desde plan.startDate: 13 mesociclos de 4 semanas (3 de carga progresiva + 1 de descarga
+// al ~65 %), fases Base → Construcción → Específico → Picos y retos → Transición, un tema por mesociclo, test VAM
+// cada 6 semanas y eventos por fecha (Navidad, Verano, Aniversario) que sustituyen a la «sorpresa» semanal.
+// Cada semana se elige con una búsqueda pequeña sobre candidatos puntuados (tema, novedad, fase) con reglas duras:
+// duración del horario, sin repetir plantilla en 21 días (entre semana) / 42 (jueves y finde), nunca la misma
+// familia dos sesiones seguidas, sin días duros consecutivos, carga semanal ≤ +10 % (salvo tras descarga), descarga
+// ≤ 70 % y 75-80 % del tiempo suave. Solo usa los campos de contrato de la plantilla (family, themes, intensity,
+// category y duraciones). Es determinista por semana (semilla) y se adapta a sesiones perdidas y sensaciones.
+import { clamp, todayKey, addDays, weekdayOf, mondayOf, daysBetween, weekDates, hashStr, makeRng, roundTo } from '../core/utils.js';
 import { TEMPLATES, getTemplate, templatesFor } from './templates.js';
 import { buildWorkout } from './generator.js';
+import { DEFAULT_LEVELS } from './levels.js';
+import {
+  SEASON_WEEKS, MESO_WEEKS, isTestWeekIndex, phaseOfMeso, themeOfMeso, eventOn, templateMeta,
+} from './season.js';
 
-export const CYCLE_WEEKS = ['Base', 'Construcción', 'Pico', 'Descarga + Test'];
-const WEEK_LOAD = [1.0, 1.08, 1.16, 0.72];
+export const CYCLE_WEEKS = ['Arranque', 'Progresión', 'Pico', 'Descarga'];
+const WEEK_LF = [0.97, 1.0, 1.04, 0.8];
+const WEEK_LINES = ['Semana de arranque del bloque: entramos con buenas sensaciones.', 'Semana de progresión: un pelín más de carga.',
+  'Semana pico: la más exigente del bloque.', 'Semana de descarga: menos volumen para asimilar el trabajo.'];
 const TEST_ID = 'test-vam';
+export const WINDOW_SHORT = 21;
+export const WINDOW_LONG = 42;
+const DELOAD_RATIO = 0.58;  // objetivo de carga de la descarga frente a la semana anterior
+const DELOAD_MAX = 0.64;    // tope blando de la descarga
+const DELOAD_HARD = 0.67;   // tope duro (el contrato pide ≤ 70 %; margen por niveles reales)
+const GROWTH_MAX = 1.05;    // tope blando de crecimiento semanal
+const GROWTH_HARD = 1.07;   // tope duro (el contrato pide ≤ +10 %)
+const EASY_BAND = [0.75, 0.81];
+const EASY_HARD_BAND = [0.71, 0.84];
+const DELOAD_EASY_BAND = [0.8, 0.95];
+const DELOAD_EASY_HARD_BAND = [0.71, 1.01];
+const K_CANDS = 3;
 const round2 = (v) => Math.round(v * 100) / 100;
 const isKey = (k) => typeof k === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(k);
+const RANK = { easy: 0, moderate: 1, hard: 2 };
+const ROLE_INT = { E: 'easy', M: 'moderate', H: 'hard', T: 'hard' };
+const ROLE_NAME = { E: 'easy', M: 'moderate', H: 'hard', T: 'test' };
+const KEY_THU = ['resistencia', 'progresivo', 'tempo', 'umbral', 'series-largas'];
+const KEY_WE = ['reto', 'piramide', 'escalera', 'fartlek', 'musica', 'cuestas', 'resistencia'];
 
-const POOLS = {
-  intervals: ['pyramid', 'minute-on', 'sprint-30-60', 'ladder-up', 'over-under', 'golden-minutes', 'two-one', 'countdown', 'km-repeats'],
-  tempo: ['cruise', 'sandwich', 'threshold-3x4', 'progressive', 'cruise-2x6', 'tempo-waves', 'fast-finish'],
-  easy: ['easy-strides', 'recovery-jog', 'aerobic-base'],
-  hills: ['hills-short', 'hill-long', 'rollercoaster', 'hill-sprints'],
-  long: ['long-progressive', 'long-blocks', 'long-surges', 'negative-split', 'long-ladder', 'aerobic-base'],
-  // semana pico: el finde trae un reto, así que el jueves es aeróbico y el viernes, juego suave
-  longPeak: ['long-surges', 'aerobic-base', 'long-progressive', 'negative-split'],
-  fartlekPeak: ['speed-play', 'fartlek-swedish', 'surprise'],
-  fartlek: ['fartlek-swedish', 'speed-play', 'surprise', 'waves'],
-  challenge: ['no-stop', 'sprint-finish', 'pyramid-xl'],
-  weekendChallenge: ['challenge-10k', 'the-hour', 'pyramid-xl', 'sprint-finish', 'no-stop'],
-  deloadMon: ['easy-strides', 'speed-play', 'minute-on', 'fartlek-swedish', 'waves'],
-  deloadTue: ['cruise', 'aerobic-base', 'recovery-jog', 'tempo-waves'],
-  deloadWed: ['recovery-jog', 'walk-jog', 'easy-strides'],
-  deloadThu: ['aerobic-base', 'long-progressive', 'long-surges'],
-  deloadWeekend: ['aerobic-base', 'long-surges', 'negative-split', 'waves', 'fartlek-swedish'],
-  easyAny: ['recovery-jog', 'easy-strides', 'aerobic-base', 'walk-jog'],
+// Papel de cada día (1-5 = lunes-viernes, we = día largo del finde) por semana del mesociclo
+const PATTERNS = {
+  1: { 1: 'M', 2: 'E', 3: 'E', 4: 'H', 5: 'E', we: 'M' },
+  2: { 1: 'H', 2: 'E', 3: 'M', 4: 'M', 5: 'E', we: 'H' },
+  3: { 1: 'H', 2: 'E', 3: 'M', 4: 'H', 5: 'E', we: 'M' },
+  4: { 1: 'E', 2: 'M', 3: 'E', 4: 'M', 5: 'E', we: 'M' },
 };
+
+/* Reloj inyectable (solo tests/simulaciones): «hoy» para contar sesiones perdidas. */
+let CLOCK = null;
+export function setPlannerToday(key) {
+  CLOCK = isKey(key) ? key : null;
+}
+const nowKey = () => CLOCK || todayKey();
 
 const posInt = (v, d) => (Number(v) > 0 ? Math.round(Number(v)) : d);
 
@@ -59,115 +81,485 @@ function fitMinutes(t, minutes) {
   return clamp(minutes, Math.min(...t.durations), Math.max(...t.durations));
 }
 
-export function cycleInfo(state, dateKey = todayKey()) {
+/* ───────────── Calendario de temporada ───────────── */
+
+function calendar(state, dateKey, adj) {
   const key = isKey(dateKey) ? dateKey : todayKey();
   const weeks = Math.floor(daysBetween(startMonday(state), mondayOf(key)) / 7);
-  const weekInCycle = (((weeks % 4) + 4) % 4) + 1;
-  const cycleIndex = Math.max(0, Math.floor(weeks / 4));
-  const adj = clamp(Number(state?.progression?.loadAdjust) || 0, -0.15, 0.15);
-  const loadFactor = round2(WEEK_LOAD[weekInCycle - 1] * (1 + Math.min(cycleIndex, 6) * 0.03) + adj);
-  return { cycleIndex, weekInCycle, weekName: CYCLE_WEEKS[weekInCycle - 1], isDeload: weekInCycle === 4, loadFactor, weeksSinceStart: weeks };
+  const weekInCycle = (((weeks % MESO_WEEKS) + MESO_WEEKS) % MESO_WEEKS) + 1;
+  const cycleIndex = Math.max(0, Math.floor(weeks / MESO_WEEKS));
+  const seasonIndex = Math.floor(cycleIndex / 13);
+  const mesoIndex = cycleIndex % 13;
+  const phase = phaseOfMeso(mesoIndex);
+  const theme = themeOfMeso(cycleIndex);
+  const isTestWeek = isTestWeekIndex(weeks);
+  const nominal = WEEK_LF[weekInCycle - 1] * phase.lf * (1 + Math.min(seasonIndex, 3) * 0.02);
+  return {
+    cycleIndex, weekInCycle, isDeload: weekInCycle === 4, weeksSinceStart: weeks,
+    weekName: CYCLE_WEEKS[weekInCycle - 1] + (isTestWeek ? ' + Test' : ''),
+    loadFactor: round2(clamp(nominal * (1 + adj), 0.5, 1.4)),
+    nominalLoad: round2(nominal),
+    seasonIndex, seasonWeek: (((weeks % SEASON_WEEKS) + SEASON_WEEKS) % SEASON_WEEKS) + 1,
+    mesoIndex, mesoNumber: mesoIndex + 1,
+    phase: { key: phase.key, name: phase.name }, theme: { key: theme.key, name: theme.name }, isTestWeek,
+  };
 }
 
-/* ───────────── Rotación ───────────── */
+/** Semana del plan: ciclo de 4 semanas + temporada (fase, tema, test). Campos antiguos intactos. */
+export function cycleInfo(state, dateKey = todayKey()) {
+  const adj = clamp(Number(state?.progression?.loadAdjust) || 0, -0.15, 0.15);
+  return calendar(state, dateKey, adj);
+}
 
-const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+/** Resumen de temporada para pantallas: fase, tema, intro de Eva, test y evento de la semana de `dateKey`. */
+export function seasonInfo(state, dateKey = todayKey()) {
+  const key = isKey(dateKey) ? dateKey : todayKey();
+  const info = cycleInfo(state, key);
+  const week = info.weeksSinceStart >= 0 ? weekPicks(state, info.weeksSinceStart) : null;
+  const phase = phaseOfMeso(info.mesoIndex);
+  const theme = themeOfMeso(info.cycleIndex);
+  const days = week ? Object.values(week.days) : [];
+  const ev = days.find((d) => d.event);
+  const test = days.find((d) => d.role === 'T');
+  const seasonStart = addDays(startMonday(state), Math.max(0, info.seasonIndex) * SEASON_WEEKS * 7);
+  const weeksToTest = (() => {
+    for (let i = 0; i < 6; i++) if (isTestWeekIndex(info.weeksSinceStart + i)) return i;
+    return null;
+  })();
+  return {
+    ...info,
+    seasonStart,
+    seasonEnd: addDays(seasonStart, SEASON_WEEKS * 7 - 1),
+    mesoStart: addDays(startMonday(state), info.cycleIndex * MESO_WEEKS * 7),
+    themeIntro: theme.intro,
+    phaseLine: phase.line,
+    weekLine: WEEK_LINES[info.weekInCycle - 1],
+    intro: `${theme.intro} ${WEEK_LINES[info.weekInCycle - 1]}`,
+    adapt: week ? { mode: week.adapt.mode, missed: week.adapt.missed } : { mode: 'normal', missed: 0 },
+    event: ev ? { key: ev.event.key, name: ev.event.name, date: ev.date } : null,
+    surpriseDate: days.find((d) => d.surprise)?.date || null,
+    testDate: test ? test.date : null,
+    weeksToTest,
+    plannedLoad: week ? Math.round(week.load) : null,
+  };
+}
 
-/** Plantilla para un índice de rotación: recorre todo el grupo antes de repetir (paso coprimo con su tamaño). */
-function rotatePick(pool, rot, salt, blocked, soft = () => false) {
-  const n = pool.length;
-  if (!n) return null;
-  const h = hashStr(salt);
-  const steps = [];
-  for (let s = 1; s < n; s++) if (gcd(s, n) === 1) steps.push(s);
-  const step = steps.length ? steps[h % steps.length] : 0;
-  const r = ((rot % n) + n) % n;
-  const start = ((h >>> 8) % n + r * step) % n;
-  // primero evita también lo "blando" (lo de hace dos semanas); si no hay forma, solo lo obligatorio
-  for (const avoidSoft of [true, false]) {
-    for (let i = 0; i < n; i++) {
-      const id = pool[(start + i) % n];
-      if (!blocked(id) && !(avoidSoft && soft(id))) return id;
+/** Mesociclos de la temporada actual (para dibujar el calendario anual). */
+export function seasonCalendar(state, dateKey = todayKey()) {
+  const info = cycleInfo(state, dateKey);
+  const first = Math.max(0, info.seasonIndex) * 13;
+  return Array.from({ length: 13 }, (_, i) => {
+    const c = first + i;
+    const p = phaseOfMeso(c % 13);
+    const t = themeOfMeso(c);
+    const start = addDays(startMonday(state), c * MESO_WEEKS * 7);
+    return { cycleIndex: c, mesoNumber: i + 1, start, end: addDays(start, MESO_WEEKS * 7 - 1), phase: { key: p.key, name: p.name },
+      theme: { key: t.key, name: t.name }, current: c === info.cycleIndex };
+  });
+}
+
+/* ───────────── Candidatos y carga estimada ───────────── */
+
+const ELIG = new Map();
+function eligible(minutes, incline) {
+  const k = `${minutes}|${incline ? 1 : 0}|${TEMPLATES.length}`;
+  let list = ELIG.get(k);
+  if (!list) {
+    list = TEMPLATES.filter((t) => t.category !== 'test' && templateMeta(t).family !== 'test' && allows(t, minutes) && (!t.requiresIncline || incline));
+    if (ELIG.size > 64) ELIG.clear();
+    ELIG.set(k, list);
+  }
+  return list;
+}
+
+const EST = new Map();
+const EASY_ZONES = ['jog', 'walk', 'warmup', 'cooldown'];
+/** Carga y tiempo suave de una clase (niveles de serie: la carga ponderada por zona apenas depende de ellos). */
+function estimate(id, minutes, seed, lf, incline) {
+  const k = `${id}|${minutes}|${seed}|${lf}|${incline ? 1 : 0}`;
+  let e = EST.get(k);
+  if (!e) {
+    const w = buildWorkout(id, { minutes, seed, loadFactor: lf, levels: DEFAULT_LEVELS, hasIncline: incline });
+    e = w ? { load: w.load, easy: EASY_ZONES.reduce((a, z) => a + (w.timeInZone[z] || 0), 0), total: w.totalSec }
+      : { load: minutes, easy: minutes * 60, total: minutes * 60 };
+    if (EST.size > 30000) EST.clear();
+    EST.set(k, e);
+  }
+  return e;
+}
+
+/* ───────────── Adaptación (historial anterior al lunes de la semana) ───────────── */
+
+function historyIndex(state) {
+  const done = new Set();
+  const feel = [];
+  let first = null;
+  for (const s of Array.isArray(state?.history) ? state.history : []) {
+    if (!s || typeof s !== 'object') continue;
+    const d = isKey(s.planDate) ? s.planDate : isKey(s.dayKey) ? s.dayKey : null;
+    if (!d) continue;
+    if (countsAsSession(s)) {
+      done.add(d);
+      if (!first || d < first) first = d;
+      if (s.feeling) feel.push({ d, f: s.feeling });
     }
   }
-  return pool[start];
+  feel.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
+  const doneSorted = [...done].sort();
+  return { done, feel, first, doneSorted };
 }
 
-/** Grupo filtrado por minutos e inclinación (con alternativas si queda vacío). */
-function poolFor(name, minutes, incline) {
-  const ok = (id) => {
-    const t = getTemplate(id);
-    return t && allows(t, minutes) && (!t.requiresIncline || incline);
+function adaptFor(hx, prev, monday, today) {
+  const none = { mode: 'normal', missed: 0, sig: 'n' };
+  if (!prev || !hx.first || hx.first >= monday) return none;
+  let missed = 0;
+  for (const d of Object.values(prev.days)) {
+    if (d.kind === 'rest' || !d.templateId) continue;
+    if (d.date < today && d.date >= hx.first && !hx.done.has(d.date)) missed++;
+  }
+  const until = monday < today ? monday : today;
+  let lastDone = null;
+  for (const d of hx.doneSorted) { if (d < until) lastDone = d; else break; }
+  const gap = lastDone ? daysBetween(lastDone, until) : 0;
+  const recent = hx.feel.filter((x) => x.d < monday).slice(-3);
+  const hardN = recent.filter((x) => x.f === 'max' || x.f === 'fail').length;
+  const easyN = recent.filter((x) => x.f === 'easy').length;
+  const mode = gap >= 10 || missed >= 4 ? 'return'
+    : recent.length >= 2 && hardN >= 2 ? 'tired'
+      : recent.length >= 2 && easyN >= 2 ? 'fresh' : 'normal';
+  return { mode, missed, sig: `${mode}|${missed >= 2 ? 1 : 0}` };
+}
+
+/* ───────────── Una semana ───────────── */
+
+const isHard = (r) => r === 'H' || r === 'T';
+
+function rolesFor(info, sch, adapt, prevWeek) {
+  const pat = { ...PATTERNS[info.weekInCycle] };
+  if (info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
+  if (info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
+  const roles = {};
+  for (let w = 1; w <= 7; w++) {
+    if (w === 4) roles[w] = pat[4];
+    else if (w === sch.weekendDay) roles[w] = pat.we;
+    else if (w <= 5) roles[w] = pat[w];
+    else roles[w] = null;
+  }
+  const demoteAll = info.phase.key === 'transicion' || adapt.mode === 'return';
+  for (let w = 1; w <= 7; w++) {
+    if (roles[w] !== 'H') continue;
+    if (demoteAll) roles[w] = 'M';
+    else if (adapt.mode === 'tired' && w !== 4 && w !== sch.weekendDay) roles[w] = 'M';
+  }
+  if (adapt.mode === 'tired' && roles[4] === 'H' && roles[sch.weekendDay] === 'H') roles[sch.weekendDay] = 'M';
+  // Semana de test: el test VAM es la sesión clave del jueves (piernas frescas: miércoles y viernes suaves)
+  let testDay = null;
+  if (info.isTestWeek) {
+    testDay = 4;
+    roles[4] = 'T';
+    roles[3] = 'E';
+    roles[5] = 'E';
+    if (info.isDeload) for (const w of [1, 2]) roles[w] = 'E';
+  }
+  // Nunca dos días duros seguidos (también domingo → lunes)
+  const prevLast = prevWeek ? prevWeek.days[7]?.role : null;
+  for (let w = 1; w <= 7; w++) {
+    const before = w === 1 ? prevLast : roles[w - 1];
+    if (!isHard(roles[w]) || !isHard(before)) continue;
+    const short = (d) => d !== 4 && d !== sch.weekendDay;
+    if (roles[w] !== 'T' && short(w)) roles[w] = 'M';
+    else if (w > 1 && roles[w - 1] !== 'T' && short(w - 1)) roles[w - 1] = 'M';
+    else if (roles[w] !== 'T') roles[w] = 'M';
+  }
+  return { roles, testDay };
+}
+
+function minutesFor(w, info, sch) {
+  const long = w === 4 || w === sch.weekendDay;
+  const base = w === 4 ? sch.thursdayMinutes : w === sch.weekendDay ? sch.weekendMinutes : sch.weekdayMinutes;
+  if (!info.isDeload) return base;
+  // descarga: largos al 60 % (al 50 % si además hay test: la semana más ligera del bloque)
+  if (long) return info.isTestWeek ? Math.max(25, Math.min(base, roundTo(base * 0.5, 5))) : Math.max(30, Math.min(base, roundTo(base * 0.6, 5)));
+  return base >= 30 ? Math.max(20, roundTo(base * 0.8, 5)) : base;
+}
+
+function computeWeek(state, W, cache, adapt) {
+  const sch = sched(state);
+  const incline = hasIncline(state);
+  const monday = addDays(startMonday(state), W * 7);
+  const info = calendar(state, monday, 0);
+  const phase = phaseOfMeso(info.mesoIndex);
+  const theme = themeOfMeso(info.cycleIndex);
+  const prev = W > 0 ? cache[W - 1] : null;
+  const { roles, testDay } = rolesFor(info, sch, adapt, prev);
+  const lf = info.nominalLoad;
+  const rng = makeRng(hashStr(`season|${monday}|${adapt.sig}`));
+
+  // Historial de uso planificado (ventanas, novedad y familias)
+  const lastUse = new Map();
+  const famLast = new Map();
+  let prevFamily = null;
+  for (let i = Math.max(0, W - 30); i < W; i++) {
+    const wk = cache[i];
+    if (!wk) continue;
+    for (let d = 1; d <= 7; d++) {
+      const x = wk.days[d];
+      if (!x.templateId) continue;
+      lastUse.set(x.templateId, x.date);
+      famLast.set(x.family, x.date);
+      prevFamily = x.family;
+    }
+  }
+
+  // Días de la semana, sorpresa y eventos
+  const days = {};
+  const train = [];
+  for (let w = 1; w <= 7; w++) {
+    const date = addDays(monday, w - 1);
+    const role = roles[w];
+    if (!role) {
+      days[w] = { date, slot: 'rest', kind: 'rest', role: null, minutes: 0, templateId: null, family: null, surprise: false, event: null };
+      continue;
+    }
+    const minutes = role === 'T' ? Math.min(sch.weekdayMinutes, 30) : minutesFor(w, info, sch);
+    const long = role !== 'T' && (w === 4 || w === sch.weekendDay);
+    days[w] = { date, w, role, minutes, long, kind: role === 'T' ? 'test' : long ? 'long' : 'short', surprise: false, event: null };
+    train.push(days[w]);
+  }
+  const surpriseDay = [3, 5, 2, 1].map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
+  let eventDay = null;
+  for (let w = 1; w <= 7 && !eventDay; w++) {
+    const ev = eventOn(addDays(monday, w - 1));
+    if (!ev || !ev.single) continue;
+    // en su día; si ese día es descanso o test, el día de entreno más cercano (la víspera primero)
+    const near = [w, w - 1, w + 1, w - 2, w + 2].map((x) => days[x]).find((d) => d && d.role && d.role !== 'T');
+    eventDay = near || surpriseDay;
+    if (eventDay) eventDay.event = ev;
+  }
+  if (!eventDay && surpriseDay) {
+    const ev = eventOn(surpriseDay.date);
+    if (ev && !ev.single) { surpriseDay.event = ev; eventDay = surpriseDay; }
+  }
+  if (!eventDay && surpriseDay) surpriseDay.surprise = true;
+
+  // Objetivo de carga
+  const totalMin = train.reduce((a, d) => a + d.minutes, 0);
+  const prevLoad = prev ? prev.load : null;
+  const growth = 1 + Math.min(info.seasonIndex, 3) * 0.02;
+  let target = info.isDeload
+    ? (prevLoad ? prevLoad * DELOAD_RATIO : totalMin * 0.92)
+    : totalMin * phase.lpm[info.weekInCycle - 1] * growth;
+  if (adapt.mode === 'tired') target *= 0.88;
+  else if (adapt.mode === 'return') target *= 0.82;
+  else if (adapt.mode === 'fresh') target *= 1.04;
+  // Topes: blando (margen interno) y duro (el contrato: +10 % / 70 %). La descarga (y una vuelta o fatiga encadenadas)
+  // se mide frente a la última semana de carga normal si la anterior ya fue aligerada: no se recorta dos veces.
+  let cap = null;
+  let capHard = null;
+  let ref = prevLoad;
+  if (prev && (info.isDeload || adapt.mode === 'return' || adapt.mode === 'tired') && (prev.adapt.mode === 'return' || prev.adapt.mode === 'tired')) {
+    for (let i = W - 2; i >= Math.max(0, W - 4); i--) {
+      const x = cache[i];
+      if (x && !x.info.isDeload && x.adapt.mode !== 'return' && x.adapt.mode !== 'tired') { ref = Math.max(ref, x.load); break; }
+    }
+  }
+  if (prev && !prev.info.isDeload) {
+    // vuelta tras parón: por debajo de lo que se perdió · fatiga: sin subir · sesiones perdidas: no se acumulan
+    const [soft, hard] = info.isDeload ? [DELOAD_MAX, DELOAD_HARD]
+      : adapt.mode === 'return' ? [0.92, 0.98]
+        : adapt.mode === 'tired' ? [0.95, 1.0]
+          : adapt.missed >= 2 ? [1.0, 1.03] : [GROWTH_MAX, GROWTH_HARD];
+    cap = ref * soft;
+    capHard = ref * hard;
+    if (!info.isDeload) { cap = Math.min(cap, prevLoad * GROWTH_MAX); capHard = Math.min(capHard, prevLoad * GROWTH_HARD); }
+    if (info.isDeload) target = Math.min(target, ref * DELOAD_RATIO);
+  }
+  if (cap && !info.isDeload) target = Math.min(target, cap * 0.98);
+
+  const solve = () => {
+    // Reparto del objetivo por día según su papel (para puntuar candidatos por carga y tiempo suave)
+    const LPM = { E: 0.92, M: 1.25, H: 1.6, T: 2.2 };
+    const SHARE = { E: 0.95, M: 0.78, H: 0.62, T: 0.5 };
+    const kTarget = target / Math.max(1, train.reduce((a, d) => a + LPM[d.role] * d.minutes, 0));
+
+    // Candidatos por día
+    const pools = [];
+    const cands = train.map((d, di) => {
+      const seed = hashStr(d.date);
+      pools[di] = [];
+      if (d.role === 'T') {
+        const e = estimate(TEST_ID, d.minutes, seed, lf, incline);
+        return [{ id: TEST_ID, family: 'test', score: 0, ...e }];
+      }
+      const want = ROLE_INT[d.role];
+      const win = d.long ? WINDOW_LONG : WINDOW_SHORT;
+      const scored = [];
+      for (const t of eligible(d.minutes, incline)) {
+        // Clases de evento (campo opcional `event`): solo en su evento, y allí con prioridad
+        if (t.event && t.event !== d.event?.key) continue;
+        const m = templateMeta(t);
+        const lu = lastUse.get(t.id);
+        const since = lu ? daysBetween(lu, d.date) : null;
+        let s = since == null ? 7 : Math.min(since, 140) / 20;
+        if (since != null && since < win) s -= 24 + (win - since) * 0.3;
+        const dI = Math.abs(RANK[m.intensity] - RANK[want]);
+        s -= dI === 1 ? 3.5 : dI === 2 ? 9 : 0;
+        const themeHit = m.themes.includes(theme.key);
+        const famHit = theme.families.includes(m.family);
+        const fl = famLast.get(m.family);
+        const famFresh = !fl || daysBetween(fl, d.date) > 14;
+        if (d.event) {
+          if (t.event === d.event.key) s += 14;
+          else if (d.event.families.includes(m.family) || m.themes.some((x) => d.event.themes.includes(x))) s += 4;
+        } else if (d.surprise) {
+          s += themeHit || famHit ? -3 : 1.5;
+          if (famFresh) s += 2.5;
+        } else {
+          if (themeHit) s += 3;
+          if (famHit) s += 2;
+          if (theme.key === 'mixto' && famFresh) s += 1.5;
+        }
+        if (phase.families.includes(m.family)) s += 1;
+        if (d.w === 4 && KEY_THU.includes(m.family)) s += 2;
+        if (d.w === sch.weekendDay && KEY_WE.includes(m.family)) s += 1;
+        if (d.w === sch.weekendDay && phase.key === 'picos' && d.role === 'H' && m.family === 'reto') s += 3;
+        const cn = estimate(t.id, d.minutes, 1, 1, incline);
+        const dayTarget = kTarget * LPM[d.role] * d.minutes;
+        s -= 6 * Math.min(1.5, Math.abs(cn.load - dayTarget) / dayTarget);
+        s -= 10 * Math.abs(cn.easy / Math.max(1, cn.total) - SHARE[d.role]);
+      // las clases más ligeras (caminar, técnica) se guardan para las descargas
+      if (cn.load / d.minutes < 0.85) s += info.isDeload ? 1.5 : -3;
+        s += rng.next() * 0.8;
+        const winOk = since == null || since >= win;
+      scored.push({ t, m, s, cn, winOk, ok: winOk && dI <= 1 });
+      }
+      scored.sort((a, b) => b.s - a.s);
+      pools[di] = scored;
+      const out = [];
+      const perFam = new Map();
+      const add = (x) => out.push({ id: x.t.id, family: x.m.family, score: x.s, win: x.winOk, ...estimate(x.t.id, d.minutes, seed, lf, incline) });
+      for (const x of scored) {
+        if (out.length >= K_CANDS) break;
+        const n = perFam.get(x.m.family) || 0;
+        if (n >= 2) continue;
+        perFam.set(x.m.family, n + 1);
+        add(x);
+      }
+      // Reservas ligeras (para poder cumplir los topes de carga y de tiempo suave sin romper las ventanas)
+      const valid = scored.filter((x) => x.ok && !out.some((o) => o.id === x.t.id));
+      const light = valid.slice().sort((a, b) => a.cn.load - b.cn.load)[0];
+      if (light) add(light);
+      const soft = valid.filter((x) => x !== light).sort((a, b) => b.cn.easy / b.cn.total - a.cn.easy / a.cn.total)[0];
+      if (soft) add(soft);
+      // Último recurso si el catálogo es pequeño: la más ligera aunque repita dentro de la ventana (la seguridad manda)
+      const lightest = scored.filter((x) => !out.some((o) => o.id === x.t.id)).sort((a, b) => a.cn.load - b.cn.load)[0];
+      if (lightest && (!light || lightest.cn.load < light.cn.load * 0.9)) add(lightest);
+      if (!out.length) out.push({ id: 'aerobic-base', family: 'resistencia', score: -50, ...estimate('aerobic-base', d.minutes, seed, lf, incline) });
+      return out;
+    });
+
+    // Búsqueda de la mejor combinación de la semana
+    const band = info.isDeload ? DELOAD_EASY_BAND : EASY_BAND;
+    const hardBand = info.isDeload ? DELOAD_EASY_HARD_BAND : EASY_HARD_BAND;
+    let best = null;
+    const chosen = [];
+    const rec = (i, score, load, easy, total) => {
+      if (i === train.length) {
+        let obj = score - 25 * (Math.abs(load - target) / Math.max(1, target));
+        if (capHard && load > capHard) obj -= 200 + 800 * (load / capHard - 1);
+        else if (cap && load > cap) obj -= 6 + 250 * (load / cap - 1);
+        const share = total ? easy / total : 1;
+        if (share < band[0]) obj -= 120 * (band[0] - share);
+        else if (share > band[1]) obj -= 120 * (share - band[1]);
+        if (share < hardBand[0] || share > hardBand[1]) obj -= 30 + 300 * Math.max(hardBand[0] - share, share - hardBand[1]);
+        if (!best || obj > best.obj) best = { obj, picks: chosen.slice(), load };
+        return;
+      }
+      const before = i ? chosen[i - 1].family : prevFamily;
+      for (const c of cands[i]) {
+        if (chosen.some((p) => p.id === c.id)) continue;
+        let s = c.score;
+        if (c.family === before) s -= 20;
+        for (const p of chosen) if (p.family === c.family) s -= 2.5;
+        chosen.push(c);
+        rec(i + 1, score + s, load + c.load, easy + c.easy, total + c.total);
+        chosen.pop();
+      }
+    };
+    rec(0, 0, 0, 0, 0);
+    if (!best) best = { picks: cands.map((c) => c[0]), load: cands.reduce((a, c) => a + c[0].load, 0) };
+
+    // Reparación: si el catálogo no da para cumplir el tope de carga, cambia la sesión que más baja por menos puntos
+    const picks = best.picks.slice();
+    const sumLoad = () => picks.reduce((a, p) => a + p.load, 0);
+    const sumEasy = () => picks.reduce((a, p) => a + p.easy, 0);
+    const sumTotal = () => picks.reduce((a, p) => a + p.total, 0);
+    for (let it = 0; it < 12 && cap && sumLoad() > cap; it++) {
+      const strict = sumLoad() <= capHard; // entre el tope blando y el duro: solo cambios que respetan ventanas
+      let swap = null;
+      train.forEach((d, i) => {
+        if (d.role === 'T') return;
+        const cur = picks[i];
+        const seed = hashStr(d.date);
+        for (const x of pools[i]) {
+          if (x.cn.load >= cur.load * 0.97 || picks.some((p) => p.id === x.t.id) || (strict && !x.ok)) continue;
+          const fb = i ? picks[i - 1].family : prevFamily;
+          const fa = picks[i + 1]?.family;
+          const famPen = x.m.family === fb || x.m.family === fa ? 20 : 0;
+          if (strict && famPen) continue;
+          const e = estimate(x.t.id, d.minutes, seed, lf, incline);
+          const gain = cur.load - e.load;
+          if (gain <= 0) continue;
+          const share = (sumEasy() - cur.easy + e.easy) / Math.max(1, sumTotal() - cur.total + e.total);
+          const cost = (cur.score - x.s + famPen + (share > hardBand[1] ? 20 : 0)) / gain;
+          if (!swap || cost < swap.cost) swap = { i, cost, pick: { id: x.t.id, family: x.m.family, score: x.s, win: x.winOk, ...e } };
+        }
+      });
+      if (!swap) break;
+      picks[swap.i] = swap.pick;
+    }
+    best.picks = picks;
+    best.viol = picks.filter((p) => p.win === false).length;
+    return best;
   };
-  let ids = (POOLS[name] || []).filter(ok);
-  if (!ids.length) ids = templatesFor({ minutes, hasIncline: incline }).filter((t) => t.category !== 'test').map((t) => t.id);
-  if (!ids.length) ids = ['aerobic-base'];
-  return ids;
+  // Descarga sin hueco en el catálogo: antes que repetir plantilla, acorta un poco los largos (mín. 20′)
+  let best = solve();
+  for (let k = 0; k < 3 && info.isDeload && best.viol > 0; k++) {
+    const longs = train.filter((d) => d.long && d.minutes > 20);
+    if (!longs.length) break;
+    for (const d of longs) d.minutes -= 5;
+    const b2 = solve();
+    if (b2.viol < best.viol) best = b2;
+    else { for (const d of longs) d.minutes += 5; break; }
+  }
+
+  let load = 0;
+  let easy = 0;
+  let total = 0;
+  train.forEach((d, i) => {
+    const p = best.picks[i];
+    d.templateId = p.id;
+    d.family = p.family;
+    d.estLoad = p.load;
+    d.slot = d.role === 'T' ? 'test' : d.event ? 'event' : d.surprise ? 'surprise' : d.long ? 'key' : d.role === 'E' ? 'easy' : 'quality';
+    load += p.load;
+    easy += p.easy;
+    total += p.total;
+  });
+  return { W, monday, info, days, load, easy, total, target, cap, adapt, sig: adapt.sig, testDay };
 }
 
-/** Hueco por defecto de un día de la semana. */
-function slotOf(w, info, sch, incline) {
-  const W = info.weeksSinceStart;
-  const c = info.cycleIndex;
-  const wk = info.weekInCycle;
-  const short = (slot, pool, rot) => ({ slot, kind: 'short', minutes: sch.weekdayMinutes, pool, rot });
-  if (w === 1) return info.isDeload ? short('easy', 'deloadMon', c) : short('intervals', 'intervals', W);
-  if (w === 2) return info.isDeload ? short('easy', 'deloadTue', c) : short('tempo', 'tempo', W);
-  if (w === 3) {
-    if (info.isDeload) return short('easy', 'deloadWed', c);
-    const hillsWeek = incline && ((W % 2) + 2) % 2 === 1; // semanas pares del plan (2.ª, 4.ª…)
-    return hillsWeek ? short('hills', 'hills', Math.floor(W / 2)) : short('easy', 'easy', Math.floor(W / 2));
-  }
-  if (w === 4) {
-    const pool = info.isDeload ? 'deloadThu' : wk === 3 ? 'longPeak' : 'long';
-    return { slot: 'endurance', kind: 'long', minutes: sch.thursdayMinutes, pool, rot: info.isDeload ? c : W };
-  }
-  if (w === 5) {
-    if (info.isDeload) return { slot: 'test', kind: 'test', minutes: sch.weekdayMinutes, fixed: TEST_ID };
-    return wk === 2 ? short('challenge', 'challenge', c) : wk === 3 ? short('fartlek', 'fartlekPeak', c) : short('fartlek', 'fartlek', c);
-  }
-  if (w === sch.weekendDay) {
-    const pool = ['long', 'fartlek', 'weekendChallenge', 'deloadWeekend'][wk - 1];
-    return { slot: 'weekend', kind: 'long', minutes: sch.weekendMinutes, pool, rot: c };
-  }
-  return { slot: 'rest', kind: 'rest', minutes: 0 };
-}
-
-/* Memo de semanas calculadas (la cadena empieza en la semana 0 del plan para que la rotación sea estable). */
+/* Memo de semanas calculadas: la cadena empieza en la semana 0 del plan (novedad, ventanas y carga dependen de las
+   semanas anteriores). Una semana se recalcula solo si cambia su adaptación (historial antes de su lunes). */
 const MEMO = new Map();
 
 function settingsKey(state) {
   const s = sched(state);
-  return [startMonday(state), s.weekdayMinutes, s.thursdayMinutes, s.weekendDay, s.weekendMinutes, hasIncline(state) ? 1 : 0].join('|');
-}
-
-function computeWeek(state, W, prev, prev2 = null) {
-  const sch = sched(state);
-  const incline = hasIncline(state);
-  const monday = addDays(startMonday(state), W * 7);
-  const info = cycleInfo(state, monday);
-  const used = new Set();
-  const days = {};
-  for (let w = 1; w <= 7; w++) {
-    const slot = slotOf(w, info, sch, incline);
-    const pos = w >= 6 ? 'we' : String(w);
-    let templateId = null;
-    if (slot.kind === 'test') templateId = slot.fixed;
-    else if (slot.kind !== 'rest') {
-      const pool = poolFor(slot.pool, slot.minutes, incline);
-      templateId = rotatePick(pool, slot.rot, `${slot.pool}|${w >= 6 ? 'we' : w}`,
-        (id) => used.has(id) || prev?.days?.[prev.posOf[pos]]?.templateId === id,
-        (id) => prev2?.days?.[prev2.posOf[pos]]?.templateId === id);
-    }
-    if (templateId) used.add(templateId);
-    days[w] = { slot: slot.slot, kind: slot.kind, minutes: slot.minutes, templateId, pool: slot.pool || null };
-  }
-  const posOf = { 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, we: sch.weekendDay };
-  return { W, days, posOf };
+  return [startMonday(state), s.weekdayMinutes, s.thursdayMinutes, s.weekendDay, s.weekendMinutes, hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|');
 }
 
 function weekPicks(state, W) {
-  if (W < 0) return computeWeek(state, W, null);
+  if (W < 0) return computeWeek(state, W, [], { mode: 'normal', missed: 0, sig: 'n' });
   const key = settingsKey(state);
   let cache = MEMO.get(key);
   if (!cache) {
@@ -175,8 +567,51 @@ function weekPicks(state, W) {
     cache = [];
     MEMO.set(key, cache);
   }
-  for (let w = cache.length; w <= W; w++) cache[w] = computeWeek(state, w, w ? cache[w - 1] : null, w > 1 ? cache[w - 2] : null);
+  const hx = historyIndex(state);
+  const today = nowKey();
+  const start = startMonday(state);
+  for (let w = 0; w <= W; w++) {
+    const adapt = adaptFor(hx, w ? cache[w - 1] : null, addDays(start, w * 7), today);
+    if (cache[w] && cache[w].sig === adapt.sig) continue;
+    cache.length = w;
+    cache[w] = computeWeek(state, w, cache, adapt);
+  }
   return cache[W];
+}
+
+/** Semanas planificadas por defecto (sin overrides) para tests e informes. */
+export function seasonWeek(state, W) {
+  return weekPicks(state, W);
+}
+
+function introFor(info, day, adapt) {
+  if (!day || day.kind === 'rest') return '';
+  const theme = themeOfMeso(info.cycleIndex);
+  const phase = phaseOfMeso(info.mesoIndex);
+  if (day.event) return day.event.intro;
+  if (day.role === 'T') return `Semana ${info.seasonWeek} de la temporada: test VAM. Medimos tu forma para recalcular tus cuatro velocidades.`;
+  const parts = [];
+  if (day.surprise) parts.push(`Sorpresa de la semana: hoy salimos del guion del bloque «${theme.name}».`);
+  else if (day.w === 1 || (info.isTestWeek && day.w === 2)) parts.push(`${phase.line} ${theme.intro}`);
+  else parts.push(`Bloque «${theme.name}» · ${phase.name}.`);
+  parts.push(WEEK_LINES[info.weekInCycle - 1]);
+  if (adapt?.mode === 'tired') parts.push('Vienes de sesiones muy duras: esta semana aflojamos un poco.');
+  else if (adapt?.mode === 'return') parts.push('Volvemos con calma: nada de recuperar lo perdido de golpe.');
+  else if (adapt?.missed >= 2) parts.push('Lo que se quedó sin hacer la semana pasada no se acumula: seguimos sin subir carga.');
+  return parts.join(' ');
+}
+
+/* Plantilla de reserva para una duración distinta (override de minutos o «quitar descanso»). */
+function fallbackPick(state, dateKey, minutes, { family = null, intensity = 'easy', exclude = null } = {}) {
+  const incline = hasIncline(state);
+  const list = eligible(minutes, incline).filter((t) => t.id !== exclude && !t.event);
+  if (!list.length) return 'aerobic-base';
+  const h = hashStr(`fit|${dateKey}`);
+  const score = (t) => {
+    const m = templateMeta(t);
+    return (family && m.family === family ? 4 : 0) + (m.intensity === intensity ? 2 : 0) - Math.abs(RANK[m.intensity] - RANK[intensity]);
+  };
+  return list.map((t, i) => ({ t, s: score(t), k: (h + i * 2654435761) % 1000 })).sort((a, b) => b.s - a.s || a.k - b.k)[0].t.id;
 }
 
 /* ───────────── Resolución de un día ───────────── */
@@ -186,8 +621,8 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
   const info = cycleInfo(state, dateKey);
   const w = weekdayOf(dateKey);
   const sch = sched(state);
-  const incline = hasIncline(state);
-  const def = weekPicks(state, info.weeksSinceStart).days[w];
+  const week = weekPicks(state, info.weeksSinceStart);
+  const def = week.days[w];
   let { slot, kind, minutes, templateId } = def;
   let seed = hashStr(dateKey);
   let isOverride = false;
@@ -202,7 +637,7 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
       if (def.kind === 'rest' && !t) {
         // "Quitar descanso" sin clase concreta: una sesión suave
         minutes = sch.weekdayMinutes;
-        templateId = rotatePick(poolFor('easyAny', minutes, incline), daysBetween(startMonday(state), dateKey), 'unrest', () => false);
+        templateId = fallbackPick(state, dateKey, minutes, { intensity: 'easy' });
         slot = 'easy';
       }
       if (Number(ov.minutes) > 0) minutes = Math.round(Number(ov.minutes));
@@ -212,12 +647,18 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
       kind = templateId === TEST_ID ? 'test' : recalc ? (minutes >= 40 ? 'long' : 'short') : def.kind;
     }
   }
-  // Si cambió la duración del día y la plantilla por defecto no la admite, busca otra del mismo grupo
+  // Si cambió la duración del día y la plantilla por defecto no la admite, busca otra parecida
   if (templateId && templateId !== TEST_ID && !ov?.templateId && !allows(getTemplate(templateId), minutes)) {
-    const pool = poolFor(def.pool || 'easyAny', minutes, incline);
-    templateId = rotatePick(pool, info.weeksSinceStart, `${def.pool}|fit`, () => false);
+    const m = templateMeta(getTemplate(templateId));
+    templateId = fallbackPick(state, dateKey, minutes, { family: m.family, intensity: m.intensity });
   }
-  return { date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info };
+  return {
+    date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info,
+    role: kind === 'rest' ? null : def.role ? ROLE_NAME[def.role] : 'easy',
+    surprise: !isOverride && !!def.surprise,
+    event: !isOverride && def.event ? { key: def.event.key, name: def.event.name } : null,
+    intro: kind === 'rest' ? '' : isOverride && !def.role ? '' : introFor(info, def, week.adapt),
+  };
 }
 
 /**
@@ -277,6 +718,7 @@ export function planDay(state, dateKey, now = new Date()) {
   const key = isKey(dateKey) ? dateKey : todayKey(now);
   const r = resolveDay(state, key);
   const workout = buildFor(state, r);
+  if (workout && r.intro) workout.intro = r.intro;
   const session = sessionFor(state?.history, key);
   const today = todayKey(now);
   const status = isDone(session) ? 'done'
@@ -294,6 +736,14 @@ export function planDay(state, dateKey, now = new Date()) {
     status,
     session: session || null,
     isOverride: r.isOverride,
+    role: r.role,
+    surprise: r.surprise,
+    event: r.event,
+    intro: r.intro,
+    season: {
+      phase: r.info.phase, theme: r.info.theme, mesoNumber: r.info.mesoNumber, weekInMeso: r.info.weekInCycle,
+      seasonWeek: r.info.seasonWeek, isTestWeek: r.info.isTestWeek,
+    },
   };
 }
 
@@ -312,8 +762,11 @@ export function alternativesFor(state, dateKey, n = 6) {
   const sch = sched(state);
   const incline = hasIncline(state);
   const minutes = r.kind === 'rest' || !r.minutes ? sch.weekdayMinutes : r.minutes;
-  let cands = templatesFor({ minutes, hasIncline: incline }).filter((t) => t.id !== r.templateId && t.category !== 'test');
-  if (!cands.length) cands = TEMPLATES.filter((t) => t.category !== 'test' && t.id !== r.templateId && (!t.requiresIncline || incline));
+  // Las clases de evento (Navidad, Verano, Aniversario) solo se ofrecen en sus fechas
+  const ev = eventOn(dateKey)?.key || null;
+  const inSeason = (t) => !t.event || t.event === ev;
+  let cands = templatesFor({ minutes, hasIncline: incline }).filter((t) => t.id !== r.templateId && t.category !== 'test' && inSeason(t));
+  if (!cands.length) cands = TEMPLATES.filter((t) => t.category !== 'test' && t.id !== r.templateId && (!t.requiresIncline || incline) && inSeason(t));
   const rng = makeRng(hashStr(`alt|${dateKey}`));
   const byCat = new Map();
   for (const t of rng.shuffle(cands)) {
@@ -410,13 +863,17 @@ export function clearDayOverride(draft, dateKey) {
 /** Próximo día con test VAM (desde `fromKey` incluido) que aún no se ha hecho. */
 export function nextTestDate(state, fromKey = todayKey()) {
   const from = isKey(fromKey) ? fromKey : todayKey();
-  for (let i = 0; i < 84; i++) {
+  for (let i = 0; i < 98; i++) {
     const d = addDays(from, i);
     if (resolveDay(state, d).templateId !== TEST_ID) continue;
     if (!isDone(sessionFor(state?.history, d))) return d;
   }
-  // Sin test en el horizonte (overrides): viernes de la próxima semana de descarga
+  // Más allá del horizonte (o con overrides): el jueves de la siguiente semana de test sin hacer
   const info = cycleInfo(state, from);
-  const weeks = info.isDeload ? 4 : 4 - info.weekInCycle;
-  return addDays(mondayOf(from), weeks * 7 + 4);
+  for (let w = Math.max(0, info.weeksSinceStart); w < Math.max(0, info.weeksSinceStart) + 260; w++) {
+    if (!isTestWeekIndex(w)) continue;
+    const d = addDays(startMonday(state), w * 7 + 3);
+    if (d >= from && !isDone(sessionFor(state?.history, d))) return d;
+  }
+  return addDays(from, 42);
 }

@@ -9,6 +9,7 @@ import {
   buildMusicPlan, targetBpmFor, segmentTargets, trackGrid, snapToBar, nextBarTime, nextBarPos, beatPhaseAt, barPhaseAt,
   barIndexAt, barPos, onBarGrid, rateFor, rateForZone, isCandidate, cuePosition, cueRate, cueTimeAt, cueIndexAt,
   expectedAt, describePlan, ZONE_RANK, RATE_MIN, RATE_MAX, MIX_RATE_MIN, MIX_RATE_MAX, MATCH_TOL, BEATMIX_MAX_DELTA,
+  recentTracksFromHistory, RECENT_SESSIONS, preferred,
 } from '../js/audio/music-plan.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -245,7 +246,8 @@ function checkPlan(w, plan, label) {
         must(last.zone === c.zone, 'resumeZone', 'retoma la pista de otra zona');
         must(Math.abs(c.entryPos - last.pos) <= g.barSec / 2 + 2e-3, 'resumePos', `retoma en ${c.entryPos.toFixed(2)} y se quedó en ${last.pos.toFixed(2)} (${label} #${k})`);
         must(onBarGrid(t, c.entryPos, 0.003), 'resumeGrid', 'retoma fuera de compás');
-        must((g.outro - c.entryPos) / c.rate >= 30 - 1e-6, 'resume30', 'retoma con < 30 s antes del outro');
+        // (rate y posición del cue van redondeados a 4 decimales: hasta ~2 ms de diferencia con el cálculo del plan)
+        must((g.outro - c.entryPos) / c.rate >= 30 - 2e-3, 'resume30', 'retoma con < 30 s antes del outro');
       }
     } else if (used.has(c.trackId)) {
       stats.reuse++;
@@ -356,6 +358,108 @@ section('Robustez y casos límite', () => {
   const pt = buildMusicPlan(tiny, TRACKS);
   ok(pt.cues.filter((c) => c.kind === 'segment').length === 2 && pt.cues[1].zone === 'sprint', 'clase de 1 minuto');
   ok(Array.isArray(describePlan(pt, BY_ID)), 'describePlan');
+});
+
+section('Variedad entre sesiones (pistas de las últimas sesiones)', () => {
+  // Historial: sesiones con ids u objetos, una sin música, fechas desordenadas y más de RECENT_SESSIONS
+  const day = (d) => `2026-10-${String(d).padStart(2, '0')}T07:00:00.000Z`;
+  const hist = [
+    { startedAt: day(3), music: { tracks: ['a', 'b'] } },
+    { startedAt: day(9), music: { tracks: [{ id: 'f' }, 'g'] } },
+    { startedAt: day(4), music: { tracks: ['c'] } },
+    { startedAt: day(10), music: { tracks: [] } },
+    { startedAt: day(5), music: null },
+    { startedAt: day(6), music: { tracks: ['d', 'a'] } },
+    { startedAt: day(7), music: { tracks: ['e'] } },
+    { startedAt: day(8), music: { tracks: ['h', 'h'] } },
+  ];
+  const ages = recentTracksFromHistory(hist);
+  ok(RECENT_SESSIONS === 5, 'se recuerdan 5 sesiones');
+  ok(ages.get('f') === 0 && ages.get('g') === 0 && ages.get('h') === 1 && ages.get('e') === 2 && ages.get('d') === 3 && ages.get('a') === 3 && ages.get('c') === 4,
+    `antigüedad por fecha (${[...ages].map(([k, v]) => `${k}${v}`).join(' ')})`);
+  ok(!ages.has('b'), 'la sexta sesión con música ya no cuenta');
+  ok(recentTracksFromHistory([{ music: { tracks: ['x'] } }, { music: { tracks: ['y'] } }]).get('y') === 0, 'sin fecha: la última del historial es la más reciente');
+  ok(recentTracksFromHistory(null).size === 0 && recentTracksFromHistory([{ music: 'nada' }]).size === 0, 'historial vacío o corrupto');
+
+  // Biblioteca sintética: 4 pistas de trote iguales salvo el id; una clase de 2′ usa solo una
+  const mk = (id, extra = {}) => ({
+    id, title: id, artist: 'x', bpm: 124, duration: 240, beatOffset: 0.5, barOffset: 0.5, bars: 120,
+    energy: new Array(120).fill(0.8), cues: { mixIn: 8.24, drops: [], outro: 220, hotBars: [] }, tier: 'jog', curatedTier: 'jog', ...extra,
+  });
+  const four = ['j1', 'j2', 'j3', 'j4'].map((id) => mk(id));
+  const w1 = { id: 'v', segments: [{ zone: 'jog', speed: 8.3, sec: 120 }], totalSec: 120 };
+  const pick = (opts) => buildMusicPlan(w1, four, { seed: 3, ...opts }).cues[0].trackId;
+  const first = pick({});
+  ok(pick({ recent: [] }) === first && pick({ recent: false }) === first, 'sin memoria: misma elección');
+  const second = pick({ recent: [[first]] });
+  ok(second !== first, `evita la de la última sesión (${first} → ${second})`);
+  const rest = four.map((t) => t.id).filter((id) => id !== first);
+  ok(pick({ recent: [[first], rest.slice(0, 2)] }) === rest[2], 'con una sola libre, elige esa');
+  const all = [['j3'], ['j1'], ['j4'], ['j2']];
+  ok(pick({ recent: all }) === 'j2', 'todas recientes: la que sonó hace más sesiones');
+  ok(pick({ recent: new Map([['j1', 0], ['j2', 0], ['j3', 0], ['j4', 4]]) }) === 'j4', 'recent como Map id → antigüedad');
+  ok(pick({ recent: { j1: 0, j2: 1, j3: 2, j4: 3 } }) === 'j4', 'recent como objeto id → antigüedad');
+  // Lo que pone loadLibrary(): recentAge en cada pista; recent:false lo ignora
+  const tagged = four.map((t) => ({ ...t, recentAge: t.id === first ? 0 : null }));
+  ok(buildMusicPlan(w1, tagged, { seed: 3 }).cues[0].trackId !== first, 'recentAge de la pista (loadLibrary) se respeta');
+  ok(buildMusicPlan(w1, tagged, { seed: 3, recent: false }).cues[0].trackId === first, 'recent: false desactiva la memoria');
+  // Solo dentro del tramo preferido: una pista de otro tramo que encaja no desplaza a una reciente del tramo
+  const other = mk('r1', { tier: 'run', curatedTier: 'run' });
+  ok(pick({ recent: [rest, [first]] }) === first && buildMusicPlan(w1, [...four, other], { seed: 3, recent: [rest, [first]] }).cues[0].trackId === first,
+    'todas las del tramo recientes ⇒ la más antigua del tramo antes que otra de otro tramo');
+
+  // Biblioteca real: 8 sesiones seguidas por plantilla; cada una recuerda las 5 anteriores
+  const TPLS = ['pyramid', 'minute-on', 'sprint-30-60', 'cruise', 'fartlek-swedish', 'progressive', 'long-progressive', 'speed-play'];
+  let repeatsWith = 0;
+  let repeatsWithout = 0;
+  let lastWith = 0;
+  let lastWithout = 0;
+  let forced = 0;
+  let picks = 0;
+  for (const id of TPLS) {
+    const tpl = TEMPLATES.find((t) => t.id === id);
+    if (!tpl) { ok(false, `plantilla ${id}`); continue; }
+    const minutes = (tpl.durations || [30]).includes(30) ? 30 : tpl.durations[0];
+    const past = [];
+    const pastBase = [];
+    for (let k = 1; k <= 8; k++) {
+      const w = buildWorkout(id, { minutes, levels: LEVELS, seed: 100 + k, hasIncline: !!tpl.requiresIncline, treadmill: TREADMILL });
+      const recent = past.slice(-RECENT_SESSIONS).reverse();
+      const plan = buildMusicPlan(w, TRACKS, { seed: 100 + k, recent });
+      const base = buildMusicPlan(w, TRACKS, { seed: 100 + k });
+      lastLeave.clear();
+      ok(checkPlan(w, plan, `${id}·variedad·s${k}`), `${id} sesión ${k} con memoria: plan válido`);
+      ok(JSON.stringify(buildMusicPlan(w, TRACKS, { seed: 100 + k, recent })) === JSON.stringify(plan), `${id} sesión ${k}: determinista con memoria`);
+      const recentSet = new Set(recent.flat());
+      const baseSet = new Set(pastBase.slice(-RECENT_SESSIONS).flat());
+      repeatsWith += plan.trackIds.filter((t) => recentSet.has(t)).length;
+      repeatsWithout += base.trackIds.filter((t) => baseSet.has(t)).length;
+      // Repeticiones de la sesión inmediatamente anterior (lo que más se nota)
+      const prevWith = new Set(past[past.length - 1] || []);
+      const prevWithout = new Set(pastBase[pastBase.length - 1] || []);
+      lastWith += plan.trackIds.filter((t) => prevWith.has(t)).length;
+      lastWithout += base.trackIds.filter((t) => prevWithout.has(t)).length;
+      // Cada pista nueva que repite de una sesión reciente: no había otra libre del tramo que encajara
+      const usedBefore = new Set();
+      for (const c of plan.cues) {
+        if (c.change === 'track' && c.entry !== 'resume' && !usedBefore.has(c.trackId)) {
+          picks++;
+          if (recentSet.has(c.trackId)) {
+            forced++;
+            const alt = TRACKS.find((t) => !usedBefore.has(t.id) && !recentSet.has(t.id) && t.id !== c.trackId
+              && preferred(t, c.zone) && isCandidate(t, c.targetBpm, c.zone));
+            ok(!alt, `${id} s${k}: repite ${c.trackId} (${c.zone}) habiendo ${alt?.id} sin sonar en 5 sesiones`);
+          }
+        }
+        usedBefore.add(c.trackId);
+      }
+      past.push(plan.trackIds);
+      pastBase.push(base.trackIds);
+    }
+  }
+  line(`  variedad: pistas repetidas de la sesión anterior ${lastWith} con memoria · ${lastWithout} sin ella; de las 5 anteriores ${repeatsWith} · ${repeatsWithout}; ${forced}/${picks} elecciones sin alternativa libre en el tramo`);
+  ok(lastWith < lastWithout * 0.5, `la memoria reduce las repeticiones de la sesión anterior (${lastWith} vs ${lastWithout})`);
+  ok(repeatsWith <= repeatsWithout, `y no aumenta las de las 5 anteriores (${repeatsWith} vs ${repeatsWithout})`);
 });
 
 /* ═════════════ 3. Motor DJ con navegador simulado ═════════════
@@ -893,7 +997,9 @@ await asection('Motor DJ: voz, pausa, salto de tramo, apagar y parar', async () 
     const target = starts.find((s) => s > tNow + 120 && w.segments[starts.indexOf(s)].zone === 'sprint') ?? starts[6];
     off -= target - tNow;
     eng.seek(target);
-    await sim.advance(2.5, each);
+    // La transición rápida entra en el siguiente downbeat de la saliente: hasta un compás suyo más tras la carga
+    const outBarSec = BY_ID.get(idBefore) ? trackGrid(BY_ID.get(idBefore)).barSec / RATE_MIN : 2.6;
+    await sim.advance(2.5 + outBarSec, each);
     const ex = plan.cues[Math.max(0, plan.cues.findLastIndex((c) => c.atSec <= target + 1e-6 && c.change === 'track'))];
     ok(eng.nowPlaying()?.trackId === ex.trackId, `seek: suena la pista del tramo (${eng.nowPlaying()?.trackId} vs ${ex.trackId})`);
     ok(playingNow().length === 1, 'seek: una sola fuente sonando tras la transición rápida');

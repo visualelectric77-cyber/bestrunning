@@ -5,6 +5,7 @@
 // carga, inclinación y la semilla.
 import { round1, roundTo, clamp } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, speedForZone, zoneForSpeed, clampSpeed, vamFromLevels } from './levels.js';
+import { defineExtraTemplates } from './templates-extra.js';
 
 export const CATEGORIES = {
   intervals: { key: 'intervals', name: 'Intervalos', color: '#FF375F', icon: 'bolt',
@@ -24,6 +25,25 @@ export const CATEGORIES = {
   test: { key: 'test', name: 'Test', color: '#7D7AFF', icon: 'gauge',
     description: 'Test escalonado para medir tu VAM y recalcular tus velocidades.' },
 };
+
+/* ───────────── Contrato de temporada ─────────────
+ * Cada plantilla declara además: family (estructura, para no repetir familia dos sesiones seguidas), themes (temas de
+ * mesociclo a los que encaja, con los nombres exactos de THEMES), intensity ('easy' | 'moderate' | 'hard') y, si es
+ * de un evento de temporada, event ('navidad' | 'verano' | 'aniversario'). El planificador de temporada solo usa estos
+ * campos + category + durations. */
+
+/** Temas de mesociclo (nombres visibles; el planificador los usa tal cual). */
+export const THEMES = ['Cuestas', 'Velocidad', 'Ritmo constante', 'Fartlek', 'Récords', 'Escaleras y pirámides', 'Música y ritmo (BPM)',
+  'Resistencia larga', 'Explosividad', 'Técnica y cadencia', 'Desafío fantasma', 'Mixto'];
+const TH = {
+  cuestas: THEMES[0], velocidad: THEMES[1], ritmo: THEMES[2], fartlek: THEMES[3], records: THEMES[4], escaleras: THEMES[5], musica: THEMES[6],
+  resistencia: THEMES[7], explosividad: THEMES[8], tecnica: THEMES[9], fantasma: THEMES[10], mixto: THEMES[11],
+};
+/** Familias estructurales. */
+export const FAMILIES = ['piramide', 'escalera', 'series-cortas', 'series-largas', 'tempo', 'progresivo', 'fartlek', 'cuestas', 'umbral',
+  'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica'];
+export const INTENSITIES = ['easy', 'moderate', 'hard'];
+export const EVENT_KEYS = ['navidad', 'verano', 'aniversario'];
 
 /* ───────────── Herramientas de construcción (privadas) ───────────── */
 
@@ -1264,6 +1284,58 @@ T({
   },
 });
 
+/* ───────────── Contrato de las 39 plantillas originales ───────────── */
+
+const META = {
+  pyramid: ['piramide', [TH.escaleras, TH.velocidad], 'hard'],
+  'minute-on': ['series-cortas', [TH.velocidad, TH.mixto], 'hard'],
+  'sprint-30-60': ['series-cortas', [TH.explosividad, TH.velocidad], 'hard'],
+  'ladder-up': ['escalera', [TH.escaleras, TH.velocidad], 'hard'],
+  'over-under': ['umbral', [TH.ritmo, TH.mixto], 'hard'],
+  'golden-minutes': ['series-largas', [TH.velocidad, TH.records], 'hard'],
+  'two-one': ['series-largas', [TH.velocidad, TH.ritmo], 'hard'],
+  countdown: ['escalera', [TH.escaleras, TH.velocidad], 'hard'],
+  'km-repeats': ['series-largas', [TH.ritmo, TH.records], 'hard'],
+  cruise: ['tempo', [TH.ritmo], 'moderate'],
+  sandwich: ['tempo', [TH.ritmo, TH.mixto], 'moderate'],
+  'threshold-3x4': ['umbral', [TH.ritmo, TH.records], 'hard'],
+  progressive: ['progresivo', [TH.ritmo, TH.escaleras], 'moderate'],
+  'cruise-2x6': ['tempo', [TH.ritmo, TH.resistencia], 'moderate'],
+  'tempo-waves': ['umbral', [TH.ritmo, TH.fartlek], 'moderate'],
+  'fast-finish': ['progresivo', [TH.ritmo, TH.fantasma], 'moderate'],
+  'long-progressive': ['progresivo', [TH.resistencia, TH.ritmo], 'moderate'],
+  'long-blocks': ['resistencia', [TH.resistencia, TH.ritmo], 'moderate'],
+  'long-surges': ['resistencia', [TH.resistencia, TH.fartlek], 'moderate'],
+  'negative-split': ['progresivo', [TH.resistencia, TH.fantasma], 'moderate'],
+  'long-ladder': ['escalera', [TH.resistencia, TH.escaleras], 'moderate'],
+  'aerobic-base': ['resistencia', [TH.resistencia, TH.tecnica], 'easy'],
+  'fartlek-swedish': ['fartlek', [TH.fartlek, TH.mixto], 'hard'],
+  'speed-play': ['fartlek', [TH.fartlek, TH.velocidad], 'hard'],
+  surprise: ['fartlek', [TH.fartlek, TH.mixto], 'hard'],
+  waves: ['fartlek', [TH.fartlek, TH.ritmo], 'moderate'],
+  'hills-short': ['cuestas', [TH.cuestas, TH.explosividad], 'hard'],
+  'hill-long': ['cuestas', [TH.cuestas, TH.resistencia], 'moderate'],
+  rollercoaster: ['cuestas', [TH.cuestas, TH.fartlek], 'moderate'],
+  'hill-sprints': ['cuestas', [TH.cuestas, TH.explosividad], 'hard'],
+  'easy-strides': ['recuperacion', [TH.tecnica, TH.velocidad], 'easy'],
+  'recovery-jog': ['recuperacion', [TH.mixto, TH.resistencia], 'easy'],
+  'walk-jog': ['recuperacion', [TH.mixto], 'easy'],
+  'no-stop': ['reto', [TH.fantasma, TH.ritmo], 'hard'],
+  'sprint-finish': ['reto', [TH.explosividad, TH.records], 'hard'],
+  'challenge-10k': ['reto', [TH.records, TH.fantasma], 'hard'],
+  'the-hour': ['reto', [TH.resistencia, TH.records], 'moderate'],
+  'pyramid-xl': ['piramide', [TH.escaleras, TH.records], 'hard'],
+  'test-vam': ['test', [TH.records], 'hard'],
+};
+for (const t of TEMPLATES) {
+  const m = META[t.id];
+  if (m && !t.family) Object.assign(t, { family: m[0], themes: m[1], intensity: m[2] });
+}
+
+/* ───────────── Catálogo ampliado (temporada) ───────────── */
+
+defineExtraTemplates({ T, frame, W, numberReps, choose, r5, round1, clamp, TH });
+
 /* ───────────── Consultas ───────────── */
 
 const BY_ID = new Map(TEMPLATES.map((t) => [t.id, t]));
@@ -1272,11 +1344,18 @@ export function getTemplate(id) {
   return BY_ID.get(id) || null;
 }
 
-/** Plantillas filtradas. `minutes` acepta cualquier valor dentro del rango [mín, máx] de sus duraciones. */
-export function templatesFor({ category = 'all', minutes = null, hasIncline = false } = {}) {
+/** Plantillas filtradas. `minutes` acepta cualquier valor dentro del rango [mín, máx] de sus duraciones.
+ *  Filtros opcionales del contrato de temporada: family, theme (nombre de THEMES), intensity y event
+ *  (`event: false` excluye las clases de evento; una clave de EVENT_KEYS deja solo las de ese evento). */
+export function templatesFor({ category = 'all', minutes = null, hasIncline = false, family = null, theme = null, intensity = null, event } = {}) {
   const m = minutes == null ? null : Number(minutes);
   return TEMPLATES.filter((t) => {
     if (category && category !== 'all' && t.category !== category) return false;
+    if (family && t.family !== family) return false;
+    if (theme && !(t.themes || []).includes(theme)) return false;
+    if (intensity && t.intensity !== intensity) return false;
+    if (event === false && t.event) return false;
+    if (typeof event === 'string' && t.event !== event) return false;
     if (t.requiresIncline && !hasIncline) return false;
     if (m != null && Number.isFinite(m)) {
       const lo = Math.min(...t.durations);

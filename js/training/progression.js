@@ -8,7 +8,7 @@ import {
   ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category,
   hrMaxFromAge,
 } from './levels.js';
-import { cycleInfo, nextTestDate } from './planner.js';
+import { cycleInfo, nextTestDate, seasonInfo } from './planner.js';
 import { streakWeeks, weekProgress, totals, sessionDay, sessionCounts } from './stats.js';
 import { hrAtLevels, hasHrSeries } from '../integrations/watch-hr.js';
 
@@ -445,13 +445,22 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
   else if (daysToTest != null && daysToTest <= 6) {
     add(daysToTest <= 2 ? 8 : 7, `Test VAM el ${fmt.weekdayName(weekdayOf(testDay))}${daysToTest === 1 ? ' (mañana)' : ''}: llega descansado y con ganas, que vamos a medir lo que has mejorado.`);
   }
+  // Temporada: mesociclo con tema, eventos y adaptación de la semana
+  let season = null;
+  try { season = seasonInfo(st, today); } catch { season = null; }
+  const theme = season?.theme?.name || info.theme?.name || '';
   if (info.isDeload) {
-    add(6, 'Semana de descarga: bajamos el volumen para que tu cuerpo asimile tres semanas de trabajo. Es aquí donde de verdad mejoras.');
+    add(6, `Semana de descarga${info.isTestWeek ? ' con test VAM' : ''}: bajamos el volumen para que tu cuerpo asimile tres semanas de trabajo. Es aquí donde de verdad mejoras.`);
   } else if (info.weekInCycle === 3) {
-    add(4, 'Semana pico del ciclo: la más exigente. Duerme bien y cuida la hidratación, que la semana que viene toca descargar.');
-  } else if (info.weekInCycle === 1 && info.cycleIndex > 0) {
-    add(4, `Empieza el ciclo ${info.cycleIndex + 1}: misma estructura, un poco más de carga. Tu cuerpo ya está preparado.`);
+    add(4, `Semana pico del bloque${theme ? ` «${theme}»` : ''}: la más exigente. Duerme bien y cuida la hidratación, que la semana que viene toca descargar.`);
+  } else if (info.weekInCycle === 1 && season) {
+    add(info.cycleIndex > 0 ? 5 : 4, `Empieza el mesociclo ${season.mesoNumber} de 13 (${season.phase.name}): «${theme}». ${season.themeIntro}`);
   }
+  if (season?.event) add(6, `Esta semana hay especial de ${season.event.name}: una clase temática para celebrarlo corriendo.`);
+  if (season?.adapt?.mode === 'return') add(8, 'Volvemos con calma: esta semana no hay sesiones duras ni intentamos recuperar lo perdido de golpe.');
+  else if (season?.adapt?.mode === 'tired') add(7, 'Vienes de sesiones muy duras: esta semana el plan afloja un poco para que llegues fresco al bloque siguiente.');
+  else if (season?.adapt?.missed >= 2) add(5, 'Lo que se quedó sin hacer la semana pasada no se acumula: esta semana mantenemos la carga, sin subirla.');
+  if (season?.surpriseDate === today) add(6, `Hoy toca la sorpresa de la semana: una clase fuera del guion del bloque${theme ? ` «${theme}»` : ''}.`);
 
   // Constancia
   const counted = history.filter(sessionCounts);

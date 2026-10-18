@@ -307,8 +307,11 @@ if (!FF) {
     // Fases: con el mismo tempo (o la octava del sprint) comparar módulo un tiempo
     const spbA = 60 / a.bpm;
     const per = Math.min(spb, spbA);
-    const dA = phaseDelta(a.beatOffset, t.beatOffset, per);
-    const dBarA = phaseDelta(a.barOffset, t.barOffset, per);
+    // Rejilla corregida a mano en analyze.py (HALF_BEAT_SHIFT: bombo a +1/2 tiempo de la fase del peine): se compara
+    // la fase del analizador desplazada lo mismo
+    const shift = t.gridShift === 'half-beat' ? spb / 2 : 0;
+    const dA = phaseDelta(a.beatOffset + shift, t.beatOffset, per);
+    const dBarA = phaseDelta(a.barOffset + shift, t.barOffset, per);
     const downA = Math.abs(phaseDelta(a.barOffset, t.barOffset, 4 * Math.max(spb, spbA))) < 0.03;
     const rA = pearson(a.energy, t.energy);
     if (okA) stats.bpmA++;
@@ -323,8 +326,8 @@ if (!FF) {
       const b = analyzePcm(mono, 44100, { priorBpm: prior, loudness: loud, keepFeatures: true });
       const okB = bpmOk(b.bpm, t);
       const pB = Math.min(spb, 60 / b.bpm);
-      const dB = phaseDelta(b.beatOffset, t.beatOffset, pB);
-      const dBarB = phaseDelta(b.barOffset, t.barOffset, pB);
+      const dB = phaseDelta(b.beatOffset + shift, t.beatOffset, pB);
+      const dBarB = phaseDelta(b.barOffset + shift, t.barOffset, pB);
       const rB = pearson(b.energy, t.energy);
       if (okB) stats.bpmB++;
       if (Math.abs(dB) <= 0.03 && Math.abs(dBarB) <= 0.03) stats.phB++;

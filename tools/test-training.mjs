@@ -5,6 +5,7 @@ import { buildWorkout, workoutId, parseWorkoutId, workoutFromId, summarizeSegmen
 import {
   CYCLE_WEEKS, cycleInfo, planDay, planWeek, todayPlan, alternativesFor, swapDays, setDayOverride, clearDayOverride, nextTestDate,
 } from '../js/training/planner.js';
+import { templateMeta } from '../js/training/season.js';
 import { applyFeedback, evaluateTest, feelingToRpe, FEELINGS, coachInsight } from '../js/training/progression.js';
 import { ACHIEVEMENTS, evaluateAchievements } from '../js/training/achievements.js';
 import { totals, weeklyBuckets, streakWeeks, dayValues, records, weekProgress } from '../js/training/stats.js';
@@ -259,21 +260,24 @@ for (const cfg of configs) {
     const tag = `plan ${cfg.name} sem ${wk + 1}`;
     ok(days.length === 7 && days.every((d, i) => d.date === addDays(monday, i) && d.weekday === i + 1), `${tag}: 7 días consecutivos`);
     const info = cycleInfo(st, monday);
-    const expLf = Math.round(([1.0, 1.08, 1.16, 0.72][info.weekInCycle - 1] * (1 + Math.min(info.cycleIndex, 6) * 0.03) + (st.progression.loadAdjust || 0)) * 100) / 100;
-    ok(info.weekInCycle === (wk % 4) + 1 && info.cycleIndex === Math.floor(wk / 4) && info.weekName === CYCLE_WEEKS[wk % 4] && info.loadFactor === expLf, `${tag}: cycleInfo`);
+    // Temporada: 4 semanas (3 de carga + descarga), test VAM cada 6 semanas (el jueves), descarga con largos más cortos
+    ok(info.weekInCycle === (wk % 4) + 1 && info.cycleIndex === Math.floor(wk / 4) && info.weekName.startsWith(CYCLE_WEEKS[wk % 4])
+      && info.isDeload === (wk % 4 === 3) && info.isTestWeek === (wk % 6 === 5) && info.loadFactor > 0.5 && info.loadFactor < 1.4
+      && info.phase?.name && info.theme?.name, `${tag}: cycleInfo`);
     const rest = days.filter((d) => d.kind === 'rest');
     ok(rest.length === 1 && rest[0].weekday === (sch.weekendDay === 6 ? 7 : 6), `${tag}: un único descanso en el otro día del finde`);
     ok(days.filter((d) => d.kind !== 'rest').every((d) => d.workout && d.templateId === d.workout.templateId && d.status === 'missed'), `${tag}: días con clase (y 'missed' en el pasado)`);
-    ok(days[3].kind === 'long' && days[3].minutes === sch.thursdayMinutes && days[3].workout.totalSec === sch.thursdayMinutes * 60, `${tag}: jueves largo`);
+    const fits = (d, max) => (info.isDeload ? d.minutes <= max && d.minutes >= 20 : d.minutes === max) && d.workout.totalSec === d.minutes * 60;
+    if (info.isTestWeek) ok(days[3].kind === 'test' && days[3].templateId === 'test-vam', `${tag}: jueves de test VAM`);
+    else ok(days[3].kind === 'long' && fits(days[3], sch.thursdayMinutes), `${tag}: jueves largo`);
     const we = days[sch.weekendDay - 1];
-    ok(we.kind === 'long' && we.minutes === sch.weekendMinutes && we.workout.totalSec === sch.weekendMinutes * 60, `${tag}: finde largo`);
-    for (const d of days) if (d.kind === 'short') ok(d.minutes === sch.weekdayMinutes && d.workout.totalSec === sch.weekdayMinutes * 60, `${tag} ${d.date}: entre semana ${sch.weekdayMinutes}′`);
-    if (info.isDeload) ok(days[4].templateId === 'test-vam' && days[4].kind === 'test', `${tag}: viernes de descarga = test VAM`);
-    else ok(days.every((d) => d.templateId !== 'test-vam'), `${tag}: sin test fuera de la descarga`);
-    if (!st.treadmill.hasIncline) ok(days.every((d) => d.workout?.category !== 'hills'), `${tag}: sin cuestas sin inclinación`);
-    else if (wk % 2 === 1 && !info.isDeload) ok(days[2].workout.category === 'hills', `${tag}: miércoles de cuestas en semana par`);
-    ok(days[0].workout.category === (info.isDeload ? days[0].workout.category : 'intervals') && (info.isDeload || days[1].workout.category === 'tempo'), `${tag}: L intervalos · M tempo`);
-    ok(days[3].workout.category === 'endurance', `${tag}: jueves de resistencia`);
+    ok(we.kind === 'long' && fits(we, sch.weekendMinutes), `${tag}: finde largo`);
+    for (const d of days) if (d.kind === 'short') ok(fits(d, sch.weekdayMinutes), `${tag} ${d.date}: entre semana ${sch.weekdayMinutes}′`);
+    if (!info.isTestWeek) ok(days.every((d) => d.templateId !== 'test-vam'), `${tag}: sin test fuera de su semana`);
+    if (!st.treadmill.hasIncline) ok(days.every((d) => !getTemplate(d.workout?.templateId || '')?.requiresIncline), `${tag}: sin cuestas sin inclinación`);
+    const hardIdx = days.map((d, i) => (d.role === 'hard' || d.role === 'test' ? i : -1)).filter((i) => i >= 0);
+    ok(hardIdx.every((i, j) => !j || i - hardIdx[j - 1] > 1), `${tag}: nunca dos días duros seguidos`);
+    ok(days.filter((d) => d.surprise || d.event).length === 1, `${tag}: una sorpresa (o evento) por semana`);
     ok(days[3].templateId !== we.templateId, `${tag}: jueves ≠ finde`);
     const tids = days.filter((d) => d.templateId).map((d) => d.templateId);
     ok(new Set(tids).size === tids.length, `${tag}: sin plantillas repetidas en la semana`);
@@ -324,11 +328,11 @@ for (const cfg of configs) {
   ok(!st.plan.overrides[dTue] && planDay(st, dTue, NOW_FAR).templateId === before[1].templateId, 'quitar descanso vuelve al plan');
   setDayOverride(st, dSun, { rest: false });
   const sun = planDay(st, dSun, NOW_FAR);
-  ok(sun.kind === 'short' && sun.workout && sun.workout.category === 'recovery' || sun.workout?.templateId === 'aerobic-base', `entrenar en día de descanso → sesión suave (${sun.templateId})`);
+  ok(sun.kind === 'short' && sun.workout && templateMeta(getTemplate(sun.templateId)).intensity === 'easy', `entrenar en día de descanso → sesión suave (${sun.templateId})`);
   clearDayOverride(st, dSun);
   const alts = alternativesFor(st, dMon, 6);
   ok(alts.length === 6 && new Set(alts.map((w) => w.templateId)).size === 6 && alts.every((w) => w.templateId !== before[0].templateId && w.totalSec === 1200), 'alternativesFor: 6 distintas, misma duración');
-  ok(alts.filter((w) => w.category === 'intervals').length >= 1 && new Set(alts.map((w) => w.category)).size >= 3, 'alternativas: misma categoría + variedad');
+  ok(alts.filter((w) => w.category === before[0].workout.category).length >= 1 && new Set(alts.map((w) => w.category)).size >= 3, 'alternativas: misma categoría + variedad');
   setDayOverride(st, dMon, { templateId: alts[3].templateId, minutes: alts[3].minutes });
   ok(JSON.stringify(planDay(st, dMon, NOW_FAR).workout.segments) === JSON.stringify(alts[3].segments), 'la alternativa elegida es la que aparece en el plan');
   const restAlts = alternativesFor(st, dSun, 6);
@@ -352,9 +356,9 @@ for (const cfg of configs) {
   ok(wk[2].status === 'today' && wk[3].status === 'upcoming' && wk[6].status === 'rest', 'estados today/upcoming/rest');
   ok(todayPlan(st, now).date === dWed, 'todayPlan');
   const t1 = nextTestDate(st, START);
-  ok(t1 === addDays(START, 25) && weekdayOf(t1) === 5, `nextTestDate → viernes de la semana 4 (${t1})`);
+  ok(t1 === addDays(START, 38) && weekdayOf(t1) === 4, `nextTestDate → jueves de la semana 6 (${t1})`);
   st.history.push({ id: 'st', dayKey: t1, planDate: t1, isTest: true, test: { lastStageSpeed: 13, secondsInLastStage: 20, vam: 13.17 }, completionPct: 0.5, elapsedSec: 1100 });
-  ok(nextTestDate(st, t1) === addDays(t1, 28), 'tras hacer el test, el siguiente es 4 semanas después');
+  ok(nextTestDate(st, t1) === addDays(t1, 42), 'tras hacer el test, el siguiente es 6 semanas después');
   ok(planDay(st, t1, NOW_FAR).status === 'done', 'test con resultado cuenta como hecho');
   const noStart = makeState({ plan: { startDate: null } });
   ok(planWeek(noStart, mondayOf('2026-10-14')).length === 7 && cycleInfo(noStart).weeksSinceStart === 0, 'sin startDate usa el lunes actual');

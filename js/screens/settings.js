@@ -1216,21 +1216,26 @@ async function importBackup(input) {
   } finally {
     input.value = '';
   }
-  let ok = false;
+  // Se comprueba antes de preguntar: un JSON cualquiera no debe llegar al diálogo de restaurar
+  let j = null;
   try {
-    const j = JSON.parse(text);
-    ok = !!j && typeof j === 'object';
+    j = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch {
-    ok = false;
+    j = null;
   }
+  const ok = !!j && typeof j === 'object' && !Array.isArray(j) && typeof j.version === 'number'
+    && (j.history == null || Array.isArray(j.history));
   if (!ok) {
     haptic('error');
     toast('Ese archivo no es una copia de BestRunning', { kind: 'error' });
     return;
   }
+  const n = Array.isArray(j.history) ? j.history.length : 0;
+  const when = typeof j.exportedAt === 'string' && !Number.isNaN(Date.parse(j.exportedAt))
+    ? ` del ${fmt.dateLong(todayKey(new Date(j.exportedAt)))}` : '';
   const yes = await confirmDialog({
     title: '¿Restaurar esta copia?',
-    message: 'Sustituirá todos tus datos actuales (historial, plan, velocidades y ajustes) por los de la copia.',
+    message: `La copia${when} tiene ${n} ${n === 1 ? 'sesión' : 'sesiones'}. Sustituirá todos tus datos actuales (historial, plan, velocidades y ajustes) por los de la copia.`,
     confirmText: 'Restaurar',
     cancelText: 'Cancelar',
     destructive: true,

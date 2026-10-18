@@ -691,7 +691,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
     artwork = artwork || (() => { const src = logoDataUrl(512); return src ? [{ src, sizes: '512x512', type: 'image/png' }] : null; })();
     unbindMedia = bindMediaControls({
-      onPlay: () => { if (engine?.getState().status === 'paused' && !countingDown) engine.resume(); },
+      // Tras retomar (#/play/resume) el coach aún no existe si se reanuda desde los auriculares o el Centro de control
+      onPlay: () => { if (engine?.getState().status === 'paused' && !countingDown) { ensureCoach(); engine.resume(); } },
       onPause: () => { if (engine?.getState().status === 'running') engine.pause(); },
       onNext: () => doSkip(1),
       onPrev: () => doSkip(-1),
@@ -1679,7 +1680,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function keepAwake() {
     requestWakeLock().then((ok) => {
-      if (ok || wakeWarned || disposed) return;
+      // Reanudar desde la pantalla de bloqueo (página oculta) siempre falla: lo pedirá wakelock.js al volver a verse
+      if (ok || wakeWarned || disposed || document.visibilityState === 'hidden') return;
       wakeWarned = true;
       // Sin la API (p. ej. abierta por http en la red local, sin HTTPS): en CADA clase, porque con la pantalla
       // bloqueada iOS congela la app y la música se queda repitiendo frase o se corta
@@ -2062,12 +2064,18 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const tb = root.querySelector('.hud-test');
     if (tb && tb.hidden !== !inStage) { tb.hidden = !inStage; scheduleHudRects(); }
 
+    syncNowPlaying(seg);
+    syncPosition();
+  }
+
+  /** Pantalla de bloqueo / Centro de control / «Ahora suena» del Watch: zona y velocidad del tramo en curso. */
+  function syncNowPlaying(seg) {
+    if (!seg) return;
     setNowPlaying({
       title: workout.title || 'BestRunning',
       subtitle: `${zoneName(seg.zone)} · ${fmt.speed(seg.speed)} km/h`,
       artwork,
     });
-    syncPosition();
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
@@ -2110,6 +2118,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       refs.toggle?.setAttribute('aria-label', label);
       // Al arrancar o reanudar, los controles se recogen; en pausa se quedan
       if (s.status === 'running') ctlUntil = 0;
+      // En pausa el aviso «Mantén pulsado ♪…» (solo tiene sentido corriendo) taparía el rótulo «En pausa»
+      if (s.status === 'paused' && sndHintOff) { sndHintOff(); sndHintOff = null; }
       syncCtl();
     }
     feedScene(s);
@@ -2292,6 +2302,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     haptic('selection');
     renderProfile();
     renderNext(engine.getState());
+    syncNowPlaying(engine.getState().segment);
     cancel(adjustTimer);
     adjustTimer = later(() => {
       // Reconstruye el coach con las velocidades nuevas para que los pre-avisos digan la cifra correcta

@@ -570,6 +570,9 @@ body:has(.pl--live) #toast-root .toast {
   background: rgba(11, 13, 18, 0.94);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
+/* Toasts con acción: «Nueva versión · Toca para actualizar» no caduca; si ya estaba en pantalla al entrar a la clase,
+   se esconde mientras corres (un toque recargaría la app en mitad del entreno) y vuelve al salir */
+body:has(.pl--live) #toast-root .toast--action { display: none; }
 @media (orientation: landscape) and (max-height: 620px) {
   body:has(.pl--live) #toast-root {
     top: calc(max(8px, var(--safe-t)) + 36px + 10px);
@@ -1231,6 +1234,8 @@ body:has(.pl--live) #toast-root .toast {
   .pl-ready__title { font-size: 30px; }
   .pl-ready__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
   .pl-rstat { padding: 10px 8px; gap: 5px; }
+  /* cuatro casillas en media columna: sin icono, «Distancia» y «Duración» caben enteras */
+  .pl-rstat__lbl svg { display: none; }
   .pl-rstat__val { font-size: 19px; }
   .pl-check__item { min-height: 46px; padding: 8px 14px; font-size: 14px; }
   .pl-check__ic { width: 28px; height: 28px; }

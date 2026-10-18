@@ -7,7 +7,9 @@ import {
 } from '../ui/components.js';
 import {
   planWeek, planDay, cycleInfo, alternativesFor, swapDays, setDayOverride, clearDayOverride, nextTestDate, CYCLE_WEEKS,
+  seasonInfo, seasonCalendar,
 } from '../training/planner.js';
+import { EVENTS } from '../training/season.js';
 import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js';
 import { buildWorkout } from '../training/generator.js';
 import { exportPlanToCalendar } from '../integrations/ics.js';
@@ -45,6 +47,135 @@ const dayName = (key) => fmt.weekdayName(weekdayOf(key));
 const idHref = (id) => encodeURIComponent(id);
 /** Minutos nominales (en el test VAM totalSec es el máximo teórico hasta la velocidad tope de la cinta). */
 const mins = (w) => w?.minutes || Math.round((w?.totalSec || 0) / 60);
+
+/* ───────────── Temporada (compartido con «Hoy») ───────────── */
+
+const THEME_MONTH = {
+  ritmo: 'Mes de ritmo constante', tecnica: 'Mes de técnica y cadencia', resistencia: 'Mes de resistencia larga',
+  cuestas: 'Mes de cuestas', escaleras: 'Mes de escaleras y pirámides', fartlek: 'Mes de fartlek', velocidad: 'Mes de velocidad',
+  musica: 'Mes de música y BPM', explosividad: 'Mes de explosividad', fantasma: 'Mes del desafío fantasma', records: 'Mes de récords',
+  mixto: 'Mes mixto', juego: 'Mes de juego libre',
+};
+const PHASE_COLOR = { base: 'endurance', construccion: 'hills', especifico: 'tempo', picos: 'intervals', transicion: 'recovery' };
+const ADAPT_LABEL = { return: 'Vuelta suave', tired: 'Semana más ligera', fresh: 'Vas sobrado' };
+
+export const themeMonth = (t) => (t ? THEME_MONTH[t.key] || `Bloque «${t.name}»` : '');
+export const eventIntro = (key) => EVENTS.find((e) => e.key === key)?.intro || '';
+
+/** Info de temporada de la semana de `dateKey` (null antes de empezar o si falla). */
+export function seasonOf(state, dateKey) {
+  const si = safe(() => seasonInfo(state, dateKey), null);
+  return si && si.weeksSinceStart >= 0 && si.phase && si.theme ? si : null;
+}
+
+/** «Semana 6 de 52 · Construcción · Mes de cuestas» */
+export function seasonLine(si) {
+  if (!si) return '';
+  const season = si.seasonIndex > 0 ? ` (temporada ${si.seasonIndex + 1})` : '';
+  return `Semana ${si.seasonWeek} de 52${season} · ${si.phase.name} · ${themeMonth(si.theme)}`;
+}
+
+/** Chips de la semana: descarga, test, evento y adaptación. */
+export function seasonChips(si) {
+  if (!si) return '';
+  const out = [];
+  if (si.isDeload) out.push(`<span class="br-chip br-chip--deload">${icon('leaf', 12)} Descarga</span>`);
+  if (si.isTestWeek) out.push(`<span class="br-chip br-chip--test">${icon('gauge', 12)} Test VAM</span>`);
+  if (si.event) out.push(`<span class="br-chip br-chip--event">${icon('star', 12)} ${esc(si.event.name)}</span>`);
+  const ad = ADAPT_LABEL[si.adapt?.mode];
+  if (ad) out.push(`<span class="br-chip br-chip--adapt">${icon('pulse', 12)} ${ad}</span>`);
+  return out.join('');
+}
+
+/** Sesiones del historial hechas ese día (planificadas y extra), en orden. */
+export function sessionsOn(state, dateKey) {
+  const list = Array.isArray(state?.history) ? state.history : [];
+  return list
+    .filter((s) => s && s.id && (s.dayKey === dateKey || (!s.dayKey && String(s.startedAt || '').slice(0, 10) === dateKey)))
+    .sort((a, b) => String(a.startedAt || '').localeCompare(String(b.startedAt || '')));
+}
+
+let stylesDone = false;
+/** Estilos de los bloques de temporada y de sesiones del día (inyectados una vez; viven junto a estas pantallas). */
+export function ensureSeasonStyles() {
+  if (stylesDone || typeof document === 'undefined') return;
+  stylesDone = true;
+  if (document.getElementById('br-season-css')) return;
+  const st = document.createElement('style');
+  st.id = 'br-season-css';
+  st.textContent = `
+.br-season{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;margin:0 0 12px;padding:11px 14px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);color:var(--text-2);font:inherit;font-size:13px;line-height:1.35;text-align:left}
+button.br-season{cursor:pointer}
+.br-season__line{flex:1 1 100%;display:flex;align-items:center;gap:6px;color:var(--text);font-size:14px;font-weight:700}
+.br-season__line svg{flex:none;color:var(--accent)}
+.br-season__intro{flex:1 1 100%;margin:2px 0 0;color:var(--text-2)}
+.br-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;background:var(--surface-3);color:var(--text-2);font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.br-chip--deload{background:color-mix(in srgb,var(--c-recovery) 24%,transparent);color:#bfeaff}
+.br-chip--test{background:color-mix(in srgb,var(--c-test) 32%,transparent);color:#cfceff}
+.br-chip--event{background:var(--accent-soft);color:#ffb37f}
+.br-chip--surprise{background:color-mix(in srgb,var(--warn) 20%,transparent);color:#ffe680}
+.br-chip--adapt{background:color-mix(in srgb,var(--ok) 20%,transparent);color:#a6f0b9}
+.br-event{display:flex;align-items:flex-start;gap:12px;margin:0 0 12px;padding:12px 14px;border-radius:var(--r-md);border:1px solid rgba(255,106,26,.32);background:linear-gradient(135deg,rgba(255,106,26,.2),rgba(255,45,85,.08) 60%,var(--surface));font-size:14px;line-height:1.4;color:var(--text-2)}
+.br-event svg{flex:none;margin-top:1px;color:var(--accent)}
+.br-event b{display:block;color:var(--text)}
+.br-sessions__head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 8px}
+.br-sessions__head h3{margin:0;font-size:17px;font-weight:800;color:var(--text)}
+.br-sessions__head span{font-size:12px;color:var(--text-3)}
+.br-ses{display:flex;align-items:center;gap:12px;width:100%;min-height:56px;padding:10px 12px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line);color:var(--text);font:inherit;text-align:left;cursor:pointer}
+.br-ses+.br-ses{margin-top:8px}
+.br-ses__bar{flex:none;width:4px;align-self:stretch;border-radius:2px;background:var(--cc,var(--accent))}
+.br-ses__body{flex:1;min-width:0}
+.br-ses__title{display:flex;align-items:center;gap:6px;font-size:15px;font-weight:700}
+.br-ses__title span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.br-ses__meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:2px;font-size:12.5px;color:var(--text-3)}
+.br-ses>svg{flex:none;color:var(--text-3)}
+.br-ses .br-chip{flex:none}
+.pn-day>.br-extras{grid-column:2;display:flex;flex-direction:column;gap:6px}
+.br-extra{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:12px;background:var(--surface-2);border:1px dashed var(--line-strong);color:var(--text-2);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.br-extra b{color:var(--text);font-weight:700;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.br-extra svg{flex:none}
+.br-extra .br-extra__go{margin-left:auto;color:var(--text-3)}
+.br-cal{margin:0 0 14px;padding:12px 14px;border-radius:var(--r-md);background:var(--surface);border:1px solid var(--line)}
+.br-cal__head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px}
+.br-cal__head b{font-size:14px;color:var(--text)}
+.br-cal__head span{font-size:12px;color:var(--text-3)}
+.br-cal__strip{display:grid;grid-template-columns:repeat(13,minmax(0,1fr));gap:3px}
+.br-cal__seg{height:8px;border-radius:3px;background:var(--pc);opacity:.35}
+.br-cal__seg.is-past{opacity:.6}
+.br-cal__seg.is-current{opacity:1;box-shadow:0 0 10px var(--pc);transform:scaleY(1.4)}
+.br-cal__legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:11.5px;color:var(--text-3)}
+.br-cal__legend i{display:inline-block;width:8px;height:8px;margin-right:4px;border-radius:2px;background:var(--pc)}
+.br-cal details{margin-top:8px}
+.br-cal summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--accent);list-style:none}
+.br-cal summary::-webkit-details-marker{display:none}
+.br-cal ol{margin:8px 0 0;padding:0;list-style:none}
+.br-cal li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:13px;color:var(--text-2)}
+.br-cal li b{color:var(--text);font-weight:700}
+.br-cal li.is-current{color:var(--text)}
+.br-cal li.is-current b{color:var(--accent)}
+.br-cal li i{width:10px;height:10px;border-radius:3px;background:var(--pc)}
+.br-cal li small{font-size:11.5px;color:var(--text-3);white-space:nowrap}
+.td-hero__intro{margin:0;font-size:13.5px;line-height:1.4;color:rgba(255,255,255,.74);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.td-hero__status svg{vertical-align:-2px}
+`;
+  document.head.appendChild(st);
+}
+
+/** Tarjeta de sesión hecha (planificada o extra) que abre su resumen. */
+export function sessionRow(s, { planned = false } = {}) {
+  const cat = CATEGORIES[s.category] ? s.category : 'test';
+  const t = s.startedAt ? new Date(s.startedAt) : null;
+  const at = t && !Number.isNaN(t.getTime()) ? `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}` : '';
+  const pct = Math.round((Number(s.completionPct) || 0) * 100);
+  const tag = planned ? '<span class="br-chip">Plan</span>' : '<span class="br-chip br-chip--event">Extra</span>';
+  const meta = [at, fmt.clock(s.elapsedSec || 0), `${fmt.dec1(s.distanceKm || 0)} km`, s.kcal ? `${fmt.int(s.kcal)} kcal` : '', pct && pct < 90 ? `${pct} %` : '']
+    .filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('');
+  return `<button type="button" class="br-ses" style="--cc:var(--c-${cat})" data-href="#/summary/${idHref(s.id)}" aria-label="${esc(`Ver resumen: ${s.title || 'Entrenamiento'}${planned ? '' : ' (extra)'}`)}">
+    <span class="br-ses__bar" aria-hidden="true"></span>
+    <span class="br-ses__body"><span class="br-ses__title"><span>${esc(s.title || 'Entrenamiento')}</span>${tag}</span><span class="br-ses__meta">${meta}</span></span>
+    ${icon('chevron-right', 18)}
+  </button>`;
+}
 
 /** 9300 → '2 h 35′' · 2700 → '45 min' */
 function hm(sec) {
@@ -180,10 +311,40 @@ function cycleBar(ci) {
     const cls = [n < w ? 'is-past' : '', n === w ? 'is-current' : '', n === 4 ? 'is-test' : ''].join(' ');
     return `<div class="pn-cycle__seg ${cls}"><span class="pn-cycle__track"><span class="pn-cycle__fill"></span></span><span class="pn-cycle__name">${esc(name)}</span></div>`;
   }).join('');
-  return `<div class="pn-cycle" role="img" aria-label="Ciclo ${ci.cycleIndex + 1}, semana ${w} de 4: ${esc(ci.weekName || '')}">
-    <div class="pn-cycle__head"><span class="eyebrow">Ciclo ${ci.cycleIndex + 1}</span><span class="pn-cycle__load">Carga ${Math.round((ci.loadFactor || 1) * 100)} %</span></div>
+  const blk = ci.mesoNumber ? `Bloque ${ci.mesoNumber} de 13` : `Ciclo ${ci.cycleIndex + 1}`;
+  return `<div class="pn-cycle" role="img" aria-label="${blk}, semana ${w} de 4: ${esc(ci.weekName || '')}">
+    <div class="pn-cycle__head"><span class="eyebrow">${blk}</span><span class="pn-cycle__load">Carga ${Math.round((ci.loadFactor || 1) * 100)} %</span></div>
     <div class="pn-cycle__bar">${segs}</div>
   </div>`;
+}
+
+function seasonBlock(si) {
+  if (!si) return '';
+  const intro = si.event ? eventIntro(si.event.key) : `${si.themeIntro} ${si.weekLine || ''}`;
+  return `<div class="br-season" role="group" aria-label="${esc(seasonLine(si))}">
+    <span class="br-season__line">${icon('flag', 15)}<span>${esc(seasonLine(si))}</span></span>
+    ${seasonChips(si)}
+    <p class="br-season__intro">${esc(intro.trim())}</p>
+  </div>`;
+}
+
+function seasonCal(state, monday) {
+  const cal = safe(() => seasonCalendar(state, monday), null);
+  if (!Array.isArray(cal) || cal.length !== 13) return '';
+  const cur = cal.find((m) => m.current);
+  const pc = (m) => `--pc:var(--c-${PHASE_COLOR[m.phase.key] || 'test'})`;
+  const strip = cal.map((m) => `<span class="br-cal__seg${m.current ? ' is-current' : cur && m.cycleIndex < cur.cycleIndex ? ' is-past' : ''}" style="${pc(m)}" title="${esc(`${m.mesoNumber}. ${m.theme.name}`)}"></span>`).join('');
+  const seen = new Set();
+  const legend = cal.filter((m) => !seen.has(m.phase.key) && seen.add(m.phase.key))
+    .map((m) => `<span><i style="${pc(m)}"></i>${esc(m.phase.name)}</span>`).join('');
+  const rows = cal.map((m) => `<li class="${m.current ? 'is-current' : ''}" style="${pc(m)}"><i aria-hidden="true"></i>
+      <span><b>${m.mesoNumber}. ${esc(m.theme.name)}</b> · ${esc(m.phase.name)}</span><small>${esc(fmt.dateShort(m.start))}</small></li>`).join('');
+  return `<section class="br-cal" aria-label="Tu temporada de 52 semanas">
+    <div class="br-cal__head"><b>Tu temporada</b><span>13 bloques de 4 semanas</span></div>
+    <div class="br-cal__strip" aria-hidden="true">${strip}</div>
+    <div class="br-cal__legend">${legend}</div>
+    <details><summary>Ver los 13 bloques ${icon('chevron-down', 13)}</summary><ol>${rows}</ol></details>
+  </section>`;
 }
 
 function weekSummary(days) {
@@ -204,7 +365,7 @@ function createdKeyOf(state) {
   return d && !Number.isNaN(d.getTime()) ? todayKey(d) : null;
 }
 
-function dayRow(day, today, i, createdKey) {
+function dayRow(day, today, i, createdKey, state) {
   const w = day.workout;
   const isToday = day.date === today;
   const wd = day.weekday || weekdayOf(day.date);
@@ -218,6 +379,13 @@ function dayRow(day, today, i, createdKey) {
     </div>`;
   const more = `<button type="button" class="pn-card__more" data-more="${day.date}" aria-label="Opciones del ${fmt.weekdayName(wd)}">${MORE_SVG}</button>`;
   const liCls = `pn-day${isToday ? ' is-today' : ''}${past ? ' is-past' : ''}`;
+  // Sesiones de ese día que no son la del plan (extra): cada una abre su resumen
+  const mainId = w && day.kind !== 'rest' && day.status === 'done' ? day.session?.id : null;
+  const others = sessionsOn(state, day.date).filter((s) => s.id !== mainId);
+  const extras = others.length
+    ? `<div class="br-extras">${others.map((s) => `<button type="button" class="br-extra" data-href="#/summary/${idHref(s.id)}" aria-label="${esc(`Ver resumen de ${s.title || 'entrenamiento'} (extra)`)}">
+        ${icon('plus', 14)}<span>Extra:</span><b>${esc(s.title || 'Entrenamiento')}</b><span>${fmt.dec1(s.distanceKm || 0)} km</span><span class="br-extra__go">${icon('chevron-right', 16)}</span></button>`).join('')}</div>`
+    : '';
 
   if (!w || day.kind === 'rest') {
     const extra = day.status === 'done' && day.session;
@@ -234,7 +402,7 @@ function dayRow(day, today, i, createdKey) {
         </div>
         ${day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}
         ${more}
-      </div></li>`;
+      </div>${extras}</li>`;
   }
 
   let status = day.status || 'upcoming';
@@ -248,7 +416,10 @@ function dayRow(day, today, i, createdKey) {
     meta += intensityDots(w.intensity || 1, 'var(--cc)');
     if (status === 'missed') meta += '<span class="pn-missed">No realizada</span>';
   }
-  const badges = `${day.kind === 'test' || w.isTest ? '<span class="pn-badge pn-badge--test">Test</span>' : ''}${day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}`;
+  const badges = `${day.kind === 'test' || w.isTest ? '<span class="pn-badge pn-badge--test">Test</span>' : ''}${
+    day.event && !day.isOverride ? `<span class="br-chip br-chip--event">${esc(day.event.name || 'Especial')}</span>` : ''}${
+    day.surprise && !day.event && !day.isOverride ? '<span class="br-chip br-chip--surprise">Sorpresa</span>' : ''}${
+    day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}`;
   const label = `${capitalize(fmt.weekdayName(wd))} ${dnum}: ${w.title}, ${catName(w.category)}, ${mins(w)} minutos.${
     status === 'done' ? ' Hecho.' : status === 'missed' ? ' No realizada.' : ''
   }${locked ? '' : ' Mantén pulsado para moverlo.'}`;
@@ -264,7 +435,7 @@ function dayRow(day, today, i, createdKey) {
       <div class="pn-card__chart" aria-hidden="true">${profileChart(w.segments || [], { height: 84, compact: true })}</div>
       ${status === 'done' ? `<span class="pn-card__check" aria-hidden="true">${icon('check', 12, { stroke: 3.2 })}</span>` : ''}
       ${more}
-    </div></li>`;
+    </div>${extras}</li>`;
 }
 
 function view(state, monday, today, first) {
@@ -281,9 +452,13 @@ function view(state, monday, today, first) {
       ${emptyState({ icon: 'calendar', title: 'No hemos podido preparar la semana', text: 'Revisa tus ajustes de semana en Perfil e inténtalo de nuevo.', action: '<button type="button" class="btn btn--secondary" data-href="#/settings/week">Ajustes de semana</button>' })}`;
   }
 
+  const si = seasonOf(state, monday);
   let testNote = '';
-  if (ci?.isDeload) {
-    testNote = `<div class="pn-note pn-note--test">${icon('gauge', 18)}<span><b>Semana de descarga.</b> Menos carga para asimilar el trabajo y test VAM el viernes. ¡Vas a ver cuánto has mejorado!</span></div>`;
+  const testDay = days.find((d) => d.kind === 'test' || d.workout?.isTest);
+  if (testDay) {
+    testNote = `<div class="pn-note pn-note--test">${icon('gauge', 18)}<span><b>Semana de test.</b> Test VAM el ${esc(dayName(testDay.date))} ${parseKey(testDay.date).getDate()}: recalcula tus cuatro velocidades. Los días de alrededor son suaves.</span></div>`;
+  } else if (ci?.isDeload) {
+    testNote = `<div class="pn-note">${icon('leaf', 18)}<span><b>Semana de descarga.</b> Menos carga (sobre un 65 %) para asimilar el trabajo del bloque y llegar fresco al siguiente.</span></div>`;
   } else if (monday === curMonday) {
     const nt = safe(() => nextTestDate(state, today), null);
     if (nt) {
@@ -294,11 +469,13 @@ function view(state, monday, today, first) {
 
   return `
     ${weekHeader(monday, ci, canPrev, canNext, monday === curMonday)}
+    ${seasonBlock(si)}
     ${cycleBar(ci)}
     ${weekSummary(days)}
     ${testNote}
     <p class="pn-hint">${icon('drag', 16)} Mantén pulsado un día y arrástralo sobre otro para intercambiarlos.</p>
-    <ol class="pn-days${first ? ' stagger' : ''}" aria-label="Días de la semana">${days.map((d, i) => dayRow(d, today, i, createdKeyOf(state))).join('')}</ol>
+    <ol class="pn-days${first ? ' stagger' : ''}" aria-label="Días de la semana">${days.map((d, i) => dayRow(d, today, i, createdKeyOf(state), state)).join('')}</ol>
+    ${seasonCal(state, monday)}
     <div class="pn-actions">
       <button type="button" class="btn btn--secondary btn--block btn--lg" data-ics>${icon('calendar', 20)} Añadir al Calendario</button>
       <p class="pn-foot">Exporta las próximas 4 semanas a las ${esc(state.schedule?.reminderTime || '07:00')}, con aviso 10 minutos antes.</p>
@@ -656,6 +833,7 @@ export function mount(el, { query } = {}) {
   })}<div class="container pn"></div>`;
   const root = el.querySelector('.pn');
   const cleanupHeader = enableCollapsingHeader(el);
+  ensureSeasonStyles();
 
   const onSwap = (a, b) => {
     setState((d) => {

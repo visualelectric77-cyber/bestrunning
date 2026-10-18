@@ -421,7 +421,14 @@ button.pg-record:active { transform: scale(0.97); }
 .hs-row__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .hs-row__title { display: flex; align-items: center; gap: 6px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hs-tag { flex: none; padding: 1px 6px; border-radius: 6px; font-size: 10px; font-weight: 800; color: var(--c-test); background: color-mix(in srgb, var(--c-test) 18%, transparent); }
-.hs-row__meta { font-size: var(--fs-footnote); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.hs-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hs-tag--extra { color: var(--info); background: color-mix(in srgb, var(--info) 16%, transparent); }
+/* El pulso medio no se recorta aunque la categoría sea larga: se acorta el texto */
+.hs-row__meta { display: flex; align-items: center; min-width: 0; font-size: var(--fs-footnote); color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hs-row__metatxt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hs-row__meta .whr-rowhr { flex: none; }
+/* Segunda sesión del mismo día: la fecha ya se ve en la fila de arriba */
+.hs-row--sameday .hs-row__date { opacity: 0.4; }
 .hs-row__side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .hs-row__km { font-family: var(--font-display); font-weight: 800; font-size: var(--fs-body); font-variant-numeric: tabular-nums; }
 .hs-row__km small { font-size: 11px; color: var(--text-3); margin-left: 2px; font-weight: 700; }

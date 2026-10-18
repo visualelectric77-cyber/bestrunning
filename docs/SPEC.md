@@ -610,7 +610,12 @@ Nivel exigido: **muy pro** (mezclas cuadradas a compás, sin cortes bruscos ni s
   `{ version, lufs:-14, tracks:[{ id, file:'audio/music/<id>.m4a', title, artist, source:'Pixabay', page, license,
   curatedTier, tier, sizeBytes, duration, bpm, confidence, beatOffset, barOffset, bars, energy:[0..1 por compás],
   cues:{ mixIn, drops:[seg], outro, hotBars:[índices de compás] } }]}`. Todas normalizadas a −14 LUFS (AAC 160 kbps).
-  20 pistas: calm (90–117 BPM), jog/run (120–128), fast (135–138), sprint (148–190; DnB 170–174).
+  Opcionales: `statedBpm` (BPM que declara el autor), `forcedBpm` (tempo impuesto en `FORCE_BPM` de analyze.py) y
+  `gridShift:'half-beat'` (rejilla movida medio tiempo, `HALF_BEAT_SHIFT`, cuando el peine se engancha a los platos a
+  contratiempo y no al bombo).
+  55 pistas (20 originales + 35 añadidas el 18-oct-2026 desde `audio/music-src/nuevas/manifest.json` con
+  `analyze.py --new`). Por BPM medido: calm 8 (90–117), jog 20 (118–125), run 9 (126–133), fast 6 (135–140),
+  sprint 12 (148,5–190; DnB 167–190).
 - Pistas importadas por el usuario desde el iPhone (app Archivos): se guardan en IndexedDB (`br-music`, store `tracks`:
   `{ id:'u_…', title, artist, blob, mime, duration, bpm, beatOffset, barOffset, energy, cues, gainDb, tier, addedAt, enabled }`)
   tras analizarlas en el propio iPhone (Worker). Mismo formato de metadatos que la biblioteca integrada + `gainDb`.
@@ -639,7 +644,13 @@ pista al llegar atSec*/, rate, transition: 'start'|'beatmix'|'riser-drop'|'echo-
   de un bloque de `hotBars`) caiga exactamente en `atSec`. La subida (build-up) previa suena durante el pre-aviso.
 - Tramos largos: si la pista se acaba antes del final del segmento, cue extra intra-zona a una frontera de frase (16 compases
   antes del `outro`) con `beatmix` hacia otra pista del mismo pool. Nunca repetir pista en una sesión si hay alternativas.
-- Selección determinista con `seed` (misma clase ⇒ misma música; otro día ⇒ otra mezcla).
+- **Variedad entre sesiones**: `loadLibrary()` marca cada pista con `recentAge` (hace cuántas sesiones sonó, según
+  `session.music.tracks` de las últimas `RECENT_SESSIONS` = 5 sesiones con música; `null` si no sonó). Al elegir pista
+  nueva, `buildMusicPlan` prefiere las del tramo preferido que no sonaron en esas sesiones; si todas sonaron, la que sonó
+  hace más sesiones. Nunca cambia el BPM admitido (siguen las mismas candidatas ±2 %). `opts.recent` permite pasar la
+  memoria a mano (Map id → antigüedad, lista de sesiones o lista de ids) y `recent:false` la desactiva. Sin historial
+  nuevo el plan es idéntico, así que retomar una clase interrumpida no cambia la música.
+- Selección determinista con `seed` (misma clase ⇒ misma música; otro día ⇒ otra mezcla) y con el historial.
 
 ### 11.4 Motor DJ — `js/audio/music.js` (+ `js/audio/music-buffers.js`)
 **Sobre AudioBuffers** (la versión con dos `<audio>` + `MediaElementSource`, `currentTime` y `playbackRate` corrigiendo la fase

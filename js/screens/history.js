@@ -307,7 +307,30 @@ function noResults(q) {
   </div>`;
 }
 
-function rowHtml(h, feel) {
+/**
+ * Sesiones «extra» de cada día con varias: las que no cumplen el plan (como el planificador: primero la
+ * asignada a ese día, si no la mejor del día) y no estaban asignadas a otro día.
+ */
+function extraIds(items) {
+  const byDay = new Map();
+  for (const h of items) {
+    if (!h.dayKey) continue;
+    if (!byDay.has(h.dayKey)) byDay.set(h.dayKey, []);
+    byDay.get(h.dayKey).push(h);
+  }
+  const score = (x) => { const p = Number(x.completionPct) || 0; return (p >= 0.6 ? 2 : 0) + p; };
+  const out = new Set();
+  for (const [day, list] of byDay) {
+    if (list.length < 2) continue;
+    let c = list.filter((x) => x.planDate === day);
+    if (!c.length) c = list.filter((x) => !x.planDate);
+    const main = c.length ? c.reduce((best, x) => (score(x) >= score(best) ? x : best)) : null;
+    for (const x of list) if (x !== main && !x.planDate) out.add(x.id);
+  }
+  return out;
+}
+
+function rowHtml(h, feel, { extra = false, sameDay = false } = {}) {
   const key = h.dayKey || todayKey();
   const d = parseKey(key);
   const cat = catOf(h.category);
@@ -315,15 +338,15 @@ function rowHtml(h, feel) {
   const pct = Math.round((Number(h.completionPct) || 0) * 100);
   const partial = !h.completed && pct > 0 && pct < 100;
   const meta = [cat?.name || (h.isTest ? 'Test' : ''), timeOf(h.startedAt), fmt.clock(h.elapsedSec || 0)].filter(Boolean).map(esc).join(' · ');
-  return `<div class="hs-row" data-id="${esc(h.id)}" style="--cc:${catColor(h.category)}">
+  return `<div class="hs-row${sameDay ? ' hs-row--sameday' : ''}" data-id="${esc(h.id)}" style="--cc:${catColor(h.category)}">
     <div class="hs-row__actions">
       <button type="button" class="hs-row__del" data-del="${esc(h.id)}" aria-label="Borrar sesión">${icon('trash', 20)}<span>Borrar</span></button>
     </div>
-    <div class="hs-row__content" role="button" tabindex="0" aria-label="${esc(h.title || 'Sesión')}, ${esc(fmt.dateLong(key))}">
+    <div class="hs-row__content" role="button" tabindex="0" aria-label="${esc(h.title || 'Sesión')}${extra ? ' (extra)' : ''}, ${esc(fmt.dateLong(key))}${timeOf(h.startedAt) ? `, ${timeOf(h.startedAt)}` : ''}">
       <div class="hs-row__date"><span>${esc(fmt.weekdayAbbr(((d.getDay() + 6) % 7) + 1))}</span><b class="num">${d.getDate()}</b></div>
       <div class="hs-row__main">
-        <div class="hs-row__title">${esc(h.title || 'Entrenamiento')}${h.isTest ? '<span class="hs-tag">VAM</span>' : ''}</div>
-        <div class="hs-row__meta">${meta}${h.hrAvg ? `<span class="whr-rowhr" aria-label="Pulso medio ${Number(h.hrAvg) || ''} ppm">${icon('heart', 11, { stroke: 2.6 })}${Number(h.hrAvg) || ''}</span>` : ''}</div>
+        <div class="hs-row__title"><span class="hs-row__name">${esc(h.title || 'Entrenamiento')}</span>${h.isTest ? '<span class="hs-tag">VAM</span>' : ''}${extra ? '<span class="hs-tag hs-tag--extra">Extra</span>' : ''}</div>
+        <div class="hs-row__meta"><span class="hs-row__metatxt">${meta}</span>${h.hrAvg ? `<span class="whr-rowhr" aria-label="Pulso medio ${Number(h.hrAvg) || ''} ppm">${icon('heart', 11, { stroke: 2.6 })}${Number(h.hrAvg) || ''}</span>` : ''}</div>
       </div>
       <div class="hs-row__side">
         <div class="hs-row__km num">${fmt.km(h.distanceKm || 0)}<small>km</small></div>
@@ -335,6 +358,7 @@ function rowHtml(h, feel) {
 }
 
 function listHtml(items, feel) {
+  const extras = extraIds(items);
   const groups = [];
   let cur = null;
   const thisYear = new Date().getFullYear();
@@ -355,7 +379,7 @@ function listHtml(items, feel) {
         <h3>${esc(g.label)}</h3>
         <span>${g.items.length} ${g.items.length === 1 ? 'sesión' : 'sesiones'} · ${fmt.dec1(km)} km · ${esc(fmt.durationLong(sec))}</span>
       </div>
-      <div class="hs-group">${g.items.map((h) => rowHtml(h, feel)).join('')}</div>
+      <div class="hs-group">${g.items.map((h, i) => rowHtml(h, feel, { extra: extras.has(h.id), sameDay: i > 0 && !!h.dayKey && g.items[i - 1].dayKey === h.dayKey })).join('')}</div>
     </section>`;
   }).join('');
 }
@@ -555,7 +579,7 @@ function detailHtml(ses, s, segments) {
   parts.push(`<section class="hs-stats">
     ${stat({ label: 'Tiempo', value: fmt.clock(elapsed), size: 'md' })}
     ${stat({ label: 'Vel. media', value: fmt.speed(avg), unit: 'km/h', size: 'md' })}
-    ${stat({ label: 'Ritmo medio', value: fmt.pace(avg), unit: '/km', size: 'md' })}
+    ${stat({ label: 'Ritmo', value: avg > 0 ? fmt.pace(avg) : '–:––', unit: '/km', size: 'md' })}
     ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h', size: 'md' })}
     ${stat({ label: 'Energía', value: fmt.int(ses.kcal || 0), unit: 'kcal', size: 'md' })}
     ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)), size: 'md' })}
@@ -602,7 +626,7 @@ function detailHtml(ses, s, segments) {
         : `<button type="button" class="hs-add" data-hs="edit">${icon('plus', 18)}<span>Añadir</span></button>`}
     </div>
     <div class="card hs-card hs-hrcard">
-      <div class="eyebrow">Pulso${hasHr ? ' · Watch' : ''}</div>
+      <div class="eyebrow">Pulso${series ? ' · Watch' : hasHr ? ' · a mano' : ''}</div>
       ${hasHr
         ? `<div class="hs-hrcard__vals">
              <div>${icon('heart', 16)}<b class="num">${ses.hrAvg || '–'}</b><span>media</span></div>

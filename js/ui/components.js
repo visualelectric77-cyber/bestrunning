@@ -296,7 +296,8 @@ export function chip(text, { color = null, active = false, attrs = '' } = {}) {
   const type = tag === 'button' ? ' type="button"' : '';
   const style = color ? ` style="--chip-color:${esc(color)}"` : '';
   const cls = `chip${color ? ' chip--tinted' : ''}${active ? ' chip--active' : ''}`;
-  const pressed = tag === 'button' ? ` aria-pressed="${active ? 'true' : 'false'}"` : '';
+  // Con role="tab" (aria-selected) no se anuncia además «pulsado»: VoiceOver diría los dos estados
+  const pressed = tag === 'button' && !/aria-selected/.test(attrs) ? ` aria-pressed="${active ? 'true' : 'false'}"` : '';
   return `<${tag}${type} class="${cls}"${style}${pressed} ${attrs || ''}>${esc(text)}</${tag}>`;
 }
 
@@ -1248,6 +1249,8 @@ if (hasDOM) {
     if (commit && changed && box.isConnected) emitStepperChange(box);
   };
 
+  // El primer paso se aplica al SOLTAR (o al mantener 420 ms), nunca al apoyar el dedo: un desplazamiento
+  // que empieza sobre −/+ (pointercancel o el dedo que se mueve) no debe cambiar velocidades, peso o edad.
   document.addEventListener('pointerdown', (e) => {
     const btn = e.target.closest?.('.stepper [data-step-dir]');
     if (!btn || btn.disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
@@ -1257,8 +1260,7 @@ if (hasDOM) {
     stopHold(true);
     const dir = Number(btn.dataset.stepDir) || 1;
     btn.classList.add('is-pressed');
-    hold = { box, btn, dir, count: 0, changed: false, timer: 0, t0: Date.now() };
-    hold.changed = stepperApply(box, dir) || hold.changed;
+    hold = { box, btn, dir, count: 0, changed: false, timer: 0, t0: Date.now(), x: e.clientX, y: e.clientY, pid: e.pointerId };
     const tick = () => {
       if (!hold || !box.isConnected) return stopHold(true);
       hold.count++;
@@ -1272,7 +1274,17 @@ if (hasDOM) {
     };
     hold.timer = setTimeout(tick, 420);
   });
-  ['pointerup', 'pointercancel'].forEach((t) => document.addEventListener(t, () => stopHold(true)));
+  document.addEventListener('pointermove', (e) => {
+    if (!hold || hold.count || e.pointerId !== hold.pid) return;
+    if (Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) stopHold(false); // es un desplazamiento, no un toque
+  }, { passive: true });
+  document.addEventListener('pointerup', (e) => {
+    if (!hold) return;
+    // Toque corto: un único paso (si se mantuvo, la repetición ya lo aplicó)
+    if (!hold.count && e.pointerId === hold.pid && hold.box.isConnected) hold.changed = stepperApply(hold.box, hold.dir) || hold.changed;
+    stopHold(true);
+  });
+  document.addEventListener('pointercancel', () => stopHold(true));
   document.addEventListener('pointerleave', (e) => {
     if (hold && e.target === hold.btn) stopHold(true);
   }, true);

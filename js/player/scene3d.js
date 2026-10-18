@@ -827,7 +827,10 @@ export async function createScene3D(canvas, {
   function frame(ms) {
     if (!running) return;
     raf = requestAnimationFrame(frame);
-    const minInterval = 1000 / Q.fps;
+    // En pausa, con la escena ya frenada del todo, bastan 30 fps (media GPU y batería mientras bebes agua); esos
+    // fotogramas no cuentan para la calidad adaptativa (si no, bajaría la calidad creyendo que no llega a 60)
+    const idle = (st.status === 'paused' || pausedEvt) && timeScale === 0;
+    const minInterval = 1000 / (idle ? Math.min(Q.fps, 30) : Q.fps);
     if (lastFrameMs && ms - lastFrameMs < minInterval - 1.5) return;
     const dt = lastMs ? (ms - lastMs) / 1000 : 1 / 60;
     lastMs = ms;
@@ -837,7 +840,8 @@ export async function createScene3D(canvas, {
       renderFrame(dt, c0);
       errCount = 0;
       const c1 = nowMs();
-      adaptQuality(c1, Math.min(dt, 0.5), c1 - c0);
+      if (idle) resetQualityWindow();
+      else adaptQuality(c1, Math.min(dt, 0.5), c1 - c0);
     } catch (err) {
       errCount++;
       if (errCount === 4 && theme && theme.id !== FALLBACK_THEME) loadTheme(FALLBACK_THEME).catch(() => {});

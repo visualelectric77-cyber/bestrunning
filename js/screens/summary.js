@@ -711,11 +711,12 @@ export function mount(el, { params = {} } = {}) {
         ${newAch.length ? `
           <div class="sm-ach">
             <div class="sm-ach__title">${icon('sparkles', 16)} ${newAch.length === 1 ? 'Logro desbloqueado' : `${newAch.length} logros desbloqueados`}</div>
-            ${newAch.map((a, i) => `
+            ${newAch.slice(0, 3).map((a, i) => `
               <div class="sm-medal sm-medal--${esc(a.tier || 'bronze')}" style="--i:${i}">
                 <span class="sm-medal__ic">${icon(a.icon || 'medal', 24)}</span>
                 <span class="sm-medal__txt"><b>${esc(a.title || 'Logro')}</b><span>${esc(a.description || '')}</span></span>
               </div>`).join('')}
+            ${newAch.length > 3 ? `<p class="muted sm-note">Y ${newAch.length - 3} más: las tienes todas en Progreso.</p>` : ''}
           </div>` : ''}
       </div>`;
     let sheet = null;

@@ -232,7 +232,15 @@ function checkActiveSession() {
         onClick: (close) => {
           saveActiveSession(null);
           close();
-          toast('Entrenamiento descartado', { icon: 'trash' });
+          // Un toque por error no debe perder la clase a medias: se puede deshacer mientras se ve el aviso
+          toast('Entrenamiento descartado · Toca para deshacer', {
+            icon: 'trash',
+            duration: 6000,
+            onClick: () => {
+              saveActiveSession(snap, { savedAt });
+              setTimeout(checkActiveSession, 350); // vuelve a ofrecer «Reanudar»
+            },
+          });
         },
       },
     ],

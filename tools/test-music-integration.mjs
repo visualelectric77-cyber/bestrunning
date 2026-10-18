@@ -317,6 +317,53 @@ section('sw.js · rutas de audio, rangos y caché');
 }
 
 /* ───────────── index.html ───────────── */
+section('music-library.js · variedad entre sesiones (recentAge desde session.music.tracks)');
+{
+  const libMod = await import(pathToFileURL(join(ROOT, 'js/audio/music-library.js')).href);
+  const planMod = await import(pathToFileURL(join(ROOT, 'js/audio/music-plan.js')).href);
+  const json = JSON.parse(readFileSync(join(ROOT, 'audio/music/library.json'), 'utf8'));
+  const ids = json.tracks.map((t) => t.id);
+  const prevFetch = globalThis.fetch;
+  const prevHistory = store.getState().history;
+  globalThis.fetch = async (u) => {
+    if (String(u).endsWith('audio/music/library.json')) return new Response(JSON.stringify(json), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    throw new Error('sin red en la prueba');
+  };
+  try {
+    const at = (d) => `2026-10-${String(d).padStart(2, '0')}T07:00:00.000Z`;
+    store.setState((d) => {
+      d.history = [
+        { id: 's1', startedAt: at(1), music: { tracks: [ids[0]] } },
+        { id: 's2', startedAt: at(2), music: { tracks: [ids[1], { id: ids[2], title: 'x' }] } },
+        { id: 's3', startedAt: at(3), music: { tracks: [] } },
+        { id: 's4', startedAt: at(4), music: { tracks: [ids[3]] } },
+        { id: 's5', startedAt: at(5), music: { tracks: [ids[4]] } },
+        { id: 's6', startedAt: at(6), music: { tracks: [ids[5]] } },
+        { id: 's7', startedAt: at(7), music: { tracks: [ids[6], ids[1]] } },
+      ];
+    });
+    const tracks = await libMod.loadLibrary({ useImported: false });
+    const by = new Map(tracks.map((t) => [t.id, t]));
+    ok(tracks.length === ids.length, `biblioteca integrada completa (${tracks.length} pistas)`);
+    ok(by.get(ids[6]).recentAge === 0 && by.get(ids[1]).recentAge === 0, 'la última sesión ⇒ recentAge 0');
+    ok(by.get(ids[5]).recentAge === 1 && by.get(ids[4]).recentAge === 2 && by.get(ids[3]).recentAge === 3 && by.get(ids[2]).recentAge === 4,
+      'antigüedad por sesión con música (las vacías no cuentan)');
+    ok(by.get(ids[0]).recentAge === null, `solo las ${planMod.RECENT_SESSIONS} últimas sesiones`);
+    ok(by.get(ids[7]).recentAge === null, 'pista que no sonó ⇒ null');
+    const again = await libMod.loadLibrary({ useImported: false, history: [] });
+    ok(again.every((t) => t.recentAge === null), 'history: [] explícito ⇒ sin memoria (render determinista)');
+    // Con la memoria puesta por loadLibrary, el plan evita la pista de la última sesión en su tramo
+    const w = { id: 'w', segments: [{ zone: 'jog', speed: 8.3, sec: 150 }], totalSec: 150 };
+    const fresh = await libMod.loadLibrary({ useImported: false, history: [] });
+    const first = planMod.buildMusicPlan(w, fresh, { seed: 5 }).cues[0].trackId;
+    const withMem = await libMod.loadLibrary({ useImported: false, history: [{ startedAt: at(9), music: { tracks: [first] } }] });
+    ok(planMod.buildMusicPlan(w, withMem, { seed: 5 }).cues[0].trackId !== first, `el plan no repite la pista de la sesión anterior (${first})`);
+  } finally {
+    globalThis.fetch = prevFetch;
+    store.setState((d) => { d.history = prevHistory; });
+  }
+}
+
 section('index.html');
 {
   const html = readFileSync(join(ROOT, 'index.html'), 'utf8');

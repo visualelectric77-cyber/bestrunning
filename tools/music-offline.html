@@ -1243,7 +1243,7 @@ async function upload(kind, name, body) {
 
 async function main() {
   setStatus('Biblioteca…');
-  const tracks = await loadLibrary({ useImported: false });
+  const tracks = await loadLibrary({ useImported: false, history: [] });   // sin historial: render determinista
   log(`Biblioteca: ${tracks.length} pistas integradas`);
   let cal = { K: CAND_K, selfTest: true, skipped: true };
   if (!LITE) {
