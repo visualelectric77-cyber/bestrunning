@@ -1,0 +1,332 @@
+/* BestRunning · motion graphics del HUD de retransmisión (js/player/motion.js).
+   Solo transform/opacity (y clip-path de sus PROPIOS rótulos): nada de filtros, desenfoques ni máscaras sobre la
+   escena (§15.3). prefers-reduced-motion: fundidos sencillos. */
+.pl--live { --mo-spring: cubic-bezier(0.2, 1.28, 0.36, 1); --mo-out: cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ───────── Cifras rodantes (velocidad gigante, cuenta atrás del tramo) ───────── */
+.mo-roll { font-variant-numeric: tabular-nums; }
+.mo-d { position: relative; display: inline-block; }
+.mo-g { display: inline-block; }
+.mo-d::before {
+  content: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.mo-d[data-o]::before { content: attr(data-o); }
+.mo-d.is-u0 > .mo-g { animation: mo-in-u0 300ms var(--mo-spring) backwards; }
+.mo-d.is-u1 > .mo-g { animation: mo-in-u1 300ms var(--mo-spring) backwards; }
+.mo-d.is-d0 > .mo-g { animation: mo-in-d0 300ms var(--mo-spring) backwards; }
+.mo-d.is-d1 > .mo-g { animation: mo-in-d1 300ms var(--mo-spring) backwards; }
+.mo-d.is-u0::before { animation: mo-out-u0 210ms cubic-bezier(0.4, 0, 1, 1); }
+.mo-d.is-u1::before { animation: mo-out-u1 210ms cubic-bezier(0.4, 0, 1, 1); }
+.mo-d.is-d0::before { animation: mo-out-d0 210ms cubic-bezier(0.4, 0, 1, 1); }
+.mo-d.is-d1::before { animation: mo-out-d1 210ms cubic-bezier(0.4, 0, 1, 1); }
+@keyframes mo-in-u0 { from { opacity: 0; transform: translateY(48%); } to { opacity: 1; transform: none; } }
+@keyframes mo-in-u1 { from { opacity: 0; transform: translateY(48%); } to { opacity: 1; transform: none; } }
+@keyframes mo-in-d0 { from { opacity: 0; transform: translateY(-48%); } to { opacity: 1; transform: none; } }
+@keyframes mo-in-d1 { from { opacity: 0; transform: translateY(-48%); } to { opacity: 1; transform: none; } }
+@keyframes mo-out-u0 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-42%); } }
+@keyframes mo-out-u1 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-42%); } }
+@keyframes mo-out-d0 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(42%); } }
+@keyframes mo-out-d1 { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(42%); } }
+
+/* ───────── «En cola»: tira fina encima del lower third ───────── */
+.mo-deck {
+  grid-area: lt;
+  align-self: start;
+  justify-self: stretch;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px 0 12px;
+  background: var(--plate);
+  border: 1px solid var(--plate-edge);
+  border-radius: 10px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(calc(-100% - 8px));
+  clip-path: inset(0 100% 0 0 round 10px);
+  transition: clip-path 300ms var(--ease-in-out), opacity 220ms ease 80ms, visibility 0s linear 320ms, transform 0s linear 320ms;
+}
+.mo-deck.is-on {
+  opacity: 1;
+  visibility: visible;
+  clip-path: inset(0 0 0 0 round 10px);
+  transition: clip-path 520ms var(--mo-out), opacity 160ms ease, visibility 0s, transform 0s;
+}
+/* En el cambio de tramo baja unos px hacia el lower third y se funde ANTES de que entre el contenido nuevo
+   (relevo estrictamente secuencial: nunca se superpone a las cifras del lower third) */
+.mo-deck.is-dock {
+  visibility: visible;
+  opacity: 0;
+  clip-path: inset(0 0 0 0 round 10px);
+  transform: translateY(calc(-100% - 2px));
+  transition: transform 160ms cubic-bezier(0.4, 0, 1, 1), opacity 130ms cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 160ms;
+}
+.pl.is-ctl .mo-deck:not(.is-dock),
+.pl.is-cd .mo-deck,
+.pl.is-test-stage .mo-deck,
+.pl.is-finale .mo-deck { opacity: 0; visibility: hidden; }
+.mo-deck__bar { flex: none; width: 3px; height: 16px; border-radius: 2px; background: var(--dc, var(--nc)); }
+.mo-deck__lbl {
+  flex: none;
+  font: 700 10.5px/1 var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lbl);
+}
+.mo-deck__zone {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* line-height > 1: con overflow hidden, 1 recortaba las tildes de las mayúsculas («RÁPIDO» salía «RAPIDO») */
+  font: 800 12.5px/1.35 var(--font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dc, var(--nc));
+}
+.mo-deck__sp {
+  flex: none;
+  font: 800 18px/1 var(--font-display);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.mo-deck__u { flex: none; margin-left: -4px; font: 600 11px/1 var(--font); color: var(--ink2); }
+.mo-deck__dur {
+  flex: none;
+  font: 700 13px/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink2);
+}
+.mo-deck__dur::before { content: '·'; margin-right: 7px; color: var(--lbl); }
+.mo-deck__timer {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.mo-deck__timer > i {
+  display: block;
+  height: 100%;
+  background: var(--dc, var(--nc));
+  transform-origin: left center;
+  transform: scaleX(1);
+  transition: transform 260ms linear;
+}
+
+/* ───────── Subtítulos del coach (encima del lower third / de «en cola»; nunca sobre datos) ───────── */
+.mo-cap {
+  grid-area: lt;
+  align-self: start;
+  justify-self: center;
+  z-index: 1;
+  max-width: 100%;
+  min-width: 0;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(calc(-100% - 8px - var(--mo-capoff, 0px)));
+  transition: opacity 200ms ease, transform 360ms var(--mo-out);
+}
+.mo-cap.is-on { opacity: 1; }
+.mo-cap__t {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding: 6px 11px;
+  border-radius: 8px;
+  background: rgba(11, 13, 18, 0.8);
+  font: 600 13.5px/1.32 var(--font);
+  color: #fff;
+  text-align: center;
+  text-wrap: balance;
+}
+.pl.is-ctl .mo-cap,
+.pl.is-tv .mo-cap,
+.pl.is-cd .mo-cap,
+.pl.is-test-stage .mo-cap,
+.pl.is-finale .mo-cap { opacity: 0; }
+
+/* ───────── Últimos 10 s: la barra del tramo se vuelve 10 marcas que se apagan una por segundo ───────── */
+.pl.has-mo .hud-lt__bar { position: relative; }
+.mo-ticks {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+.mo-ticks > i { border-radius: 1px; background: var(--zc); transition: background-color 200ms ease, transform 200ms ease; }
+.mo-ticks > i.is-last { background: var(--nc); }
+.mo-ticks > i.is-off { background: rgba(255, 255, 255, 0.13); }
+.hud-lt.mo-is-ticks .hud-lt__bar { background: transparent; }
+.hud-lt.mo-is-ticks .hud-lt__bar > i { opacity: 0; }
+.hud-lt.mo-is-ticks .mo-ticks { opacity: 1; }
+
+/* Mientras la tira «Siguiente» está fuera (últimos 10 s), el bloque SIGUIENTE del lower third se funde: es ese mismo
+   dato levantado (sin duplicados). Solo opacidad; si la tira se oculta (controles, 3-2-1, test, final) vuelve. */
+.pl.has-mo .hud-lt__head .hud-lt__next { transition: opacity 180ms ease; }
+.pl.has-mo:not(.is-ctl):not(.is-cd):not(.is-test-stage):not(.is-finale) .hud-lt.mo-is-deck .hud-lt__head .hud-lt__next,
+.pl.has-mo .hud-lt__head.mo-nx .hud-lt__next { opacity: 0; }
+.pl.has-mo .hud-lt__head.mo-nx .hud-lt__next { transition: none; }
+
+/* ───────── Relevo del lower third en el cambio de tramo ─────────
+   Estrictamente secuencial: lo saliente llega a 0 en 130 ms; lo entrante empieza a los 145 ms (sin fundido cruzado).
+   La cuenta atrás no rueda durante el relevo (motion.js · quietUntil cubre los ~450 ms). */
+.pl.has-mo .hud-lt__sweep { display: none; }
+.hud-lt .hud-lt__head.mo-old { pointer-events: none; animation: mo-head-out 130ms cubic-bezier(0.4, 0, 1, 1) forwards; }
+.hud-lt__head.mo-in { animation: mo-head-in-a 300ms var(--mo-out) 145ms backwards; }
+.hud-lt__head.mo-in2 { animation: mo-head-in-b 300ms var(--mo-out) 145ms backwards; }
+@keyframes mo-head-out { to { opacity: 0; transform: translateY(8px); } }
+@keyframes mo-head-in-a { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+@keyframes mo-head-in-b { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+.mo-wipe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 3;
+  height: 2px;
+  background: var(--zc);
+  transform-origin: left center;
+  transform: scaleX(0);
+  opacity: 0;
+  pointer-events: none;
+}
+.mo-wipe.is-on { animation: mo-wipe-a 900ms var(--ease-in-out) both; }
+.mo-wipe.is-on2 { animation: mo-wipe-b 900ms var(--ease-in-out) both; }
+@keyframes mo-wipe-a { 0% { opacity: 1; transform: scaleX(0); } 55% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
+@keyframes mo-wipe-b { 0% { opacity: 1; transform: scaleX(0); } 55% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
+
+/* ───────── Apertura: título con tracking + perfil que se dibuja; luego el HUD se monta ───────── */
+.mo-title {
+  grid-area: speed;
+  align-self: center;
+  justify-self: center;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 560px);
+  padding: 0 4px;
+  text-align: center;
+  pointer-events: none;
+  animation: mo-title-life 3400ms linear both;
+}
+.mo-title__kick {
+  font: 700 11px/1 var(--font);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--zc);
+  text-shadow: var(--ink-shadow);
+  animation: mo-fade-up 600ms var(--mo-out) 120ms backwards;
+}
+.mo-title__name {
+  max-width: 100%;
+  font: 800 clamp(28px, 8vw, 46px)/1.04 var(--font-display);
+  letter-spacing: 0.1em;
+  margin-right: -0.1em;
+  color: #fff;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.5);
+  text-wrap: balance;
+}
+.mo-w { display: inline-block; white-space: nowrap; }
+.mo-l { display: inline-block; animation: mo-track 1100ms var(--mo-out) backwards; animation-delay: calc(var(--i) * 16ms); }
+@keyframes mo-track { from { opacity: 0; transform: translateX(calc(var(--k) * 0.34em)); } to { opacity: 1; transform: none; } }
+.mo-title__rule {
+  display: block;
+  width: 72px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--zc);
+  transform-origin: center;
+  animation: mo-rule 700ms var(--mo-out) 380ms backwards;
+}
+@keyframes mo-rule { from { transform: scaleX(0); } to { transform: none; } }
+.mo-title__prof { display: block; width: 100%; height: 64px; }
+.mo-title__svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.mo-title__svg .mo-pb {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: mo-bar 560ms var(--mo-spring) backwards;
+  animation-delay: calc(420ms + var(--i) / var(--n) * 900ms);
+}
+@keyframes mo-bar { from { transform: scaleY(0); opacity: 0; } 30% { opacity: 1; } to { transform: none; opacity: 1; } }
+.mo-title__meta {
+  font: 700 12.5px/1 var(--font);
+  letter-spacing: 0.08em;
+  color: var(--ink2);
+  text-shadow: var(--ink-shadow);
+  animation: mo-fade-up 600ms var(--mo-out) 900ms backwards;
+}
+/* El título se retira del todo (≈2,38 s) antes de que suba la cifra de velocidad (2,4 s): comparten la misma zona
+   de la rejilla y el fundido cruzado dejaba «PIRÁMIDE» y el perfil fantasma detrás del «7,1» */
+@keyframes mo-title-life {
+  0%, 58% { opacity: 1; transform: none; }
+  70%, 100% { opacity: 0; transform: translateY(-14px); }
+}
+@keyframes mo-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes mo-rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes mo-drop { from { opacity: 0; transform: translateY(-130%); } to { opacity: 1; transform: none; } }
+@keyframes mo-draw { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes mo-fade { from { opacity: 0; } to { opacity: 1; } }
+/* El HUD se monta: lower third (con el 3-2-1) desde el primer instante; perfil que se dibuja; barra superior,
+   métricas y velocidad cuando el título se retira */
+.pl.mo-intro .hud-lt { animation: mo-rise 560ms var(--mo-out) backwards; }
+.pl.mo-intro .hud-strip { animation: mo-draw 1200ms var(--ease-in-out) 380ms backwards; }
+.pl.mo-intro .hud-top { animation: mo-drop 640ms var(--mo-out) 1650ms backwards; }
+.pl.mo-intro .hud-info { animation: mo-rise 560ms var(--mo-out) 1900ms backwards; }
+.pl.mo-intro .hud-speed__core { animation: mo-rise 640ms var(--mo-out) 2400ms backwards; }
+.pl.mo-intro--skip .hud-lt,
+.pl.mo-intro--skip .hud-strip,
+.pl.mo-intro--skip .hud-top,
+.pl.mo-intro--skip .hud-info,
+.pl.mo-intro--skip .hud-speed__core { animation: none; }
+.pl.mo-intro--skip .mo-title { animation: mo-fade 220ms ease reverse both; }
+/* Versión tranquila (reduce motion): fundidos, sin desplazamientos */
+.pl.mo-intro--calm .mo-title,
+.pl.mo-intro--calm .mo-title * { animation: none; }
+.pl.mo-intro--calm .mo-title { animation: mo-calm-life 3400ms linear both; }
+@keyframes mo-calm-life { 0% { opacity: 0; } 12%, 62% { opacity: 1; } 76%, 100% { opacity: 0; } }
+.pl.mo-intro--calm .hud-lt,
+.pl.mo-intro--calm .hud-strip { animation: mo-fade 400ms ease backwards; }
+.pl.mo-intro--calm .hud-top,
+.pl.mo-intro--calm .hud-info { animation: mo-fade 500ms ease 2100ms backwards; }
+.pl.mo-intro--calm .hud-speed__core { animation: mo-fade 450ms ease 2600ms backwards; }
+
+/* ───────── Cierre: recuento y perfil que se llena en los colores de zona ───────── */
+.mo-cu { display: inline-block; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; }
+.mo-oprof { position: relative; display: block; height: 22px; margin-top: 3px; }
+.mo-oprof svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.mo-oprof__lit { position: absolute; inset: 0; display: block; }
+.hud-done.mo-outro .mo-oprof__lit { animation: mo-draw 1700ms var(--ease-in-out) 260ms backwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mo-d > .mo-g, .mo-d::before { animation: none !important; }
+  .mo-deck, .mo-deck.is-on, .mo-deck.is-dock {
+    clip-path: none;
+    transform: translateY(calc(-100% - 8px));
+    transition: opacity 220ms ease, visibility 0s linear 220ms;
+  }
+  .mo-deck.is-on { transition: opacity 220ms ease, visibility 0s; }
+  .mo-wipe { display: none; }
+  .hud-lt__head.mo-in, .hud-lt__head.mo-in2, .hud-lt .hud-lt__head.mo-old { animation: none; }
+  .mo-cap { transition: opacity 200ms ease; }
+}

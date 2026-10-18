@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es-ES" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>BestRunning</title>
+    <meta name="description" content="Tu entrenador personal de cinta: clases guiadas con voz, plan semanal y progreso." />
+
+    <!-- PWA en iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="BestRunning" />
+    <meta name="application-name" content="BestRunning" />
+    <meta name="theme-color" content="#08080a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="format-detection" content="telephone=no, date=no, email=no, address=no" />
+
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./assets/icons/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/icons/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./assets/icons/icon-180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="./assets/icons/icon-167.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="./assets/icons/icon-152.png" />
+
+    <!-- Pantallas de arranque (iPhone, vertical) -->
+    <link
+      rel="apple-touch-startup-image"
+      media="screen and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+      href="./assets/splash/splash-1320x2868.png"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      media="screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+      href="./assets/splash/splash-1290x2796.png"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      media="screen and (device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+      href="./assets/splash/splash-1206x2622.png"
+    />
+    <link
+      rel="apple-touch-startup-image"
+      media="screen and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+      href="./assets/splash/splash-1179x2556.png"
+    />
+
+    <!-- Primer pintado oscuro, sin destello blanco -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #08080a;
+        color: #f5f5f7;
+        color-scheme: dark;
+      }
+      /* Réplica de la pantalla de arranque para que el paso splash → app sea continuo */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        background:
+          radial-gradient(circle 45vw at 50% 43%, rgba(255, 45, 85, 0.16), transparent 75%),
+          radial-gradient(circle 95vw at 50% 43%, rgba(255, 90, 31, 0.28), rgba(255, 90, 31, 0.08) 40%, transparent 75%),
+          #08080a;
+        transition: opacity 0.4s ease;
+      }
+      #boot img {
+        position: absolute;
+        left: 50%;
+        top: 43%;
+        width: 23.5vw;
+        height: 23.5vw;
+        transform: translate(-50%, -50%);
+        border-radius: 22.37%;
+        box-shadow: 0 3vw 9vw rgba(48, 6, 14, 0.85);
+      }
+      #boot p {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(43% + 17.6vw);
+        margin: 0;
+        text-align: center;
+        font: 800 8.2vw/1.1 ui-rounded, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        letter-spacing: -0.02em;
+        color: #f5f5f7;
+      }
+      #boot p span {
+        background: linear-gradient(135deg, #ff9500, #ff5a1f 48%, #ff2d55);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      #boot small {
+        display: block;
+        margin-top: 2.6vw;
+        font: 600 3.4vw/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        letter-spacing: 0;
+        color: #9696a0;
+      }
+      @media (orientation: landscape) {
+        #boot img { width: 12vw; height: 12vw; }
+        #boot p { top: calc(43% + 8vw); font-size: 4vw; }
+        #boot small { font-size: 1.8vw; margin-top: 1.2vw; }
+      }
+      .is-booted #boot {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
+
+    <link rel="stylesheet" href="./css/tokens.css" />
+    <link rel="stylesheet" href="./css/base.css" />
+    <link rel="stylesheet" href="./css/components.css" />
+    <link rel="stylesheet" href="./css/screens-main.css" />
+    <link rel="stylesheet" href="./css/screens-more.css" />
+    <link rel="stylesheet" href="./css/player.css" />
+    <link rel="stylesheet" href="./css/motion.css" />
+    <link rel="stylesheet" href="./css/music.css" />
+
+    <link rel="modulepreload" href="./js/app.js" />
+    <script type="module" src="./js/app.js"></script>
+  </head>
+  <body>
+    <div id="app">
+      <main id="view"></main>
+      <nav id="tabbar" class="tabbar" aria-label="Secciones"></nav>
+    </div>
+    <div id="sheet-root"></div>
+    <div id="toast-root" aria-live="polite"></div>
+
+    <div id="boot" aria-hidden="true">
+      <img src="./assets/icons/icon-512.png" alt="" width="104" height="104" />
+      <p>Best<span>Running</span><small>Tu entrenador personal de cinta</small></p>
+    </div>
+
+    <noscript>
+      <p style="padding: 24px; font-family: -apple-system, system-ui, sans-serif; text-align: center">
+        BestRunning necesita JavaScript activado para funcionar.
+      </p>
+    </noscript>
+  </body>
+</html>

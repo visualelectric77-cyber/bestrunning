@@ -1,0 +1,310 @@
+// BestRunning · estado global persistente (localStorage) con suscripción.
+import { deepClone } from './utils.js';
+
+const STATE_KEY = 'br.state.v1';
+const ACTIVE_KEY = 'br.active.v1';
+const ACTIVE_TS_KEY = 'br.active.v1.ts';
+
+/** Versión del esquema persistido (2 = fase 2: música DJ, voz grabada y pulso del Watch). */
+export const STATE_VERSION = 2;
+const DEFAULT_PACK = 'eva';
+const DEFAULT_HR_SHORTCUT = 'BestRunning FC';
+const VISUAL_QUALITIES = ['auto', 'high', 'eco', 'off'];
+// Escenarios 3D que se ofrecen en Ajustes (§15.2; el 'legacy' oculto nunca se guarda). Aurora por defecto.
+const VISUAL_THEMES = ['aurora', 'cordillera', 'estadio', 'blank'];
+const DEFAULT_VISUAL_THEME = 'aurora';
+
+const hasLS = (() => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage !== null;
+  } catch {
+    return false;
+  }
+})();
+
+export function defaultState() {
+  return {
+    version: STATE_VERSION,
+    onboarded: false,
+    createdAt: null,
+    profile: { name: '', age: 46, weightKg: 78, sex: 'm', hrMax: 176, hrRest: null },
+    levels: { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13.0 },
+    levelHistory: [],
+    progression: {
+      lastBump: {},
+      okStreak: {},
+      hardStreak: 0,
+      loadAdjust: 0,
+      lastTest: null,
+      bestVam: null,
+    },
+    schedule: { weekdayMinutes: 20, thursdayMinutes: 50, weekendDay: 6, weekendMinutes: 50, reminderTime: '07:00' },
+    plan: { startDate: null, overrides: {} },
+    treadmill: { hasIncline: false, maxIncline: 12, minSpeed: 1.0, maxSpeed: 18.0, announceLead: 10 },
+    audio: {
+      voiceEnabled: true, voiceURI: null, rate: 1.0, pitch: 1.0, volume: 1.0, beeps: true,
+      chattiness: 'normal', duckMusic: true, packId: DEFAULT_PACK,
+    },
+    // healthShortcut: Atajo «Guardar en Salud» (fase 1, opcional) · hrShortcut: Atajo de pulso del Watch (§12)
+    integrations: { watchReminder: true, healthShortcut: '', hrShortcut: DEFAULT_HR_SHORTCUT },
+    music: {
+      enabled: true, mode: 'app', volume: 0.8, effects: true, energy: 'normal',
+      useBuiltIn: true, useImported: true, disabled: [],
+    },
+    // Escena 3D del reproductor (§14–§15): calidad 'auto'|'high'|'eco'|'off', escenario (§15.2), modo TV por
+    // defecto, balanceo de cámara a tu zancada y fantasma de tu mejor marca (§14.1)
+    visuals: { quality: 'auto', theme: DEFAULT_VISUAL_THEME, tvMode: false, strideBob: true, ghost: true, captions: true },
+    history: [],
+    achievements: {},
+    ui: { libraryDuration: 20, libraryCategory: 'all', progressMetric: 'km' },
+  };
+}
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Fusión profunda: parte de `base` (por defecto) y aplica lo guardado. Arrays y primitivos guardados sustituyen. */
+function mergeDeep(base, saved) {
+  if (!isPlainObject(saved)) return base;
+  const out = { ...base };
+  for (const k of Object.keys(saved)) {
+    const sv = saved[k];
+    const bv = base[k];
+    if (isPlainObject(bv) && isPlainObject(sv)) out[k] = mergeDeep(bv, sv);
+    else if (isPlainObject(bv) && !isPlainObject(sv)) out[k] = bv; // tipo corrupto: conserva el valor por defecto
+    else if (Array.isArray(bv) && !Array.isArray(sv)) out[k] = bv;
+    else if (sv !== undefined) out[k] = sv;
+  }
+  return out;
+}
+
+function readJSON(key) {
+  if (!hasLS) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Campos de Session añadidos en la fase 2 (§12, §13): se rellenan en sesiones antiguas. */
+export function normalizeSession(session) {
+  if (!isPlainObject(session)) return session;
+  const out = { ...session };
+  for (const k of ['hrAvg', 'hrMax', 'hrMin', 'hrSeries', 'hrZones']) if (out[k] === undefined) out[k] = null;
+  if (out.music === undefined) out.music = null;
+  else if (isPlainObject(out.music) && !Array.isArray(out.music.tracks)) out.music = { ...out.music, tracks: [] };
+  return out;
+}
+
+const clamp01 = (v, d) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : d);
+
+/**
+ * Migra un estado ya fusionado con los valores por defecto. `savedVersion` es la versión con la que se guardó.
+ * v1 → v2: el pack de voz grabado («eva») pasa a ser el predeterminado (en la v1 nadie pudo elegir otro: no existían).
+ */
+export function migrateState(st, savedVersion = STATE_VERSION) {
+  if (!isPlainObject(st)) return defaultState();
+  const v = Number(savedVersion) || 1;
+  if (v < 2) {
+    if (isPlainObject(st.audio) && (st.audio.packId == null || st.audio.packId === '')) st.audio.packId = DEFAULT_PACK;
+  }
+  if (isPlainObject(st.integrations)) {
+    const ig = st.integrations;
+    if (!String(ig.hrShortcut || '').trim()) ig.hrShortcut = DEFAULT_HR_SHORTCUT;
+    // El Atajo de pulso nunca debe recibir los datos de «Guardar en Salud»
+    if (String(ig.healthShortcut || '').trim() === String(ig.hrShortcut).trim()) ig.healthShortcut = '';
+  }
+  // Saneado de música (tipos corruptos o valores fuera de rango)
+  const def = defaultState().music;
+  const m = isPlainObject(st.music) ? st.music : { ...def };
+  m.mode = m.mode === 'own' ? 'own' : 'app';
+  m.energy = m.energy === 'max' ? 'max' : 'normal';
+  m.volume = clamp01(m.volume, def.volume);
+  for (const k of ['enabled', 'effects', 'useBuiltIn', 'useImported']) m[k] = typeof m[k] === 'boolean' ? m[k] : def[k];
+  m.disabled = Array.isArray(m.disabled) ? [...new Set(m.disabled.filter((x) => typeof x === 'string' && x))] : [];
+  st.music = m;
+  // Saneado de la escena 3D (usuarios anteriores la reciben con los valores por defecto)
+  const dv = defaultState().visuals;
+  const vz = isPlainObject(st.visuals) ? st.visuals : { ...dv };
+  vz.quality = VISUAL_QUALITIES.includes(vz.quality) ? vz.quality : dv.quality;
+  vz.theme = VISUAL_THEMES.includes(vz.theme) ? vz.theme : dv.theme;
+  for (const k of ['tvMode', 'strideBob', 'ghost', 'captions']) vz[k] = typeof vz[k] === 'boolean' ? vz[k] : dv[k];
+  st.visuals = vz;
+  if (Array.isArray(st.history)) st.history = st.history.map(normalizeSession);
+  st.version = STATE_VERSION;
+  return st;
+}
+
+function hydrate(saved) {
+  if (!isPlainObject(saved)) return defaultState();
+  return migrateState(mergeDeep(defaultState(), saved), saved.version);
+}
+
+function loadInitial() {
+  return hydrate(readJSON(STATE_KEY));
+}
+
+let state = loadInitial();
+const listeners = new Set();
+
+function emitStorageError(error) {
+  try {
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('br:storage-error', { detail: { error } }));
+    }
+  } catch {
+    /* sin DOM */
+  }
+}
+
+let persistOk = true;
+
+/** Guarda el estado. Devuelve false (y emite 'br:storage-error') si el almacenamiento falló (p. ej. lleno). */
+function persist() {
+  if (!hasLS) return (persistOk = true);
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+    persistOk = true;
+  } catch (error) {
+    persistOk = false;
+    emitStorageError(error);
+  }
+  return persistOk;
+}
+
+/** ¿Se guardó en disco el último setState()? (false ⇒ el cambio solo vive en memoria hasta el próximo guardado bueno). */
+export function lastPersistOk() {
+  return persistOk;
+}
+
+function notify() {
+  for (const fn of [...listeners]) {
+    try {
+      fn(state);
+    } catch (err) {
+      // Un listener roto no debe romper al resto; se reporta al manejador global.
+      if (typeof reportError === 'function') reportError(err);
+      else setTimeout(() => { throw err; });
+    }
+  }
+}
+
+export function getState() {
+  return state;
+}
+
+export function setState(mutator) {
+  const draft = deepClone(state);
+  if (typeof mutator === 'function') mutator(draft);
+  state = draft;
+  persist();
+  notify();
+  return state;
+}
+
+export function subscribe(listener) {
+  if (typeof listener !== 'function') return () => {};
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function resetState() {
+  if (hasLS) {
+    try {
+      localStorage.removeItem(STATE_KEY);
+      localStorage.removeItem(ACTIVE_KEY);
+      localStorage.removeItem(ACTIVE_TS_KEY);
+    } catch {
+      /* nada */
+    }
+  }
+  state = defaultState();
+  persist();
+  notify();
+  return state;
+}
+
+export function exportState() {
+  const payload = { app: 'BestRunning', exportedAt: new Date().toISOString(), ...state };
+  return JSON.stringify(payload, null, 2);
+}
+
+export function importState(json) {
+  try {
+    const data = typeof json === 'string' ? JSON.parse(json) : json;
+    if (!isPlainObject(data)) return false;
+    if (typeof data.version !== 'number') return false;
+    if (!isPlainObject(data.profile) && !isPlainObject(data.levels)) return false;
+    if (data.history != null && !Array.isArray(data.history)) return false;
+    if (isPlainObject(data.levels)) {
+      for (const k of ['jog', 'run', 'fast', 'sprint']) {
+        if (data.levels[k] != null && !(typeof data.levels[k] === 'number' && data.levels[k] > 0 && data.levels[k] < 40)) return false;
+      }
+    }
+    const { app, exportedAt, ...rest } = data; // metadatos de la copia
+    state = hydrate(rest);
+    persist();
+    notify();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveActiveSession(snap) {
+  if (!hasLS) return;
+  try {
+    if (snap == null) {
+      localStorage.removeItem(ACTIVE_KEY);
+      localStorage.removeItem(ACTIVE_TS_KEY);
+    } else {
+      localStorage.setItem(ACTIVE_KEY, JSON.stringify(snap));
+      localStorage.setItem(ACTIVE_TS_KEY, String(Date.now()));
+    }
+  } catch (error) {
+    emitStorageError(error);
+  }
+}
+
+export function loadActiveSession() {
+  return readJSON(ACTIVE_KEY);
+}
+
+/** Extra (no contractual): ms epoch del último guardado de la sesión activa, o null. */
+export function activeSessionSavedAt() {
+  if (!hasLS) return null;
+  try {
+    const ts = Number(localStorage.getItem(ACTIVE_TS_KEY));
+    if (ts > 0) return ts;
+  } catch {
+    /* nada */
+  }
+  const snap = loadActiveSession();
+  const t = snap && (snap.savedAt ?? snap.updatedAt ?? snap.startedAt);
+  const n = typeof t === 'string' ? Date.parse(t) : Number(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/* ───── Efectos de arranque (solo en navegador) ───── */
+
+if (typeof window !== 'undefined') {
+  // Almacenamiento persistente (iOS puede purgar datos de webs poco usadas).
+  try {
+    const st = typeof navigator !== 'undefined' ? navigator.storage : null;
+    if (st?.persisted && st?.persist) {
+      st.persisted().then((ok) => (ok ? null : st.persist())).catch(() => {});
+    } else {
+      st?.persist?.()?.catch?.(() => {});
+    }
+  } catch {
+    /* nada */
+  }
+
+  // Sincroniza si otra pestaña cambia el estado.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STATE_KEY) return;
+    state = hydrate(readJSON(STATE_KEY));
+    notify();
+  });
+}

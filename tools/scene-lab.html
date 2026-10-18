@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Escena 3D · Laboratorio</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #050608; color: var(--text, #fff); font-family: var(--font, -apple-system, system-ui, sans-serif); -webkit-font-smoothing: antialiased; }
+  body { display: flex; overflow: hidden; }
+  button, select, input { font: inherit; color: inherit; }
+  #panel { width: 330px; flex: none; height: 100%; overflow-y: auto; background: #0b0d12; border-right: 1px solid rgba(255,255,255,.08);
+    padding: 16px 14px 40px; display: flex; flex-direction: column; gap: 12px; z-index: 20; }
+  #panel h1 { margin: 0; font: 700 17px/1.2 var(--font-display, inherit); letter-spacing: .02em; }
+  .sub { color: rgba(235,235,245,.45); font-size: 12px; margin-top: 3px; }
+  .sec { background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07); border-radius: 12px; padding: 11px; display: flex; flex-direction: column; gap: 9px; }
+  .sec > h2 { margin: 0; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: rgba(235,235,245,.45); }
+  .row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  .row > label { font-size: 12.5px; color: rgba(235,235,245,.7); min-width: 62px; }
+  select, input[type=number], input[type=text] { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 6px 8px; font-size: 12.5px; }
+  select { flex: 1; min-width: 0; }
+  input[type=number] { width: 66px; }
+  input[type=text] { flex: 1; min-width: 0; }
+  input[type=range] { flex: 1; min-width: 0; accent-color: #ff9f0a; }
+  .btn { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); border-radius: 9px; padding: 6px 9px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: rgba(255,255,255,.1); }
+  .btn.on { background: rgba(255,159,10,.18); border-color: rgba(255,159,10,.7); }
+  .btn.primary { background: #ff9f0a; border-color: #ff9f0a; color: #000; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .seg { display: flex; background: rgba(255,255,255,.05); border-radius: 9px; padding: 2px; border: 1px solid rgba(255,255,255,.1); flex: 1; }
+  .seg button { flex: 1; background: none; border: none; padding: 5px 3px; border-radius: 7px; font-size: 11.5px; font-weight: 600; cursor: pointer; color: rgba(235,235,245,.6); }
+  .seg button.on { background: rgba(255,255,255,.12); color: #fff; }
+  #timeLbl { font: 600 12px ui-monospace, Menlo, monospace; color: rgba(235,235,245,.7); min-width: 88px; text-align: right; }
+  #profile { width: 100%; height: 40px; display: block; border-radius: 7px; background: rgba(255,255,255,.04); cursor: pointer; }
+  #info, #log, #snapOut { font: 11px/1.5 ui-monospace, Menlo, monospace; color: rgba(235,235,245,.6); white-space: pre-wrap; }
+  #log { max-height: 110px; overflow: auto; color: rgba(235,235,245,.4); }
+  #main { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #020203; }
+  #device { position: relative; overflow: hidden; background: #000; flex: none; transform-origin: center center; border-radius: 40px;
+    box-shadow: 0 0 0 9px #16171b, 0 0 0 10px #2c2d33, 0 40px 80px -20px rgba(0,0,0,.8); }
+  #device canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #hudCanvas { pointer-events: none; z-index: 5; }
+  #rectsLayer { position: absolute; inset: 0; pointer-events: none; z-index: 6; display: none; }
+  body.showrects #rectsLayer { display: block; }
+  #rectsLayer i { position: absolute; border: 1px dashed rgba(255,214,10,.8); border-radius: 10px; }
+  #rectsLayer b { position: absolute; border: 1px dashed rgba(48,209,88,.85); border-radius: 8px; }
+  #fallback { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: rgba(235,235,245,.5); text-align: center; padding: 20px; z-index: 7; }
+  #badge { position: absolute; bottom: 10px; right: 10px; z-index: 30; font: 700 11.5px ui-monospace, Menlo, monospace; padding: 5px 9px; border-radius: 999px;
+    background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.12); pointer-events: none; }
+  #togglePanel { position: absolute; top: 10px; right: 10px; z-index: 30; width: 36px; height: 36px; border-radius: 11px; border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.6); cursor: pointer; }
+  body.nopanel #panel { display: none; }
+  body.nopanel.clean #badge, body.nopanel.clean #togglePanel { display: none; }
+  @media (max-width: 760px) { #panel { position: absolute; inset: 0 auto 0 0; width: min(330px, 92vw); box-shadow: 20px 0 50px rgba(0,0,0,.6); } }
+</style>
+</head>
+<body>
+<aside id="panel">
+  <div>
+    <h1>Escena 3D · Laboratorio</h1>
+    <div class="sub">Núcleo + escenarios · motor real con reloj simulado · capturas deterministas</div>
+  </div>
+
+  <div class="sec">
+    <h2>Escenario</h2>
+    <div class="row"><select id="theme"></select></div>
+    <div class="row" id="themeDesc" style="font-size:12px;color:rgba(235,235,245,.5)"></div>
+  </div>
+
+  <div class="sec">
+    <h2>Clase</h2>
+    <div class="row"><label>Plantilla</label><select id="tpl"></select></div>
+    <div class="row"><label>Duración</label><select id="dur"></select><label style="min-width:auto">Semilla</label><input id="seed" type="number" value="1" min="1"></div>
+    <canvas id="profile" width="600" height="80" title="Clic para saltar"></canvas>
+  </div>
+
+  <div class="sec">
+    <h2>Reproducción</h2>
+    <div class="row">
+      <button class="btn primary" id="play">▶ Empezar</button>
+      <div class="seg" id="rates"><button data-r="1" class="on">1×</button><button data-r="5">5×</button><button data-r="20">20×</button></div>
+    </div>
+    <div class="row"><input id="scrub" type="range" min="0" max="1200" step="1" value="0"><span id="timeLbl">0:00 / 0:00</span></div>
+    <div class="grid3">
+      <button class="btn" data-jump="gate">Cambio −5 s</button>
+      <button class="btn" data-jump="sprint">Sprint −4 s</button>
+      <button class="btn" data-jump="km">KM −6 s</button>
+      <button class="btn" data-jump="half">Mitad −6 s</button>
+      <button class="btn" data-jump="end">Final −6 s</button>
+      <button class="btn" data-jump="stairs">Escalera</button>
+    </div>
+    <div class="grid3">
+      <button class="btn" id="prev">⏮ Atrás</button>
+      <button class="btn" id="pause">⏯ Pausa</button>
+      <button class="btn" id="next">⏭ Saltar</button>
+      <button class="btn" id="minus">− 0,1</button>
+      <button class="btn" id="plus">+ 0,1</button>
+      <button class="btn" id="finish">Terminar</button>
+    </div>
+    <div class="row"><button class="btn" id="endTest">No puedo más</button></div>
+  </div>
+
+  <div class="sec">
+    <h2>Eventos y música</h2>
+    <div class="grid3">
+      <button class="btn" id="evCount">3-2-1</button>
+      <button class="btn" id="evDrop">Drop</button>
+      <button class="btn" id="evKm">KM</button>
+    </div>
+    <div class="row"><button class="btn" id="beatOn">♫ Beat</button><input id="bpm" type="range" min="70" max="190" value="128"><span id="bpmLbl" style="font:600 11.5px ui-monospace,Menlo,monospace;min-width:54px">128 BPM</span></div>
+    <div class="grid3">
+      <button class="btn" id="audioBtn">♫ Espectro</button>
+      <button class="btn" id="ghostAhead">Fantasma +</button>
+      <button class="btn" id="ghostBehind">Fantasma −</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Vista</h2>
+    <div class="row"><label>Marco</label><div class="seg" id="frames"><button data-f="portrait">Vertical</button><button data-f="landscape">Horizontal</button></div></div>
+    <div class="row"><label>Calidad</label><div class="seg" id="quality"><button data-q="auto">Auto</button><button data-q="high">Alta</button><button data-q="med">Media</button><button data-q="low">Baja</button><button data-q="eco">Eco</button></div></div>
+    <div class="grid3">
+      <button class="btn on" id="hudBtn">HUD</button>
+      <button class="btn" id="tvBtn">Modo TV</button>
+      <button class="btn" id="rmBtn">Sin mov.</button>
+      <button class="btn on" id="strideBtn">Zancada</button>
+      <button class="btn" id="rectsBtn">Rects</button>
+      <button class="btn" id="reloadBtn">Recrear</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Captura determinista</h2>
+    <div class="row"><input id="snapName" type="text" value="prueba"><button class="btn primary" id="snapBtn">Capturar</button></div>
+    <div class="row"><button class="btn" id="suiteBtn">Serie completa (V+H)</button></div>
+    <div id="snapOut">→ docs/capturas/3d/&lt;nombre&gt;.jpg (servidor tools/snap-server.mjs)</div>
+  </div>
+
+  <div class="sec"><h2>Estado</h2><div id="info">—</div></div>
+  <div class="sec"><h2>Registro</h2><div id="log"></div></div>
+</aside>
+
+<main id="main">
+  <div id="device">
+    <canvas id="c"></canvas>
+    <canvas id="hudCanvas"></canvas>
+    <div id="rectsLayer"></div>
+    <div id="fallback">WebGL no disponible: el reproductor usaría su fondo 2D.</div>
+  </div>
+  <div id="badge">—</div>
+  <button id="togglePanel" title="Panel">☰</button>
+</main>
+
+<script type="module">
+// Laboratorio del núcleo 3D (SPEC §14–§16). URL: ?theme=&template=&minutes=&seed=&t=&w=&h=&hud=0|1&quality=&frame=
+// portrait|landscape &rate=&play=1&tv=1&rm=1&ghost=+|-&beat=1&bpm=&panel=0&clean=1
+// API (consola / automatización): window.lab = { snap(name, opts), suite(prefix, opts), seek(t), play(r), pause(),
+//   setTheme(id), event(type, data), scene(), engine(), state(), hudData() }.
+//   await lab.snap('blank-sprint', { t: 420, w: 440, h: 956, hud: true, template: 'pyramid', minutes: 20, quality: 'high' })
+//   → render determinista a tiempo virtual t (desde t − 3 s, 180 fotogramas de 1/60 s), independiente de la pestaña
+//     (funciona en segundo plano), HUD de tools/hud-mock.js (drawHud) encima si existe, y POST /__snap/<nombre>.jpg.
+//   await lab.record('hypertrack-aurora', { segments: [{ t0: 20, t1: 23 }, { t0: 230, t1: 236 }, { finale: 3 }],
+//                                          fps: 30, w: 440, h: 956, hud: true, theme: 'aurora' })
+//   → vídeo: fotogramas continuos a dt fijo (1/fps, sin re-seek por fotograma; 2 s de pre-rodaje sin grabar en cada
+//     corte), eventos como el reproductor (segment, countdown 3-2-1, km, halfway, finish) y bugs del HUD (KM, MITAD);
+//     cada fotograma → POST /__snap/rec/<nombre>/00001.jpg. Devuelve { frames, clips: [{ start, count, sec }] } para
+//     montarlo con ffmpeg (xfade entre clips). lab.plan(opts) da los tiempos útiles (tramos, sprints, km).
+import { createScene3D, isWebGLAvailable, THEMES, DEFAULT_THEME } from '../js/player/scene3d.js';
+import { buildWorkout } from '../js/training/generator.js';
+import { TEMPLATES } from '../js/training/templates.js';
+import { createEngine, restoreEngine } from '../js/player/engine.js';
+import { ZONES, fmtPaceKmh, hrTargetForZone } from '../js/training/levels.js';
+import { fmt } from '../js/core/utils.js';
+
+const FAKE = {
+  levels: { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13.0 },
+  treadmill: { minSpeed: 1, maxSpeed: 18, hasIncline: false, maxIncline: 12 },
+  profile: { weightKg: 78, age: 46, hrMax: 176, hrRest: null },
+  music: { title: 'Midnight Run', artist: 'Laboratorio', bpm: 128 },
+};
+const $ = (id) => document.getElementById(id);
+const P = new URLSearchParams(location.search);
+const num = (v, d) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : d);
+
+let themeId = P.get('theme') || DEFAULT_THEME;
+let frameMode = P.get('frame') === 'landscape' ? 'landscape' : 'portrait';
+let devW = num(P.get('w'), frameMode === 'landscape' ? 956 : 440);
+let devH = num(P.get('h'), frameMode === 'landscape' ? 440 : 956);
+if (P.get('w') && P.get('h')) frameMode = devW > devH ? 'landscape' : 'portrait';
+let quality = P.get('quality') || P.get('q') || 'auto';
+let tv = P.get('tv') === '1';
+let reduced = P.get('rm') === '1';
+let beatOn = P.get('beat') === '1';
+let bpm = num(P.get('bpm'), 128);
+let hudOn = P.get('hud') !== '0';
+let ghostMode = P.get('ghost') || '';
+let strideOn = P.get('stride') !== '0';
+let rate = num(P.get('rate'), 1);
+
+let workout = null;
+let starts = [];
+let engine = null;
+let scene = null;
+let canvas = $('c');
+let simMs = 0;
+let playing = false;
+let audio = null;
+let audioOn = false;
+let hudMod = null;          // tools/hud-mock.js (opcional)
+let countdownTimer = null;
+
+/* ───────── HUD de retransmisión (tools/hud-mock.js, del diseñador del HUD) ───────── */
+let hudCheckedAt = -1e9;
+async function loadHud(force = false) {
+  if (!force && performance.now() - hudCheckedAt < 15000) return;
+  hudCheckedAt = performance.now();
+  let exists = true;
+  try { const r = await fetch('/__exists/tools/hud-mock.js', { cache: 'no-store' }); if (r.ok) exists = !!(await r.json()).exists; } catch { /* otro servidor: se intenta importar */ }
+  try { hudMod = exists ? await import(`./hud-mock.js?v=${Date.now()}`) : null; } catch { hudMod = null; }
+  if (hudMod && typeof hudMod.drawHud !== 'function') hudMod = null;
+  log(hudMod ? 'HUD: tools/hud-mock.js cargado' : 'HUD: sin tools/hud-mock.js (capturas sin HUD)');
+}
+
+/* ───────── Clase ───────── */
+const tplSel = $('tpl');
+const durSel = $('dur');
+for (const t of TEMPLATES) {
+  if (t.requiresIncline) continue;
+  const o = document.createElement('option');
+  o.value = t.id;
+  o.textContent = `${t.title} · ${t.category}`;
+  tplSel.append(o);
+}
+function fillDurations(pref) {
+  const t = TEMPLATES.find((x) => x.id === tplSel.value);
+  durSel.innerHTML = '';
+  for (const d of t.durations) { const o = document.createElement('option'); o.value = d; o.textContent = `${d} min`; durSel.append(o); }
+  if (pref && t.durations.includes(Number(pref))) durSel.value = String(pref);
+}
+const tplP = P.get('template') || P.get('tpl');
+tplSel.value = tplP && TEMPLATES.some((x) => x.id === tplP) ? tplP : 'pyramid';
+fillDurations(P.get('minutes') || P.get('m') || 20);
+$('seed').value = P.get('seed') || 1;
+
+function makeWorkout(templateId, minutes, seed) {
+  return buildWorkout(templateId, {
+    minutes: Number(minutes), levels: FAKE.levels, seed: Number(seed) || 1, loadFactor: 1, hasIncline: false,
+    treadmill: FAKE.treadmill, weightKg: FAKE.profile.weightKg,
+  });
+}
+const startsOf = (wk) => { const out = []; let a = 0; for (const s of wk.segments) { out.push(a); a += s.sec; } return out; };
+const segIdxAt = (st, t) => { let i = 0; while (i + 1 < st.length && st[i + 1] <= t) i++; return i; };
+function planKm(wk, st, t) {
+  let d = 0;
+  for (let i = 0; i < wk.segments.length; i++) {
+    const s = wk.segments[i];
+    if (t <= st[i]) break;
+    d += (s.speed * Math.min(s.sec, t - st[i])) / 3600;
+  }
+  return d;
+}
+
+/** Estado tipo engine.getState() en el segundo t (según el plan). */
+function planState(wk, st, t, status = 'running') {
+  const total = wk.totalSec;
+  const tt = Math.max(0, Math.min(total, t));
+  const i = segIdxAt(st, tt);
+  const seg = wk.segments[i];
+  const next = wk.segments[i + 1] || null;
+  const segElapsed = tt - st[i];
+  const km = planKm(wk, st, tt);
+  return {
+    status, segIndex: i, segment: { ...seg }, nextSegment: next ? { ...next } : null, segElapsed,
+    segRemaining: Math.max(0, seg.sec - segElapsed), totalElapsed: tt, totalRemaining: Math.max(0, total - tt), distanceKm: km,
+    kcal: km * FAKE.profile.weightKg * 0.95, currentSpeed: status === 'finished' ? 0 : seg.speed, progress: total ? tt / total : 0,
+    totalSec: total, segCount: wk.segments.length, segStart: st[i], isTest: !!wk.isTest,
+  };
+}
+
+/**
+ * Datos para drawHud(ctx, w, h, data, orientation) de tools/hud-mock.js (contrato del mock: speed, zone, zoneLabel,
+ * pace, segRemaining, segProgress, nextLabel, nextZone, elapsed, remaining, title, segText, distanceKm, kcal, hrText,
+ * nowPlaying, profile, cursor, paused, ghost '+35 m', record, glow) + el estado del motor por si el mock lo necesita.
+ */
+function hudDataFor(wk, st, s, extra = {}) {
+  const seg = s.segment || wk.segments[0];
+  const z = ZONES[seg.zone] || ZONES.jog;
+  const nx = s.nextSegment;
+  const nz = nx ? ZONES[nx.zone] || ZONES.jog : null;
+  const hr = hrTargetForZone(seg.zone, FAKE.profile);
+  const speed = s.currentSpeed || seg.speed;
+  const g = extra.ghost;
+  const ghostTxt = g && Number.isFinite(g.deltaM) ? `${g.deltaM >= 0 ? '+' : '−'}${Math.abs(Math.round(g.deltaM))} m` : null;
+  return {
+    speed, zone: seg.zone, pace: speed, segRemaining: s.segRemaining, segProgress: seg.sec ? s.segElapsed / seg.sec : 0,
+    nextLabel: nx ? `${nz.short} ${fmt.speed(nx.speed)} · ${fmt.clock(nx.sec)}` : '', nextZone: nx ? nx.zone : null,
+    elapsed: s.totalElapsed, remaining: s.totalRemaining, title: wk.title, segText: `${s.segIndex + 1}/${wk.segments.length}`,
+    distanceKm: s.distanceKm, kcal: s.kcal, hrText: `Z${z.hrZone} · ${hr.min}–${hr.max}`,
+    nowPlaying: `${FAKE.music.title} · ${bpm} BPM`, profile: wk.segments.map((x) => ({ zone: x.zone, sec: x.sec, speed: x.speed })),
+    cursor: Math.max(1.0001, s.totalElapsed), paused: s.status === 'paused', ghost: ghostTxt, record: !!(g && g.deltaM > 3),
+    glow: 0, tvMode: !!extra.tv, controls: !!extra.controls,
+    // motion graphics del reproductor (js/player/motion.js): tira «Siguiente» y 10 marcas en los últimos 10 s
+    ...(() => {
+      const left = Math.ceil((Number(s.segRemaining) || 0) - 1e-6);
+      if (!nx || s.status !== 'running' || left > 10 || left < 1) return {};
+      const into = 10 - (Number(s.segRemaining) || 0);
+      return {
+        ticks: left,
+        deck: { zone: nx.zone, name: nz.short || nz.name, speed: fmt.speed(nx.speed), dur: fmt.clock(nx.sec), timer: Math.min(1, (Number(s.segRemaining) || 0) / 10), reveal: Math.min(1, Math.max(0, into / 0.52)) },
+      };
+    })(),
+    state: s, status: s.status, segIndex: s.segIndex, segCount: wk.segments.length, workout: wk, starts: st,
+  };
+}
+
+/* ───────── Motor real con reloj simulado (vista en vivo) ───────── */
+const simNow = () => simMs;
+function callbacks() { return { now: simNow, autoTick: false, treadmill: FAKE.treadmill, weightKg: FAKE.profile.weightKg, onEvent: onEngineEvent }; }
+function onEngineEvent(type, data = {}) {
+  log(`${type}${data.index != null ? ' #' + data.index : ''}${data.km ? ' km ' + data.km : ''}${data.reason ? ' · ' + data.reason : ''}`);
+  if (!scene) return;
+  switch (type) {
+    case 'segment':
+      scene.event('segment', { index: data.index, reason: data.reason });
+      if (data.segment?.stage > 0 && workout.isTest) scene.event('testStage', { stage: data.segment.stage });
+      break;
+    case 'km': if (!data.silent) scene.event('km', { km: data.km }); break;
+    case 'halfway': scene.event('halfway'); break;
+    case 'finish': scene.event('finish', { durationMs: 4800 }); playing = false; break;
+    case 'pause': scene.event('pause'); break;
+    case 'resume': scene.event('resume'); break;
+    case 'testEnd': scene.event('testEnd', data); break;
+    case 'adjust': scene.event('adjust', { speed: data.speed, delta: data.delta }); break;
+    default: break;
+  }
+}
+function newEngine() { engine?.destroy(); engine = createEngine(workout, callbacks()); playing = false; }
+
+function seek(t) {
+  if (!workout) return;
+  t = Math.max(0, Math.min(workout.totalSec - 0.5, t));
+  const idx = segIdxAt(starts, t);
+  const dist = planKm(workout, starts, t);
+  const wasPlaying = playing;
+  const speeds = engine?.getSegments ? engine.getSegments().map((s) => s.speed) : workout.segments.map((s) => s.speed);
+  const snap = {
+    v: 1, status: 'paused', segIndex: idx, segElapsed: t - starts[idx], activeSec: t, distanceKm: dist, kcal: dist * 70,
+    kmNotified: Math.floor(dist + 1e-9), halfwayDone: t >= workout.totalSec / 2, lastSegDone: idx === starts.length - 1,
+    speeds, speedTrace: [], adjustments: {}, timeInZone: {}, kmSplits: [], maxSpeed: 0, startedAt: new Date().toISOString(),
+  };
+  engine?.destroy();
+  engine = restoreEngine(snap, workout, callbacks());
+  engine.resume();
+  playing = wasPlaying;
+  pushState();
+}
+
+function ghostTrace(wk, st, mode) {
+  if (!mode) return null;
+  const f = mode === '+' ? 1.03 : 0.97; // la misma clase un 3 % más rápida (+, por delante) o más lenta (−)
+  const trace = wk.segments.map((sg, i) => [st[i], Math.round(sg.speed * f * 10) / 10]);
+  trace.push([wk.totalSec, trace[trace.length - 1][1]]);
+  return { trace, label: 'Tu mejor marca' };
+}
+function applyGhost() {
+  for (const [id, m] of [['ghostAhead', '+'], ['ghostBehind', '-']]) $(id).classList.toggle('on', ghostMode === m);
+  scene?.setGhost(ghostTrace(workout, starts, ghostMode));
+}
+
+/* ───────── Escena en vivo ───────── */
+async function makeScene() {
+  if (scene) { try { scene.destroy(); } catch { /* nada */ } scene = null; }
+  const fresh = document.createElement('canvas');
+  fresh.id = 'c';
+  canvas.replaceWith(fresh);
+  canvas = fresh;
+  if (!isWebGLAvailable()) { $('fallback').style.display = 'flex'; return; }
+  try {
+    scene = await createScene3D(canvas, {
+      workout, levels: FAKE.levels, quality, reducedMotion: reduced, tvMode: tv, strideBob: strideOn, treadmill: FAKE.treadmill,
+      theme: themeId,
+      onError: (e) => log('ERROR escena: ' + (e?.message || e)),
+      onFinale: () => log('onFinale'),
+      onMoment: (type, data) => log(`momento ${type} ${JSON.stringify(data)}`),
+    });
+    log(`escena lista · escenario ${scene.getTheme()}`);
+    pushRects();
+    applyGhost();
+    if (audioOn) startAudio(); else scene.setAnalyser(null);
+    pushState();
+  } catch (e) {
+    $('fallback').style.display = 'flex';
+    log('createScene3D falló: ' + e.message);
+  }
+}
+
+async function loadWorkout() {
+  workout = makeWorkout(tplSel.value, durSel.value, $('seed').value);
+  starts = startsOf(workout);
+  $('scrub').max = String(workout.totalSec);
+  drawProfile();
+  newEngine();
+  await makeScene();
+}
+
+function pushState() {
+  if (!scene || !engine) return;
+  const s = engine.getState();
+  scene.setState({
+    status: s.status, totalElapsed: s.totalElapsed, segIndex: s.segIndex, segElapsed: s.segElapsed, segRemaining: s.segRemaining,
+    currentSpeed: s.currentSpeed, distanceKm: s.distanceKm, rate: playing ? rate : 0,
+  });
+}
+
+function hudRectsFor(w, h, data, orientation) {
+  try {
+    if (typeof hudMod?.hudLayout === 'function') { const r = hudMod.hudLayout(w, h, orientation, data); if (Array.isArray(r) && r.length) return r; }
+    const fn = hudMod?.hudRects || hudMod?.getHudRects;
+    if (typeof fn === 'function') { const r = fn(w, h, data, orientation); if (Array.isArray(r) && r.length) return r; }
+  } catch { /* opcional */ }
+  return null;
+}
+function pushRects() {
+  if (!scene || !engine) return;
+  const s = engine.getState();
+  const data = hudDataFor(workout, starts, s, { tv });
+  scene.setHudRects(hudOn ? hudRectsFor(devW, devH, data, devW > devH ? 'landscape' : 'portrait') : null);
+  drawRects();
+}
+function drawRects() {
+  const L = $('rectsLayer');
+  if (!document.body.classList.contains('showrects') || !scene) { L.innerHTML = ''; return; }
+  const lay = scene._debug.layout;
+  let html = '';
+  for (const r of lay.rects) html += `<i style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px" title="${r.kind}"></i>`;
+  const f = lay.free;
+  if (f.w) html += `<b style="left:${f.x}px;top:${f.y}px;width:${f.w}px;height:${f.h}px"></b>`;
+  L.innerHTML = html;
+}
+
+/* ───────── Espectro sintético (como el AnalyserNode del motor DJ), silenciado ───────── */
+function startAudio() {
+  try {
+    if (!audio) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AC();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.6;
+      const master = ctx.createGain();
+      master.gain.value = 0.8;
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      master.connect(analyser); analyser.connect(mute); mute.connect(ctx.destination);
+      const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+      const nd = noiseBuf.getChannelData(0);
+      for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+      audio = { ctx, analyser, master, noiseBuf, t0: ctx.currentTime + 0.1, next: 0, timer: 0 };
+    }
+    audio.ctx.resume?.();
+    const sched = () => {
+      const { ctx, master, noiseBuf } = audio;
+      const spb = 60 / bpm;
+      while (audio.t0 + audio.next * spb < ctx.currentTime + 0.25) {
+        const t = audio.t0 + audio.next * spb;
+        const k = ctx.createOscillator(); const kg = ctx.createGain();
+        k.frequency.setValueAtTime(140, t); k.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+        kg.gain.setValueAtTime(1, t); kg.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+        k.connect(kg); kg.connect(master); k.start(t); k.stop(t + 0.32);
+        const h = ctx.createBufferSource(); h.buffer = noiseBuf; const hf = ctx.createBiquadFilter(); hf.type = 'highpass'; hf.frequency.value = 7000;
+        const hg = ctx.createGain(); hg.gain.setValueAtTime(0.35, t + spb * 0.5); hg.gain.exponentialRampToValueAtTime(0.001, t + spb * 0.5 + 0.06);
+        h.connect(hf); hf.connect(hg); hg.connect(master); h.start(t + spb * 0.5); h.stop(t + spb * 0.5 + 0.08);
+        audio.next++;
+      }
+    };
+    clearInterval(audio.timer);
+    audio.timer = setInterval(sched, 40);
+    sched();
+    scene?.setAnalyser(audio.analyser);
+    audioOn = true;
+  } catch (e) { log('audio: ' + e.message); audioOn = false; }
+  $('audioBtn').classList.toggle('on', audioOn);
+}
+function stopAudio() {
+  if (audio) { clearInterval(audio.timer); audio.ctx.suspend?.(); }
+  audioOn = false;
+  scene?.setAnalyser(null);
+  $('audioBtn').classList.toggle('on', false);
+}
+
+/* ───────── Captura determinista ───────── */
+const RELLUM = new Float32Array(256).map((_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
+function measureRects(ctx, rects, dpr) {
+  const out = [];
+  const W = ctx.canvas.width;
+  const H = ctx.canvas.height;
+  for (const r of rects) {
+    const x0 = Math.max(0, Math.floor(r.x * dpr)); const y0 = Math.max(0, Math.floor(r.y * dpr));
+    const x1 = Math.min(W, Math.ceil((r.x + r.w) * dpr)); const y1 = Math.min(H, Math.ceil((r.y + r.h) * dpr));
+    if (x1 - x0 < 2 || y1 - y0 < 2) continue;
+    const px = ctx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let sum = 0; let max = 0; let n = 0;
+    for (let i = 0; i < px.length; i += 16) {
+      const L = 0.2126 * RELLUM[px[i]] + 0.7152 * RELLUM[px[i + 1]] + 0.0722 * RELLUM[px[i + 2]];
+      sum += L; n++; if (L > max) max = L;
+    }
+    out.push({ kind: r.kind, mean: +(sum / n).toFixed(4), max: +max.toFixed(3) });
+  }
+  return out;
+}
+
+/**
+ * Captura determinista. opts: { t, w=440, h=956, hud=true, template, minutes, seed, quality='high', theme, dpr=2,
+ * ghost: '+'|'-'|null, tv, reduced, beat (bool), bpm, jpeg=0.9, post=true (false: no la sube),
+ * finale: segundos tras 'finish' (captura el plano final; ignora t) }
+ */
+async function snap(name, opts = {}) {
+  const o = {
+    t: 60, w: 440, h: 956, hud: true, template: tplSel.value, minutes: Number(durSel.value), seed: Number($('seed').value) || 1,
+    quality: 'high', theme: themeId, dpr: 2, ghost: null, tv: false, reduced: false, beat: false, bpm, jpeg: 0.9, post: true,
+    ...opts,
+  };
+  const wk = makeWorkout(o.template, o.minutes, o.seed);
+  if (!wk) throw new Error(`plantilla desconocida: ${o.template}`);
+  const st = startsOf(wk);
+  const fin = Number.isFinite(Number(o.finale)) && o.finale != null ? Math.max(0, Number(o.finale)) : null;
+  const T = fin != null ? wk.totalSec - 0.02 : Math.max(0, Math.min(wk.totalSec - 0.25, Number(o.t) || 0));
+  const T0 = Math.max(0, T - 3);
+  const steps = Math.max(1, Math.round((T - T0) * 60));
+  const dpr = Math.max(1, Math.min(2, Number(o.dpr) || 2));
+  const orientation = o.w > o.h ? 'landscape' : 'portrait';
+  if (o.hud && !hudMod) await loadHud();
+  const cv = document.createElement('canvas');
+  const sc = await createScene3D(cv, {
+    workout: wk, levels: FAKE.levels, quality: o.quality, reducedMotion: !!o.reduced, tvMode: !!o.tv, strideBob: true,
+    treadmill: FAKE.treadmill, theme: o.theme, snapshot: { width: o.w, height: o.h, dpr },
+  });
+  try {
+    const g = ghostTrace(wk, st, o.ghost);
+    if (g) sc.setGhost(g);
+    // con fantasma el núcleo del HUD incluye el chip «VS RÉCORD» (como .hud-speed__core en la app real)
+    const dataAt = (t) => hudDataFor(wk, st, planState(wk, st, t), { tv: o.tv, ghost: g ? { deltaM: 0 } : null });
+    const rects = o.hud && hudMod ? hudRectsFor(o.w, o.h, dataAt(T), orientation) : null;
+    sc.setHudRects(rects);
+    const feed = (t) => {
+      const s = planState(wk, st, t);
+      sc.setState({ status: 'running', totalElapsed: t, segIndex: s.segIndex, segElapsed: s.segElapsed, segRemaining: s.segRemaining, currentSpeed: s.currentSpeed, distanceKm: s.distanceKm, rate: 1 });
+      if (o.beat) sc.setBeat(((t * o.bpm) / 60) % 1, o.bpm);
+    };
+    feed(T0);
+    sc.snapshot.sync();
+    const dt = (T - T0) / steps || 1 / 60;
+    for (let k = 1; k <= steps; k++) {
+      feed(T0 + (k - 1) * dt);  // el núcleo predice +dt: tras el paso k el reloj de la escena está en T0 + k·dt
+      sc.snapshot.step(dt);
+    }
+    if (fin != null) {
+      const s = planState(wk, st, wk.totalSec, 'finished');
+      sc.setState({ status: 'finished', totalElapsed: wk.totalSec, segIndex: s.segIndex, segElapsed: s.segElapsed, segRemaining: 0, currentSpeed: 0, distanceKm: s.distanceKm, rate: 1 });
+      sc.event('finish', { durationMs: 4800 });
+      const n = Math.max(1, Math.round(fin * 60));
+      for (let k = 0; k < n; k++) sc.snapshot.step(1 / 60);
+    }
+    const info = sc.getInfo();
+    const out = document.createElement('canvas');
+    out.width = Math.round(o.w * dpr);
+    out.height = Math.round(o.h * dpr);
+    const ctx = out.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(cv, 0, 0, out.width, out.height);
+    const lay = sc._debug.layout;
+    const lum = measureRects(ctx, lay.rects, dpr);
+    let hudDrawn = false;
+    if (o.hud && hudMod) {
+      const s = planState(wk, st, T, fin != null ? 'finished' : 'running');
+      const data = hudDataFor(wk, st, s, { tv: o.tv, ghost: g ? { deltaM: sc._debug.frame.ghost.deltaM, label: g.label } : null });
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      try { hudMod.drawHud(ctx, o.w, o.h, data, orientation); hudDrawn = true; } catch (e) { log('drawHud: ' + e.message); }
+      ctx.restore();
+    }
+    const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', o.jpeg));
+    let saved = null;
+    if (o.post && blob) {
+      const r = await fetch(`/__snap/${encodeURIComponent(name)}.jpg`, { method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg' } });
+      saved = r.ok ? (await r.json()).file : `error ${r.status}`;
+    }
+    const res = {
+      ok: !!blob && (!o.post || /^docs\//.test(String(saved))), file: saved, name, theme: info.theme, t: +sc._debug.frame.t.toFixed(3),
+      w: o.w, h: o.h, dpr, hud: hudDrawn, quality: info.quality, calls: info.calls, triangles: info.triangles,
+      zone: sc._debug.frame.zone, lumBehindHud: lum, maxMeanLum: lum.reduce((m, x) => Math.max(m, x.mean), 0),
+    };
+    $('snapOut').textContent = JSON.stringify(res, null, 1);
+    log(`captura ${name} → ${saved}`);
+    return res;
+  } finally {
+    try { sc.destroy({ releaseContext: true }); } catch { /* nada */ }
+  }
+}
+
+/** Tiempos útiles de una clase para planificar cortes de vídeo: inicio de cada tramo, sprints y cruces de km. */
+function plan(opts = {}) {
+  const wk = makeWorkout(opts.template || tplSel.value, opts.minutes || Number(durSel.value), opts.seed || Number($('seed').value) || 1);
+  if (!wk) throw new Error('plantilla desconocida');
+  const st = startsOf(wk);
+  const kms = [];
+  for (let k = 1; k <= Math.floor(planKm(wk, st, wk.totalSec)); k++) {
+    let lo = 0; let hi = wk.totalSec;
+    for (let it = 0; it < 40; it++) { const m = (lo + hi) / 2; if (planKm(wk, st, m) < k) lo = m; else hi = m; }
+    kms.push(+hi.toFixed(2));
+  }
+  return {
+    title: wk.title, totalSec: wk.totalSec, kms,
+    segments: wk.segments.map((x, i) => ({ i, zone: x.zone, speed: x.speed, sec: x.sec, start: st[i], label: x.label || '' })),
+  };
+}
+
+/**
+ * Vídeo determinista: renderiza fotogramas continuos a dt fijo y los sube uno a uno.
+ * opts: { segments: [{ t0, t1 } | { finale: seg }], fps=30, w=440, h=956, dpr=2, hud=true, theme, template, minutes,
+ *         seed, quality='high', jpeg=0.92, preroll=2, bugSec=3, ghost, beat, bpm }
+ */
+async function record(name, opts = {}) {
+  const o = {
+    segments: [], fps: 30, w: 440, h: 956, dpr: 2, hud: true, theme: themeId, template: tplSel.value,
+    minutes: Number(durSel.value), seed: Number($('seed').value) || 1, quality: 'high', jpeg: 0.92, preroll: 2,
+    bugSec: 3, ghost: null, beat: true, bpm, ...opts,
+  };
+  const wk = makeWorkout(o.template, o.minutes, o.seed);
+  if (!wk) throw new Error(`plantilla desconocida: ${o.template}`);
+  const st = startsOf(wk);
+  const total = wk.totalSec;
+  const fps = Math.max(1, Math.min(60, Number(o.fps) || 30));
+  const dt = 1 / fps;
+  const sub = Math.max(1, Math.round(60 / fps));  // subpasos de ~1/60 s por fotograma (física y cámara estables)
+  const dpr = Math.max(1, Math.min(2, Number(o.dpr) || 2));
+  const orientation = o.w > o.h ? 'landscape' : 'portrait';
+  if (o.hud && !hudMod) await loadHud();
+  const kms = plan(o).kms;
+  const cv = document.createElement('canvas');
+  const sc = await createScene3D(cv, {
+    workout: wk, levels: FAKE.levels, quality: o.quality, reducedMotion: false, tvMode: false, strideBob: true,
+    treadmill: FAKE.treadmill, theme: o.theme, snapshot: { width: o.w, height: o.h, dpr },
+  });
+  const out = document.createElement('canvas');
+  out.width = Math.round(o.w * dpr);
+  out.height = Math.round(o.h * dpr);
+  const ctx = out.getContext('2d');
+  const g = ghostTrace(wk, st, o.ghost);
+  if (g) sc.setGhost(g);
+  // como snap() y el reproductor: el escenario compone su encuadre sabiendo dónde va el HUD (§15.3: solo composición)
+  try {
+    if (o.hud && hudMod) sc.setHudRects(hudRectsFor(o.w, o.h, hudDataFor(wk, st, planState(wk, st, 1), { ghost: g ? { deltaM: 0 } : null }), orientation));
+  } catch { /* opcional */ }
+  const safeName = String(name).replace(/[^a-zA-Z0-9._-]+/g, '-');
+  let frame = 0;
+  const clips = [];
+  const t0All = performance.now();
+  // estado que el reproductor mantiene entre tics: tramo actual, km anunciados, mitad, cuenta atrás
+  let lastSeg = -1; let lastKm = 0; let halfDone = false; let lastCd = null; let bug = null;
+  const bugAt = (t) => (bug && t - bug.at < o.bugSec ? bug.data : null);
+  const feed = (t, status = 'running') => {
+    const s = planState(wk, st, t, status);
+    sc.setState({ status, totalElapsed: t, segIndex: s.segIndex, segElapsed: s.segElapsed, segRemaining: s.segRemaining, currentSpeed: s.currentSpeed, distanceKm: s.distanceKm, rate: 1 });
+    if (o.beat) sc.setBeat(((t * o.bpm) / 60) % 1, o.bpm);
+    return s;
+  };
+  const events = (t, s, live) => {
+    if (s.segIndex !== lastSeg) { if (live && lastSeg >= 0) sc.event('segment', { index: s.segIndex, reason: 'auto' }); lastSeg = s.segIndex; lastCd = null; }
+    const rem = s.segRemaining;
+    const n = rem <= 3 && rem > 0 && s.nextSegment ? Math.ceil(rem) : null;
+    if (n && n !== lastCd) { if (live) sc.event('countdown', { n }); lastCd = n; }
+    const k = kms.filter((x) => x <= t).length;
+    if (k > lastKm) {
+      if (live) {
+        sc.event('km', { km: k });
+        const spd = wk.segments[s.segIndex].speed;
+        bug = { at: t, data: { lbl: 'KM', val: String(k), sub: `${fmtPaceKmh(spd)} /km` } };
+      }
+      lastKm = k;
+    }
+    if (!halfDone && t >= total / 2) {
+      if (live) { sc.event('halfway'); bug = { at: t, data: { lbl: 'MITAD', val: fmt.clock(Math.round(total / 2)), sub: '' } }; }
+      halfDone = true;
+    }
+  };
+  const capture = async (t, s, status, fin = null) => {
+    ctx.drawImage(cv, 0, 0, out.width, out.height);
+    // plano final como en el reproductor: el HUD se retira en 0,6 s y entra el rótulo final (.hud-done)
+    const hudAlpha = fin ? Math.max(0, 1 - fin.sec / 0.6) : 1;
+    if (o.hud && hudMod && hudAlpha > 0) {
+      ctx.globalAlpha = hudAlpha;
+      const data = hudDataFor(wk, st, s, { ghost: g ? { deltaM: sc._debug.frame.ghost.deltaM, label: g.label } : null });
+      data.bug = status === 'finished' ? null : bugAt(t);
+      if (status === 'finished') { data.segRemaining = 0; data.segProgress = 1; }
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      try { hudMod.drawHud(ctx, o.w, o.h, data, orientation); } catch (e) { log('drawHud: ' + e.message); }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+    if (fin && o.hud && typeof hudMod?.drawDone === 'function') {
+      const k = Math.min(1, fin.sec / 0.52);
+      const ease = 1 - (1 - k) ** 3;
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      try {
+        hudMod.drawDone(ctx, o.w, o.h, {
+          label: wk.title, title: '¡Entrenamiento completado!', ring: Math.min(1, Math.max(0, (fin.sec - 0.15) / 0.9)),
+          stats: `${fmt.km(s.distanceKm)} km · ${fmt.clock(total)} · ${fmt.int(s.kcal)} kcal`,
+        }, orientation, { alpha: ease, rise: (1 - ease) * 14 });
+      } catch (e) { log('drawDone: ' + e.message); }
+      ctx.restore();
+    }
+    const blob = await new Promise((res) => out.toBlob(res, 'image/jpeg', o.jpeg));
+    frame++;
+    const r = await fetch(`/__snap/rec/${encodeURIComponent(safeName)}/${String(frame).padStart(5, '0')}.jpg`, { method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg' } });
+    if (!r.ok) throw new Error(`subida del fotograma ${frame}: ${r.status}`);
+  };
+  try {
+    for (const seg of o.segments) {
+      const start = frame + 1;
+      if (seg.finale != null) {
+        // final: llega al último segundo, 'finish' y plano de dron durante `finale` s
+        const T = total - 0.02;
+        const pre = Math.max(0, T - o.preroll);
+        lastSeg = segIdxAt(st, pre); lastKm = kms.filter((x) => x <= pre).length; halfDone = pre >= total / 2; bug = null;
+        feed(pre); sc.snapshot.sync();
+        for (let t = pre; t < T; t += 1 / 60) { const s = feed(t); events(t, s, true); sc.snapshot.step(1 / 60); }
+        const s = planState(wk, st, total, 'finished');
+        feed(total, 'finished');
+        sc.event('finish', { durationMs: 4800 });
+        const n = Math.round(Number(seg.finale) * fps);
+        for (let k = 0; k < n; k++) {
+          for (let j = 0; j < sub; j++) sc.snapshot.step(dt / sub);
+          await capture(total, s, 'finished', { sec: (k + 1) * dt });
+        }
+      } else {
+        const a = Math.max(0, Math.min(total - 0.1, Number(seg.t0) || 0));
+        const b = Math.max(a + dt, Math.min(total - 0.05, Number(seg.t1) || a + 3));
+        const pre = Math.max(0, a - o.preroll);
+        // pre-rodaje sin grabar: cámara, colores y partículas llegan asentados al primer fotograma del corte
+        lastSeg = segIdxAt(st, pre); lastKm = kms.filter((x) => x <= pre).length; halfDone = pre >= total / 2; lastCd = null; bug = null;
+        feed(pre); sc.snapshot.sync();
+        for (let t = pre; t < a - 1e-6; t += 1 / 60) { const s = feed(t); events(t, s, true); sc.snapshot.step(1 / 60); }
+        const n = Math.round((b - a) * fps);
+        for (let k = 0; k < n; k++) {
+          const t = a + k * dt;
+          let s = null;
+          for (let j = 0; j < sub; j++) { const tj = t + (j * dt) / sub; s = feed(tj); events(tj, s, true); sc.snapshot.step(dt / sub); }
+          await capture(t + dt, planState(wk, st, t + dt), 'running');
+        }
+      }
+      clips.push({ start, count: frame - start + 1, sec: +((frame - start + 1) / fps).toFixed(3) });
+      log(`grabando ${safeName}: clip ${clips.length} · ${frame} fotogramas`);
+    }
+  } finally {
+    try { sc.destroy({ releaseContext: true }); } catch { /* nada */ }
+  }
+  const res = { ok: true, name: safeName, dir: `docs/capturas/3d/rec/${safeName}/`, frames: frame, fps, w: out.width, h: out.height, clips, ms: Math.round(performance.now() - t0All) };
+  $('snapOut').textContent = JSON.stringify(res, null, 1);
+  return res;
+}
+
+/** Serie estándar (vertical y horizontal): calentamiento, trote, justo antes del sprint, sprint, final. */
+async function suite(prefix = themeId, opts = {}) {
+  const wk = makeWorkout(opts.template || tplSel.value, opts.minutes || Number(durSel.value), opts.seed || 1);
+  const st = startsOf(wk);
+  const find = (z) => wk.segments.findIndex((s, i) => s.zone === z && i > 0);
+  const mid = (i) => (i >= 0 ? st[i] + wk.segments[i].sec / 2 : null);
+  const sp = find('sprint') >= 0 ? find('sprint') : find('fast');
+  const moments = [
+    ['calentamiento', Math.min(40, wk.segments[0].sec * 0.5)],
+    ['trote', mid(find('jog'))],
+    ['antes-sprint', sp >= 0 ? st[sp] - 1.5 : null],
+    ['sprint', mid(sp)],
+    ['calma', mid(find('cooldown'))],
+  ].filter((m) => Number.isFinite(m[1]));
+  const results = [];
+  for (const [label, t] of moments) {
+    for (const [ori, w, h] of [['v', 440, 956], ['h', 956, 440]]) {
+      results.push(await snap(`${prefix}-${label}-${ori}`, { ...opts, t, w, h }));
+    }
+  }
+  for (const [ori, w, h] of [['v', 440, 956], ['h', 956, 440]]) results.push(await snap(`${prefix}-final-${ori}`, { ...opts, finale: 3.2, w, h }));
+  return results;
+}
+
+/* ───────── Bucle de la vista en vivo ───────── */
+let last = performance.now();
+let lastRectsAt = 0;
+let lastHudAt = 0;
+let fpsAcc = 0; let fpsN = 0; let labFps = 0;
+let lastBeatSent = 0;
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.25, (now - last) / 1000);
+  last = now;
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.5) { labFps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  if (!engine) return;
+  if (playing && engine.getState().status === 'running') simMs += dt * 1000 * rate;
+  engine.tick();
+  pushState();
+  if ((beatOn || audioOn) && scene && now - lastBeatSent > 250) {
+    lastBeatSent = now;
+    if (audioOn && audio) scene.setBeat((((audio.ctx.currentTime - audio.t0) * bpm) / 60) % 1, bpm);
+    else scene.setBeat(((simMs / 1000) * bpm / 60) % 1, bpm);
+  }
+  if (now - lastRectsAt > 700) { lastRectsAt = now; pushRects(); }
+  if (now - lastHudAt > 60) { lastHudAt = now; drawLiveHud(); }
+  updateUi();
+}
+
+function drawLiveHud() {
+  const c = $('hudCanvas');
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  const W = Math.round(devW * dpr); const H = Math.round(devH * dpr);
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (!hudOn || !hudMod || !engine) return;
+  const s = engine.getState();
+  const g = scene?._debug?.frame?.ghost;
+  const data = hudDataFor(workout, starts, s, { tv, ghost: g?.active ? { deltaM: g.deltaM, label: 'Tu mejor marca' } : null, controls: s.status !== 'running' });
+  ctx.scale(dpr, dpr);
+  try { hudMod.drawHud(ctx, devW, devH, data, devW > devH ? 'landscape' : 'portrait'); } catch { /* el mock puede estar a medias */ }
+}
+
+function updateUi() {
+  const s = engine.getState();
+  $('scrub').value = String(Math.round(s.totalElapsed));
+  $('timeLbl').textContent = `${fmt.clock(s.totalElapsed)} / ${fmt.clock(workout.totalSec)}`;
+  $('play').textContent = s.status === 'ready' ? '▶ Empezar' : playing ? '❚❚ Congelar' : '▶ Reproducir';
+  drawProfileCursor(s.totalElapsed);
+  const info = scene?.getInfo?.();
+  $('badge').textContent = `${Math.round(info?.fps || labFps)} fps · ${info?.quality || '—'} · ${info?.theme || '—'}`;
+  if (info) {
+    $('info').textContent = `escenario ${info.theme} · calidad ${info.quality} (${info.mode}) · dpr ${info.dpr}\n`
+      + `fps ${info.fps} · draw calls ${info.calls} · tris ${info.triangles}\n`
+      + `reloj escena ${info.t} s · motor ${s.totalElapsed.toFixed(2)} s · ${s.status}\n`
+      + `post ${info.post.toneMapping} exp ${info.post.exposure} bloom ${info.post.bloomStrength}/${info.post.bloomThreshold}`
+      + `${info.ghost != null ? `\nfantasma ${info.ghost > 0 ? '+' : ''}${info.ghost} m${info.golden ? ' · RÉCORD' : ''}` : ''}`
+      + `${info.reduced ? '\nmovimiento reducido' : ''}${info.tv ? ' · TV' : ''}`;
+  }
+}
+
+let profileBase = null;
+function drawProfile() {
+  const c = $('profile');
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.clearRect(0, 0, c.width, c.height);
+  const sp = workout.segments.map((s) => s.speed);
+  const max = Math.max(...sp); const min = Math.min(...sp);
+  workout.segments.forEach((s, i) => {
+    const x = (starts[i] / workout.totalSec) * c.width;
+    const w = (s.sec / workout.totalSec) * c.width;
+    const h = 10 + ((s.speed - min) / Math.max(0.1, max - min)) * (c.height - 16);
+    ctx.fillStyle = ZONES[s.zone].color;
+    ctx.globalAlpha = 0.8;
+    ctx.fillRect(x + 0.5, c.height - h, Math.max(1, w - 1), h);
+  });
+  ctx.globalAlpha = 1;
+  profileBase = ctx.getImageData(0, 0, c.width, c.height);
+}
+function drawProfileCursor(t) {
+  const c = $('profile');
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  if (profileBase) ctx.putImageData(profileBase, 0, 0);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect((t / workout.totalSec) * c.width - 1, 0, 2, c.height);
+}
+
+function log(msg) {
+  const el = $('log');
+  el.textContent = `${fmt.clock(engine?.getState().totalElapsed || 0)} ${msg}\n` + el.textContent.slice(0, 3000);
+}
+
+/* ───────── Marco ───────── */
+function layoutDevice() {
+  const dev = $('device');
+  const main = $('main');
+  dev.style.width = `${devW}px`;
+  dev.style.height = `${devH}px`;
+  const k = Math.min(1, (main.clientWidth - 50) / devW, (main.clientHeight - 50) / devH);
+  dev.style.transform = `scale(${Math.max(0.2, k)})`;
+  for (const b of $('frames').children) b.classList.toggle('on', b.dataset.f === frameMode);
+  scene?.resize();
+  requestAnimationFrame(() => pushRects());
+}
+addEventListener('resize', layoutDevice);
+
+/* ───────── Controles ───────── */
+const themeSel = $('theme');
+for (const t of THEMES) {
+  const o = document.createElement('option');
+  o.value = t.id;
+  o.textContent = `${t.name}${t.hidden ? ' (oculto)' : ''} · ${t.id}`;
+  themeSel.append(o);
+}
+themeSel.value = THEMES.some((t) => t.id === themeId) ? themeId : DEFAULT_THEME;
+const showDesc = () => { $('themeDesc').textContent = THEMES.find((t) => t.id === themeSel.value)?.description || ''; };
+showDesc();
+themeSel.addEventListener('change', async () => {
+  themeId = themeSel.value;
+  showDesc();
+  const ok = await scene?.setTheme(themeId);
+  log(`setTheme(${themeId}) → ${ok ? 'ok' : 'falló (respaldo)'} · activo ${scene?.getTheme()}`);
+});
+tplSel.addEventListener('change', () => { fillDurations(durSel.value); loadWorkout(); });
+durSel.addEventListener('change', loadWorkout);
+$('seed').addEventListener('change', loadWorkout);
+$('profile').addEventListener('click', (e) => { const r = e.currentTarget.getBoundingClientRect(); seek(((e.clientX - r.left) / r.width) * workout.totalSec); });
+$('scrub').addEventListener('input', (e) => seek(Number(e.target.value)));
+function startWithCountdown() {
+  if (engine.getState().status !== 'ready' || countdownTimer) return;
+  let n = 3;
+  const tick = () => {
+    if (n === 0) { countdownTimer = null; engine.start(); playing = true; return; }
+    scene?.event('countdown', { n });
+    n--;
+    countdownTimer = setTimeout(tick, 1000);
+  };
+  tick();
+}
+$('play').addEventListener('click', () => {
+  const s = engine.getState().status;
+  if (s === 'ready') return startWithCountdown();
+  if (s === 'paused') { engine.resume(); playing = true; return; }
+  if (s === 'finished') { loadWorkout(); return; }
+  playing = !playing;
+});
+for (const b of $('rates').children) {
+  b.classList.toggle('on', Number(b.dataset.r) === rate);
+  b.addEventListener('click', () => { rate = Number(b.dataset.r); for (const x of $('rates').children) x.classList.toggle('on', x === b); });
+}
+$('prev').addEventListener('click', () => engine.skip(-1));
+$('next').addEventListener('click', () => engine.skip(1));
+$('pause').addEventListener('click', () => { engine.togglePause(); if (engine.getState().status === 'running') playing = true; });
+$('minus').addEventListener('click', () => engine.adjustSpeed(-0.1));
+$('plus').addEventListener('click', () => engine.adjustSpeed(0.1));
+$('endTest').addEventListener('click', () => { if (!engine.endTest()) log('endTest: solo en un escalón del test'); });
+$('finish').addEventListener('click', () => engine.finish());
+$('evCount').addEventListener('click', () => { [3, 2, 1].forEach((n, k) => setTimeout(() => scene?.event('countdown', { n }), k * 1000)); });
+$('evDrop').addEventListener('click', () => scene?.event('drop'));
+$('evKm').addEventListener('click', () => scene?.event('km', { km: Math.floor(engine.getState().distanceKm) + 1 }));
+$('beatOn').addEventListener('click', () => { beatOn = !beatOn; $('beatOn').classList.toggle('on', beatOn); });
+$('bpm').addEventListener('input', (e) => { bpm = Number(e.target.value); $('bpmLbl').textContent = `${bpm} BPM`; });
+$('audioBtn').addEventListener('click', () => { if (audioOn) stopAudio(); else startAudio(); });
+$('ghostAhead').addEventListener('click', () => { ghostMode = ghostMode === '+' ? '' : '+'; applyGhost(); });
+$('ghostBehind').addEventListener('click', () => { ghostMode = ghostMode === '-' ? '' : '-'; applyGhost(); });
+for (const b of $('frames').children) {
+  b.addEventListener('click', () => {
+    frameMode = b.dataset.f;
+    [devW, devH] = frameMode === 'landscape' ? [956, 440] : [440, 956];
+    layoutDevice();
+  });
+}
+for (const b of $('quality').children) {
+  b.classList.toggle('on', b.dataset.q === quality);
+  b.addEventListener('click', () => { quality = b.dataset.q; for (const x of $('quality').children) x.classList.toggle('on', x === b); scene?.setQuality(quality); });
+}
+const setHud = (on) => { hudOn = on; $('hudBtn').classList.toggle('on', on); pushRects(); };
+$('hudBtn').addEventListener('click', () => setHud(!hudOn));
+$('tvBtn').addEventListener('click', () => { tv = !tv; scene?.setTvMode(tv); $('tvBtn').classList.toggle('on', tv); pushRects(); });
+$('rmBtn').addEventListener('click', () => { reduced = !reduced; $('rmBtn').classList.toggle('on', reduced); const t = engine.getState().totalElapsed; makeScene().then(() => seek(t)); });
+$('strideBtn').addEventListener('click', () => { strideOn = !strideOn; scene?.setStrideBob(strideOn); $('strideBtn').classList.toggle('on', strideOn); });
+$('rectsBtn').addEventListener('click', () => { document.body.classList.toggle('showrects'); $('rectsBtn').classList.toggle('on'); drawRects(); });
+$('reloadBtn').addEventListener('click', () => { const t = engine.getState().totalElapsed; makeScene().then(() => seek(t)); });
+$('togglePanel').addEventListener('click', () => { document.body.classList.toggle('nopanel'); setTimeout(layoutDevice, 0); });
+$('snapBtn').addEventListener('click', async () => {
+  const t = engine.getState().totalElapsed;
+  try { await snap($('snapName').value || 'prueba', { t, w: devW, h: devH, hud: hudOn, tv, reduced, ghost: ghostMode || null, beat: beatOn }); } catch (e) { log('captura: ' + e.message); }
+});
+$('suiteBtn').addEventListener('click', async () => { try { await suite(themeId); } catch (e) { log('serie: ' + e.message); } });
+
+function jumpTo(kind) {
+  const t = engine.getState().totalElapsed;
+  const segs = workout.segments;
+  let target = null;
+  if (kind === 'gate') { const i = starts.findIndex((a) => a > t + 6); target = i > 0 ? starts[i] - 5 : null; }
+  if (kind === 'sprint') { let i = segs.findIndex((x, k) => x.zone === 'sprint' && starts[k] > t + 5); if (i < 0) i = segs.findIndex((x) => x.zone === 'sprint'); target = i > 0 ? starts[i] - 4 : null; }
+  if (kind === 'km') {
+    const k = Math.floor(planKm(workout, starts, t)) + 1;
+    let lo = t; let hi = workout.totalSec;
+    if (planKm(workout, starts, hi) >= k) { for (let it = 0; it < 40; it++) { const m = (lo + hi) / 2; if (planKm(workout, starts, m) < k) lo = m; else hi = m; } target = hi - 6; }
+  }
+  if (kind === 'half') target = workout.totalSec / 2 - 6;
+  if (kind === 'end') target = workout.totalSec - 6;
+  if (kind === 'stairs') { const i = segs.findIndex((x) => x.stage >= 6); target = i > 0 ? starts[i] - 3 : null; if (i < 0) log('Escalera: elige la plantilla del test'); }
+  if (target != null) { if (engine.getState().status === 'ready') engine.start(); seek(target); }
+}
+for (const b of document.querySelectorAll('[data-jump]')) b.addEventListener('click', () => jumpTo(b.dataset.jump));
+
+window.lab = {
+  snap, suite, record, plan, seek, jumpTo, event: (t, d) => scene?.event(t, d), engine: () => engine, scene: () => scene,
+  state: () => engine?.getState(), hudData: () => hudDataFor(workout, starts, engine.getState(), { tv }),
+  play(r = rate) { rate = r; const s = engine.getState().status; if (s === 'ready') engine.start(); else if (s === 'paused') engine.resume(); playing = true; },
+  pause() { playing = false; },
+  async setTheme(id) { themeId = id; themeSel.value = id; showDesc(); return scene?.setTheme(id); },
+  reloadHud: () => loadHud(true),
+};
+
+/* ───────── Arranque ───────── */
+if (P.get('panel') === '0') document.body.classList.add('nopanel');
+if (P.get('clean') === '1') document.body.classList.add('nopanel', 'clean');
+$('hudBtn').classList.toggle('on', hudOn);
+$('rmBtn').classList.toggle('on', reduced);
+$('strideBtn').classList.toggle('on', strideOn);
+$('tvBtn').classList.toggle('on', tv);
+$('beatOn').classList.toggle('on', beatOn);
+$('bpm').value = String(bpm); $('bpmLbl').textContent = `${bpm} BPM`;
+await loadHud(true);
+layoutDevice();
+await loadWorkout();
+const t0 = P.get('t') ?? P.get('at');
+if (t0 != null) { engine.start(); playing = P.get('play') === '1'; seek(Number(t0)); }
+else if (P.get('play') === '1') window.lab.play(rate);
+window.lab.ready = true;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

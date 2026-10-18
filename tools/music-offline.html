@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Motor DJ offline</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0b0e; --fg: #f2f2f5; --dim: #8b8b96; --ok: #30d158; --bad: #ff453a; --warn: #ffd60a; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  h1 { font: 600 17px -apple-system, system-ui, sans-serif; margin: 0 0 4px; }
+  p { color: var(--dim); margin: 0 0 12px; font-family: -apple-system, system-ui, sans-serif; }
+  #status { color: var(--warn); margin-bottom: 8px; }
+  pre { white-space: pre-wrap; margin: 0; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim { color: var(--dim); }
+  button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid #333; background: #1c1c22; color: var(--fg); }
+</style>
+</head>
+<body>
+<h1>Motor DJ · render offline (OfflineAudioContext 44,1 kHz)</h1>
+<p>Clase real + plan real + motor real sobre un contexto offline; analiza huecos, clics y sonoridad, y sube informe y WAV al servidor del laboratorio.
+  Parámetros: <code>?only=piramide|bloques</code> · <code>?step=0.25</code> · <code>?upload=0</code></p>
+<div id="status">Preparando…</div>
+<pre id="log"></pre>
+<script type="module">
+import { buildWorkout } from '../js/training/generator.js';
+import { buildMusicPlan, trackGrid } from '../js/audio/music-plan.js';
+import { loadLibrary, libraryById, fetchTrackData } from '../js/audio/music-library.js';
+import { createMusicEngine } from '../js/audio/music.js';
+
+const qs = new URLSearchParams(location.search);
+const SR = 44100;
+const STEP = Number(qs.get('step')) || 0.25;
+const UPLOAD = qs.get('upload') !== '0';
+const ONLY = qs.get('only');
+const LEVELS = { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13.0 };
+const T0 = 0.1;                       // instante del contexto en que arranca la clase
+const GAP_DB = -45;
+const GAP_MS = 120;
+const CLICK_K = Number(qs.get('k')) || 0;   // 0 = umbral calibrado con las pistas originales
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const log = (s, cls = '') => {
+  const span = document.createElement('span');
+  if (cls) span.className = cls;
+  span.textContent = `${s}\n`;
+  logEl.appendChild(span);
+};
+const setStatus = (s) => { statusEl.textContent = s; };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const db = (x) => (x > 1e-12 ? 20 * Math.log10(x) : -240);
+const r1 = (x) => Math.round(x * 10) / 10;
+const r3 = (x) => Math.round(x * 1000) / 1000;
+
+/* ───────────── Sesiones ───────────── */
+
+const SESSIONS = [
+  {
+    key: 'piramide', name: 'piramide-20', label: 'Pirámide 20′', template: 'pyramid', minutes: 20, seed: 7, channels: 2,
+    excerpts: true, events: [],
+  },
+  {
+    key: 'bloques', name: 'bloques-resistencia-45', label: 'Bloques de resistencia 45′', template: 'long-blocks', minutes: 45, seed: 2,
+    channels: 1, excerpts: false,
+    // pausa de 6 s, un salto de tramo hacia delante y voz del coach (ducking) para cubrir todo el motor
+    events: [{ at: 600, kind: 'pause', sec: 6 }, { at: 1500, kind: 'seek' }],
+  },
+];
+
+/* ───────────── Render ───────────── */
+
+async function render(S, tracks) {
+  const byId = libraryById(tracks);
+  const w = buildWorkout(S.template, { minutes: S.minutes, levels: LEVELS, seed: S.seed });
+  const plan = buildMusicPlan(w, tracks, { seed: S.seed });
+  const starts = [];
+  let acc = 0;
+  for (const s of w.segments) { starts.push(acc); acc += s.sec; }
+  const pauseSec = S.events.filter((e) => e.kind === 'pause').reduce((a, e) => a + e.sec, 0);
+  let seekSkip = 0;
+  // salto: del inicio del evento al inicio del segmento siguiente
+  for (const e of S.events) {
+    if (e.kind !== 'seek') continue;
+    const k = starts.findIndex((s) => s > e.at + 20);
+    e.to = starts[k];
+    seekSkip += e.to - e.at;
+  }
+  const renderSec = T0 + w.totalSec + pauseSec - seekSkip + 3;
+  const length = Math.ceil(renderSec * SR);
+  let ctx;
+  try { ctx = new OfflineAudioContext(S.channels, length, SR); } catch (err) {
+    log(`  sin memoria para ${S.channels} canales: ${err.message}; se prueba en mono`, 'dim');
+    ctx = new OfflineAudioContext(1, length, SR);
+  }
+  const eng = createMusicEngine({ context: ctx, now: () => ctx.currentTime, decodeTimeoutMs: 120000 });
+  log(`${S.label}: ${w.segments.length} tramos · ${plan.cues.length} cues · ${Math.round(w.totalSec)} s de clase · render ${Math.round(renderSec)} s · ${ctx.destination.channelCount} canal(es)`);
+  setStatus(`${S.label}: decodificando la primera pista…`);
+  const loaded = await eng.load(plan, byId);
+  if (!loaded) throw new Error('load() devolvió false');
+
+  // Voz del coach: avisos de 2,2 s en cada cambio de tramo (10 s antes), como el ducking real
+  const voice = [];
+  for (const s of starts.slice(1)) voice.push({ on: s - 10, off: s - 7.8 });
+
+  const marks = [];               // [ctxT, classT, estado]
+  const decodes = [];             // { id, ctxT, classT }
+  const kinds = {};
+  const jobs = new Map();         // índice de cue → { kind, first, swap, end } (instantes del contexto)
+  let classT = 0;
+  let paused = null;              // { until }
+  let started = false;
+  let finished = false;
+  let vi = 0;
+  let speaking = false;
+  let lastIds = [];
+  let ev = 0;
+  const pauses = [];
+  const seeks = [];
+  let waitMs = 0;
+
+  const onStep = async (t) => {
+    if (!started) { eng.start(0); started = true; marks.push([ctx.currentTime, 0, 'run']); return; }
+    if (paused) {
+      if (ctx.currentTime >= paused.until) {
+        paused = null;
+        eng.update(classT, { status: 'running' });
+        pauses[pauses.length - 1].end = ctx.currentTime;
+      } else { eng.update(classT, { status: 'paused' }); marks.push([ctx.currentTime, classT, 'pause']); return; }
+    } else classT += STEP;
+    const e = S.events[ev];
+    if (e && classT >= e.at) {
+      ev++;
+      if (e.kind === 'pause') {
+        eng.update(classT, { status: 'paused' });
+        paused = { until: ctx.currentTime + e.sec };
+        pauses.push({ start: ctx.currentTime, classT });
+        marks.push([ctx.currentTime, classT, 'pause']);
+        return;
+      }
+      if (e.kind === 'seek') {
+        seeks.push({ ctxT: ctx.currentTime, from: classT, to: e.to });
+        classT = e.to;
+        eng.seek(classT);
+      }
+    }
+    // Voz del coach
+    while (vi < voice.length && classT >= voice[vi].off) { if (speaking) { dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } })); speaking = false; } vi++; }
+    if (vi < voice.length && !speaking && classT >= voice[vi].on) { dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } })); speaking = true; }
+    if (classT >= w.totalSec) {
+      if (!finished) { finished = true; eng.update(w.totalSec, { status: 'finished' }); }
+      else eng.update(w.totalSec, { status: 'finished' });
+    } else eng.update(classT, { status: 'running' });
+    marks.push([ctx.currentTime, classT, 'run']);
+    const st = eng.status();
+    if (st.job && st.job.idx >= 0 && !jobs.has(st.job.idx)) { jobs.set(st.job.idx, { ...st.job }); kinds[st.job.kind] = (kinds[st.job.kind] || 0) + 1; }
+    if (st.job && st.job.kind === 'loop' && !jobs.has(`loop@${Math.round(st.job.first)}`)) { jobs.set(`loop@${Math.round(st.job.first)}`, { ...st.job }); kinds.loop = (kinds.loop || 0) + 1; }
+    // Decodificación: en el móvil va ≥ 45 s por delante; aquí el render va a ×100, así que se espera a que acabe
+    const t0 = performance.now();
+    while (eng.status().buffers.loading) await sleep(5);
+    waitMs += performance.now() - t0;
+    const ids = eng.status().buffers.ids;
+    for (const id of ids) if (!lastIds.includes(id)) decodes.push({ id, ctxT: ctx.currentTime, classT });
+    lastIds = ids;
+  };
+
+  const chain = (t) => {
+    ctx.suspend(t).then(async () => {
+      try { await onStep(t); } catch (err) { log(`  paso ${t.toFixed(2)}: ${err?.stack || err}`, 'bad'); }
+      const next = Math.round((t + STEP) * SR / 128) * 128 / SR;
+      if (next < renderSec - 0.05) chain(next);
+      if ((Math.round(t / STEP)) % 400 === 0) setStatus(`${S.label}: render ${Math.round(t)} / ${Math.round(renderSec)} s · clase ${Math.round(classT)} s`);
+      ctx.resume();
+    });
+  };
+  chain(Math.round(T0 * SR / 128) * 128 / SR);
+  const wall = performance.now();
+  const buf = await ctx.startRendering();
+  const renderMs = performance.now() - wall;
+  const finalStatus = eng.status();
+  eng.destroy();
+  return { S, w, plan, starts, buf, marks, decodes, kinds, jobs, pauses, seeks, renderMs, waitMs, finalStatus, voice, byId };
+}
+
+/* ───────────── Análisis ───────────── */
+
+/** classT → instante del render (mapa por tramos registrado en cada paso). */
+function makeMap(marks) {
+  return (T) => {
+    for (let i = 0; i < marks.length - 1; i++) {
+      const [c0, t0, s0] = marks[i];
+      const [c1, t1] = marks[i + 1];
+      if (s0 === 'run' && T >= t0 && T <= t1 && t1 > t0) return c0 + ((T - t0) / (t1 - t0)) * (c1 - c0);
+    }
+    const last = marks[marks.length - 1];
+    return last[0] + (T - last[1]);
+  };
+}
+
+function mono(buf) {
+  const n = buf.length;
+  if (buf.numberOfChannels === 1) return buf.getChannelData(0);
+  const L = buf.getChannelData(0);
+  const R = buf.getChannelData(1);
+  const m = new Float32Array(n);
+  for (let i = 0; i < n; i++) m[i] = (L[i] + R[i]) * 0.5;
+  return m;
+}
+
+/** RMS por ventanas de `win` muestras (sin solape). */
+function rmsFrames(x, win) {
+  const nf = Math.floor(x.length / win);
+  const out = new Float32Array(nf);
+  for (let f = 0; f < nf; f++) {
+    let s = 0;
+    for (let i = f * win, e = i + win; i < e; i++) s += x[i] * x[i];
+    out[f] = Math.sqrt(s / win);
+  }
+  return out;
+}
+
+/**
+ * Clics: segunda diferencia (derivada paso alto) por bloques de 64 muestras; un bloque es clic si su pico supera
+ * K veces la base local (RMS medio de la segunda diferencia en ~46 ms a cada lado, el mayor de los dos lados, sin el
+ * bloque vecino) y un mínimo absoluto. La música explica sus propios transitorios (el lado que suena sube la base).
+ */
+function clickScan(ch, { K, absMin = 0.012, from = 0, to = ch.length, collect = 200 } = {}) {
+  const B = 64;
+  const W = 32;
+  const nb = Math.floor((to - from) / B);
+  const peak = new Float32Array(nb);
+  const rms = new Float32Array(nb);
+  for (let b = 0; b < nb; b++) {
+    let p = 0;
+    let s = 0;
+    const i0 = from + b * B;
+    for (let i = Math.max(2, i0); i < i0 + B; i++) {
+      const d = ch[i] - 2 * ch[i - 1] + ch[i - 2];
+      const a = d < 0 ? -d : d;
+      if (a > p) p = a;
+      s += d * d;
+    }
+    peak[b] = p;
+    rms[b] = Math.sqrt(s / B);
+  }
+  const cs = new Float64Array(nb + 1);
+  for (let b = 0; b < nb; b++) cs[b + 1] = cs[b] + rms[b];
+  const hits = [];
+  let worst = 0;
+  let worstAt = 0;
+  for (let b = 0; b < nb; b++) {
+    const l0 = Math.max(0, b - 1 - W);
+    const l1 = Math.max(0, b - 1);
+    const r0 = Math.min(nb, b + 2);
+    const r1 = Math.min(nb, b + 2 + W);
+    const left = l1 > l0 ? (cs[l1] - cs[l0]) / (l1 - l0) : 0;
+    const right = r1 > r0 ? (cs[r1] - cs[r0]) / (r1 - r0) : 0;
+    const base = Math.max(left, right, 1e-5);
+    const ratio = peak[b] / base;
+    if (peak[b] > absMin && ratio > worst) { worst = ratio; worstAt = from + b * B; }
+    if (K && peak[b] > absMin && ratio > K) {
+      if (hits.length < collect) hits.push({ sample: from + b * B, ratio: r1(ratio), peak: r3(peak[b]), base: r3(base) });
+      else hits.length++;
+    }
+  }
+  return { hits, count: hits.length, worst, worstAt };
+}
+
+/** Filtro K (BS.1770) para fs: estante +4 dB a 1681 Hz y paso alto RLB a 38 Hz. */
+function kFilter(x, fs) {
+  const out = new Float32Array(x.length);
+  let f0 = 1681.974450955533;
+  const G = 3.999843853973347;
+  let Q = 0.7071752369554196;
+  let K = Math.tan((Math.PI * f0) / fs);
+  const Vh = 10 ** (G / 20);
+  const Vb = Vh ** 0.4996667741545416;
+  let a0 = 1 + K / Q + K * K;
+  const b = [(Vh + (Vb * K) / Q + K * K) / a0, (2 * (K * K - Vh)) / a0, (Vh - (Vb * K) / Q + K * K) / a0];
+  const a = [(2 * (K * K - 1)) / a0, (1 - K / Q + K * K) / a0];
+  f0 = 38.13547087602444;
+  Q = 0.5003270373238773;
+  K = Math.tan((Math.PI * f0) / fs);
+  a0 = 1 + K / Q + K * K;
+  const a2 = [(2 * (K * K - 1)) / a0, (1 - K / Q + K * K) / a0];
+  let x1 = 0; let x2 = 0; let y1 = 0; let y2 = 0;
+  let u1 = 0; let u2 = 0; let z1 = 0; let z2 = 0;
+  for (let i = 0; i < x.length; i++) {
+    const xi = x[i];
+    const y = b[0] * xi + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2;
+    x2 = x1; x1 = xi; y2 = y1; y1 = y;
+    const z = y - 2 * u1 + u2 - a2[0] * z1 - a2[1] * z2;
+    u2 = u1; u1 = y; z2 = z1; z1 = z;
+    out[i] = z;
+  }
+  return out;
+}
+
+/** Sonoridad de bloques de 400 ms (salto 100 ms) de una señal K-filtrada: array de LUFS. */
+function blockLoudness(kx, fs, chWeight = 1) {
+  const win = Math.round(0.4 * fs);
+  const hop = Math.round(0.1 * fs);
+  const out = [];
+  const cs = new Float64Array(kx.length + 1);
+  for (let i = 0; i < kx.length; i++) cs[i + 1] = cs[i] + kx[i] * kx[i];
+  for (let s = 0; s + win <= kx.length; s += hop) out.push(-0.691 + 10 * Math.log10(Math.max(1e-12, (chWeight * (cs[s + win] - cs[s])) / win)));
+  return out;
+}
+
+function integrated(blocks) {
+  const abs = blocks.filter((l) => l > -70);
+  if (!abs.length) return -70;
+  const meanE = (arr) => 10 * Math.log10(arr.reduce((a, l) => a + 10 ** (l / 10), 0) / arr.length);
+  const rel = meanE(abs) - 10;
+  const g = abs.filter((l) => l > rel);
+  return g.length ? meanE(g) : meanE(abs);
+}
+
+async function calibrate(tracks) {
+  // Las pistas originales (decodificadas a 44,1 kHz) dicen hasta dónde llegan los transitorios de la propia música
+  const ids = ['hard-aggressive-techno-delosound', 'house-breakbeat-deep-house-music', 'trance-klavo85', 'rapid-drum-and-bass-catch22music', 'tropical-deep-house-deep-house-music'];
+  const dec = new OfflineAudioContext(2, 1, SR);
+  let worst = 0;
+  const per = [];
+  for (const id of ids) {
+    const t = tracks.find((x) => x.id === id);
+    if (!t) continue;
+    const b = await dec.decodeAudioData(await fetchTrackData(t));
+    let wt = 0;
+    for (let c = 0; c < b.numberOfChannels; c++) {
+      const ch = b.getChannelData(c);
+      const r = clickScan(ch, { K: 0, from: Math.round(SR * 2), to: ch.length - Math.round(SR * 2) });
+      wt = Math.max(wt, r.worst);
+    }
+    // y a 32 kHz (como las decodifica el motor), reproducidas a 44,1 kHz
+    per.push({ id, worst: r1(wt) });
+    worst = Math.max(worst, wt);
+  }
+  // Detector: un escalón de 0,05 en una pista limpia debe saltar
+  const t = tracks.find((x) => x.id === ids[1]);
+  const b = await dec.decodeAudioData(await fetchTrackData(t));
+  const ch = b.getChannelData(0).slice(SR * 30, SR * 40);
+  for (let i = SR * 5; i < ch.length; i++) ch[i] += 0.05;
+  const probe = clickScan(ch, { K: Math.max(8, worst * 1.25) });
+  return { worst: r1(worst), per, K: r1(Math.max(8, worst * 1.25)), selfTest: probe.count >= 1, selfTestRatio: r1(probe.worst) };
+}
+
+function analyse(R, cal) {
+  const { buf, plan, starts, w, marks, pauses, seeks } = R;
+  const sr = buf.sampleRate;
+  const map = makeMap(marks);
+  const m = mono(buf);
+  const F10 = Math.round(sr * 0.01);
+  const F50 = Math.round(sr * 0.05);
+  const rms10 = rmsFrames(m, F10);
+  const rms50 = rmsFrames(m, F50);
+  // Ventanas donde el silencio es lo esperado: arranque, pausas y fundido final
+  const quiet = [[0, T0 + 0.5], [map(w.totalSec - (plan.endFadeSec || 8)), Infinity]];
+  for (const p of pauses) quiet.push([p.start, (p.end || p.start) + 0.7]);
+  const isQuiet = (t) => quiet.some(([a, b]) => t >= a && t <= b);
+  // Huecos: −45 dBFS durante más de 120 ms
+  const gaps = [];
+  let run = 0;
+  for (let f = 0; f < rms10.length; f++) {
+    const t = (f * F10) / sr;
+    if (db(rms10[f]) < GAP_DB && !isQuiet(t)) run++;
+    else {
+      if (run * 10 > GAP_MS) gaps.push({ at: r3(((f - run) * F10) / sr), ms: run * 10 });
+      run = 0;
+    }
+  }
+  // Clics en cada canal
+  let clicks = { hits: [], count: 0, worst: 0, worstAt: 0 };
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const r = clickScan(buf.getChannelData(c), { K: cal.K, from: Math.round(sr * (T0 + 0.2)) });
+    const hits = r.hits.filter((h) => !isQuiet(h.sample / sr) || true).map((h) => ({ ...h, t: r3(h.sample / sr), ch: c }));
+    clicks.hits.push(...hits);
+    clicks.count += r.count;
+    if (r.worst > clicks.worst) { clicks.worst = r.worst; clicks.worstAt = r.worstAt; }
+  }
+  clicks.worst = r1(clicks.worst);
+  clicks.worstAt = r3(clicks.worstAt / sr);
+  // Sonoridad (K) por bloques
+  const ks = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) ks.push(blockLoudness(kFilter(buf.getChannelData(c), sr), sr));
+  const blocks = ks[0].map((_, i) => {
+    const e = ks.reduce((a, arr) => a + 10 ** ((arr[i] + 0.691) / 10), 0);
+    return -0.691 + 10 * Math.log10(Math.max(1e-12, e));
+  });
+  const lufsIn = (a, b) => integrated(blocks.slice(Math.max(0, Math.floor(a * 10)), Math.max(0, Math.floor((b - 0.4) * 10))));
+  const minDb = (a, b) => {
+    let mn = Infinity;
+    for (let f = Math.max(0, Math.floor((a * sr) / F50)); f < Math.min(rms50.length, Math.ceil((b * sr) / F50)); f++) mn = Math.min(mn, db(rms50[f]));
+    return r1(mn);
+  };
+  const medDb = (a, b) => {
+    const arr = [];
+    for (let f = Math.max(0, Math.floor((a * sr) / F50)); f < Math.min(rms50.length, Math.ceil((b * sr) / F50)); f++) arr.push(db(rms50[f]));
+    arr.sort((x, y) => x - y);
+    return arr.length ? r1(arr[arr.length >> 1]) : null;
+  };
+  const skipped = (T) => seeks.some((s) => T > s.from && T < s.to);
+  // Transiciones (cambios de pista del plan) y cambios de tramo
+  const transitions = [];
+  plan.cues.forEach((c, i) => {
+    if (c.change !== 'track' || skipped(c.atSec)) return;
+    const job = R.jobs.get(i);
+    const t = job ? job.swap : map(c.atSec);
+    const pre = medDb(t - 9, t - 4);
+    const post = medDb(t + 4, t + 9);
+    const mn = minDb(t - 2, t + 2);
+    const lPre = lufsIn(t - 12, t - 3);
+    const lPost = lufsIn(t + 3, t + 12);
+    const near = gaps.filter((g) => Math.abs(g.at - t) < 3);
+    const nc = clicks.hits.filter((h) => Math.abs(h.t - t) < 3).length;
+    transitions.push({
+      i, atSec: r1(c.atSec), t: r3(t), zone: c.zone, transition: c.transition, engine: job?.kind || '—', entry: c.entry,
+      trackId: c.trackId, minRmsDb: mn, preDb: pre, postDb: post, dipDb: r1(mn - Math.min(pre ?? mn, post ?? mn)),
+      lufsJump: r1(lPost - lPre), gaps: near.length, clicks: nc,
+      smooth: !near.length && !nc && mn > GAP_DB,
+    });
+  });
+  // Seeks y pausas también son "transiciones"
+  const extra = [];
+  for (const s of seeks) extra.push({ kind: 'seek', t: r3(s.ctxT), minRmsDb: minDb(s.ctxT - 2, s.ctxT + 2), clicks: clicks.hits.filter((h) => Math.abs(h.t - s.ctxT) < 3).length });
+  for (const p of pauses) extra.push({ kind: 'pausa', t: r3(p.start), resumeAt: r3(p.end || 0), clicks: clicks.hits.filter((h) => h.t > p.start - 1 && h.t < (p.end || p.start) + 2).length });
+  // Sonoridad por tramo (sin el fundido final ni las pausas/saltos)
+  const segments = [];
+  w.segments.forEach((s, i) => {
+    const a = starts[i];
+    const b = a + s.sec;
+    if (skipped(a + 1) || b > w.totalSec - 9) return;
+    let ca = map(a);
+    let cb = map(b);
+    for (const p of pauses) if (p.start > ca && p.start < cb) cb = p.start;
+    segments.push({ i, zone: s.zone, from: r1(a), sec: s.sec, lufs: r1(lufsIn(ca + 0.5, cb - 0.5)), minDb: minDb(ca + 0.5, cb - 0.5) });
+  });
+  const lv = segments.map((s) => s.lufs).filter((x) => x > -60);
+  const loud = { min: r1(Math.min(...lv)), max: r1(Math.max(...lv)), spread: r1(Math.max(...lv) - Math.min(...lv)), session: r1(integrated(blocks)) };
+  return { gaps, clicks, transitions, extra, segments, loud, map, quiet };
+}
+
+/* ───────────── WAV ───────────── */
+
+function wav(chans, sr) {
+  const n = chans[0].length;
+  const nc = chans.length;
+  const out = new DataView(new ArrayBuffer(44 + n * nc * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); out.setUint32(4, 36 + n * nc * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, nc, true); out.setUint32(24, sr, true);
+  out.setUint32(28, sr * nc * 2, true); out.setUint16(32, nc * 2, true); out.setUint16(34, 16, true); str(36, 'data');
+  out.setUint32(40, n * nc * 2, true);
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < nc; c++) { const v = Math.max(-1, Math.min(1, chans[c][i])); out.setInt16(o, Math.round(v * 32767), true); o += 2; }
+  return new Blob([out.buffer], { type: 'audio/wav' });
+}
+
+function excerptWav(R, A, picks) {
+  const { buf } = R;
+  const sr = buf.sampleRate;
+  const gap = Math.round(sr * 0.8);
+  const parts = picks.map((p) => [Math.max(0, Math.round((p.t - 9) * sr)), Math.min(buf.length, Math.round((p.t + 9) * sr))]);
+  const total = parts.reduce((a, [x, y]) => a + (y - x), 0) + gap * (parts.length - 1);
+  const chans = [];
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const src = buf.getChannelData(c);
+    const dst = new Float32Array(total);
+    let o = 0;
+    for (const [x, y] of parts) { dst.set(src.subarray(x, y), o); o += y - x + gap; }
+    chans.push(dst);
+  }
+  return wav(chans, sr);
+}
+
+async function upload(kind, name, body) {
+  if (!UPLOAD) return null;
+  const res = await fetch(`/__snap/${kind}/${name}`, { method: 'POST', body });
+  if (!res.ok) throw new Error(`subida ${kind}/${name}: HTTP ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+/* ───────────── Main ───────────── */
+
+async function main() {
+  setStatus('Biblioteca…');
+  const tracks = await loadLibrary({ useImported: false });
+  log(`Biblioteca: ${tracks.length} pistas integradas`);
+  setStatus('Calibrando el detector de clics con las pistas originales…');
+  const cal = await calibrate(tracks);
+  const K = CLICK_K || cal.K;
+  cal.K = K;
+  log(`Calibración: peor transitorio de la música original ${cal.worst}× la base → umbral de clic ${K}× · autoprueba (escalón 0,05): ${cal.selfTest ? 'detectado' : 'NO detectado'} (${cal.selfTestRatio}×)`, cal.selfTest ? '' : 'bad');
+  const summary = { when: new Date().toISOString(), ua: navigator.userAgent, sr: SR, step: STEP, gapRule: `${GAP_DB} dBFS > ${GAP_MS} ms`, calibration: cal, sessions: [] };
+  for (const S of SESSIONS) {
+    if (ONLY && S.key !== ONLY) continue;
+    const R = await render(S, tracks);
+    setStatus(`${S.label}: analizando…`);
+    const A = analyse(R, cal);
+    const pre = (x) => (x >= 0 ? `+${x}` : `${x}`);
+    log(`  render ${(R.renderMs / 1000).toFixed(1)} s (espera de decodificación ${(R.waitMs / 1000).toFixed(1)} s) · transiciones del motor: ${Object.entries(R.kinds).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+    log(`  HUECOS (< ${GAP_DB} dBFS > ${GAP_MS} ms): ${A.gaps.length}${A.gaps.length ? ` → ${A.gaps.slice(0, 8).map((g) => `${g.at}s/${g.ms}ms`).join(', ')}` : ''}`, A.gaps.length ? 'bad' : 'ok');
+    log(`  CLICS (> ${K}×): ${A.clicks.count}${A.clicks.count ? ` → ${A.clicks.hits.slice(0, 8).map((h) => `${h.t}s ${h.ratio}× (${h.peak})`).join(', ')}` : ''} · peor relación ${A.clicks.worst}× en ${A.clicks.worstAt} s`, A.clicks.count ? 'bad' : 'ok');
+    log(`  Sonoridad por tramo: ${A.loud.min}…${A.loud.max} LUFS (dispersión ${A.loud.spread} LU) · sesión ${A.loud.session} LUFS`, A.loud.spread > 3 ? 'bad' : 'ok');
+    for (const tr of A.transitions) {
+      log(`   ${String(tr.atSec).padStart(7)} s ${tr.zone.padEnd(8)} ${tr.transition.padEnd(11)}→ ${tr.engine.padEnd(11)} mín ${String(tr.minRmsDb).padStart(6)} dB (antes ${tr.preDb}, después ${tr.postDb}, bache ${pre(tr.dipDb)}) · ΔLUFS ${pre(tr.lufsJump)}${tr.gaps ? ` · ${tr.gaps} hueco(s)` : ''}${tr.clicks ? ` · ${tr.clicks} clic(s)` : ''}`, tr.smooth ? '' : 'bad');
+    }
+    for (const x of A.extra) log(`   ${x.kind} en ${x.t} s${x.minRmsDb != null ? ` · mín ${x.minRmsDb} dB` : ''} · clics ${x.clicks}`, x.clicks ? 'bad' : '');
+    const decodeLead = [];
+    for (const [i, c] of R.plan.cues.entries()) {
+      if (c.change !== 'track' || i === 0) continue;
+      const d = R.decodes.filter((x) => x.id === c.trackId && x.classT <= c.atSec).pop();
+      if (d) decodeLead.push(c.atSec - Math.max(c.leadSec, c.atSec - c.entryAt) - d.classT);
+    }
+    const sess = {
+      name: S.name, label: S.label, template: S.template, minutes: S.minutes, seed: S.seed, channels: R.buf.numberOfChannels,
+      totalSec: R.w.totalSec, renderSec: r1(R.buf.duration), renderMs: Math.round(R.renderMs), engineKinds: R.kinds,
+      gaps: A.gaps, gapCount: A.gaps.length, clickCount: A.clicks.count, clickWorst: A.clicks.worst, clickWorstAt: A.clicks.worstAt,
+      clicks: A.clicks.hits.slice(0, 50), loudness: A.loud, segments: A.segments, transitions: A.transitions, extra: A.extra,
+      smoothTransitions: A.transitions.filter((t) => t.smooth).length, totalTransitions: A.transitions.length,
+      worstTransitionMinDb: Math.min(...A.transitions.map((t) => t.minRmsDb)),
+      decodes: R.decodes.length, decodeLeadMinSec: decodeLead.length ? r1(Math.min(...decodeLead)) : null,
+      buffersPeak: R.finalStatus.buffers.peak, subst: R.finalStatus.subst,
+    };
+    log(`  Decodificaciones: ${sess.decodes} · máx. ${sess.buffersPeak} en memoria · antelación mínima ${sess.decodeLeadMinSec} s · transiciones suaves ${sess.smoothTransitions}/${sess.totalTransitions}`);
+    if (S.excerpts) {
+      const tr = A.transitions;
+      const jogSprint = tr.find((t) => t.zone === 'sprint' && R.plan.cues[t.i - 1] && ['jog'].includes(prevZone(R.plan, t.i)));
+      const sprintJog = tr.find((t) => t.zone === 'jog' && prevZone(R.plan, t.i) === 'sprint');
+      const resume = tr.find((t) => t.entry === 'resume' && t !== sprintJog && t !== jogSprint);
+      const picks = [jogSprint, sprintJog, resume].filter(Boolean);
+      sess.excerpts = picks.map((p, k) => ({ n: k + 1, atSec: p.atSec, t: p.t, zone: p.zone, transition: p.transition, engine: p.engine, trackId: p.trackId, offsetInWav: r1(k * 18.8 + 9) }));
+      const blob = excerptWav(R, A, picks);
+      const up = await upload('audio', `${S.name}-cambios.wav`, blob);
+      if (up) log(`  WAV de ${picks.length} cambios → ${up.file} (${Math.round(up.bytes / 1024)} KB): ${sess.excerpts.map((e) => `#${e.n} ${e.atSec} s ${e.transition}`).join(' · ')}`);
+    }
+    summary.sessions.push(sess);
+    R.buf = null;
+    await sleep(50);
+  }
+  summary.ok = summary.sessions.every((s) => s.gapCount === 0 && s.clickCount === 0);
+  const up = await upload('report', `music-offline${ONLY ? `-${ONLY}` : ''}.json`, JSON.stringify(summary, null, 2));
+  if (up) log(`Informe → ${up.file}`);
+  window.__result = summary;
+  setStatus(summary.ok ? '✓ 0 huecos · 0 clics' : '✗ hay huecos o clics (ver arriba)');
+  statusEl.className = summary.ok ? 'ok' : 'bad';
+}
+
+function prevZone(plan, i) {
+  for (let k = i - 1; k >= 0; k--) if (plan.cues[k].change === 'track' || plan.cues[k].kind === 'segment') return plan.cues[k].zone;
+  return null;
+}
+
+main().catch((err) => { log(String(err?.stack || err), 'bad'); setStatus('Error'); window.__result = { error: String(err?.stack || err) }; });
+</script>
+</body>
+</html>

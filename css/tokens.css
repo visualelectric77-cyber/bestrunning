@@ -1,0 +1,119 @@
+/* BestRunning · design tokens. Tema oscuro único (app de entrenamiento). */
+:root {
+  color-scheme: dark;
+
+  /* Superficies */
+  --bg: #08080a;
+  --bg-elev: #111115;
+  --surface: #18181d;
+  --surface-2: #222229;
+  --surface-3: #2e2e37;
+  --glass: rgba(24, 24, 29, 0.72);
+  --glass-strong: rgba(14, 14, 18, 0.86);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  /* Texto */
+  --text: #f5f5f7;
+  --text-2: rgba(235, 235, 245, 0.66);
+  /* ≈ 4,6:1 sobre --bg/--surface/--surface-2 (WCAG AA para leyendas de 11–13 px) */
+  --text-3: rgba(235, 235, 245, 0.56);
+  /* Solo decorativo o deshabilitado (no informativo) */
+  --text-4: rgba(235, 235, 245, 0.32);
+  --text-inverse: #0b0b0d;
+
+  /* Marca: "ember" naranja → rojo */
+  --accent: #ff6a1a;
+  --accent-2: #ff2d55;
+  --accent-soft: rgba(255, 106, 26, 0.16);
+  --accent-grad: linear-gradient(135deg, #ff9500 0%, #ff5a1f 45%, #ff2d55 100%);
+  --accent-glow: 0 10px 30px -8px rgba(255, 90, 31, 0.55);
+
+  /* Estados */
+  --ok: #30d158;
+  --warn: #ffd60a;
+  --danger: #ff453a;
+  --info: #64d2ff;
+
+  /* Zonas de segmento (mismos valores que ZONES en js/training/levels.js) */
+  --z-warmup: #64d2ff;
+  --z-walk: #aeaeb2;
+  --z-jog: #30d158;
+  --z-run: #ffd60a;
+  --z-fast: #ff9f0a;
+  --z-sprint: #ff375f;
+  --z-cooldown: #7d7aff;
+
+  /* Categorías de clase (mismos valores que CATEGORIES en js/training/templates.js) */
+  --c-intervals: #ff375f;
+  --c-tempo: #ff9f0a;
+  --c-endurance: #30d158;
+  --c-fartlek: #bf5af2;
+  --c-hills: #c79a6b;
+  --c-recovery: #64d2ff;
+  --c-challenge: #ffd60a;
+  --c-test: #7d7aff;
+
+  /* Radios */
+  --r-xs: 8px;
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* Espaciado (múltiplos de 4) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --gutter: 16px;
+
+  /* Tipografía: SF Pro en iOS; SF Pro Rounded para cifras grandes */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --font-display: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-caption: 12px;
+  --fs-footnote: 13px;
+  --fs-sub: 15px;
+  --fs-body: 17px;
+  --fs-title3: 20px;
+  --fs-title2: 22px;
+  --fs-title1: 28px;
+  --fs-large: 34px;
+
+  /* Elevación */
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 20px 50px -20px rgba(0, 0, 0, 0.8);
+
+  /* Movimiento */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.12);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 160ms;
+  --dur: 280ms;
+  --dur-slow: 480ms;
+
+  /* Áreas seguras (Dynamic Island / home indicator) */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+
+  /* Layout */
+  --tabbar-h: 58px;
+  --navbar-h: 44px;
+  --content-max: 720px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur: 0ms;
+    --dur-slow: 0ms;
+  }
+}

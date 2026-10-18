@@ -1,0 +1,33 @@
+# macOS / discos externos (exFAT crea un "._archivo" por cada archivo)
+._*
+.DS_Store
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# Fuentes de música originales (se procesan con tools/music/analyze.py → audio/music/*.m4a)
+audio/music-src/
+
+# Voz grabada: tomas largas y pruebas de ElevenLabs (tools/voice/split-takes.py las corta en audio/packs/eva/)
+audio/packs/_takes/
+audio/packs/_samples/
+audio/packs/eva/_raw/
+
+# Python / Node
+__pycache__/
+*.pyc
+node_modules/
+
+# No se publican en GitHub Pages: entorno de Claude, capturas/copias internas y fotogramas del laboratorio 3D
+.claude/
+docs/capturas/3d/rec/
+docs/capturas/
+docs/backup/
+# tools/ y el resto de docs/ son internos y ligeros; para no publicarlos tampoco, descomentar:
+# tools/
+# docs/
+
+# Kit de lanzamiento (borradores de posts, metraje y vídeos) y pruebas de audio: privados
+docs/launch/
+docs/audio-tests/
+tools/capture/out/
