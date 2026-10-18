@@ -561,17 +561,20 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
     globalThis.fetch = real.fetch;
     if (real.OAC) globalThis.OfflineAudioContext = real.OAC; else delete globalThis.OfflineAudioContext;
   }
-  // Cadena maestra (desde el destino hacia atrás): limitador ← music ← fade ← duck ← lp ← hp ← bus
+  // Cadena maestra (desde el destino hacia atrás): music ← fade ← duck ← trim ← limitador ← glue ← drive ← lp ← hp ← bus
   function master() {
     const into = (target, kind) => ctx.nodes.find((n) => n.kind === kind && n.outs.has(target));
-    const limiter = into(ctx.destination, 'comp');
-    const music = limiter && into(limiter, 'gain');
+    const music = into(ctx.destination, 'gain');
     const fade = music && into(music, 'gain');
     const duck = fade && into(fade, 'gain');
-    const lp = duck && into(duck, 'biquad');
+    const trim = duck && into(duck, 'gain');
+    const limiter = trim && into(trim, 'comp');
+    const glue = limiter && into(limiter, 'comp');
+    const drive = glue && into(glue, 'gain');
+    const lp = drive && into(drive, 'biquad');
     const hp = lp && into(lp, 'biquad');
     const busN = hp && into(hp, 'gain');
-    return { limiter, music, fade, duck, lp, hp, bus: busN };
+    return { limiter, glue, drive, trim, music, fade, duck, lp, hp, bus: busN };
   }
   /** Ganancia de una fuente hasta el bus (producto de las GainNode del camino seco). */
   function srcGain(src, t, m) {
@@ -857,7 +860,7 @@ await asection('Motor DJ: voz, pausa, salto de tramo, apagar y parar', async () 
     // Ducking
     globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } }));
     await sim.advance(0.2, each);
-    ok(Math.abs(m.duck.gain.value - 10 ** (-9 / 20)) < 0.03, `voz ⇒ −9 dB (${m.duck.gain.value.toFixed(3)})`);
+    ok(Math.abs(m.duck.gain.value - 10 ** (-11 / 20)) < 0.03, `voz ⇒ −11 dB (${m.duck.gain.value.toFixed(3)})`);
     globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } }));
     await sim.advance(0.15, each);
     ok(m.duck.gain.value < 0.9, 'la relajación es suave (450 ms)');
@@ -899,7 +902,27 @@ await asection('Motor DJ: voz, pausa, salto de tramo, apagar y parar', async () 
     // Volumen y efectos
     eng.setVolume(0.5);
     await sim.advance(0.5, each);
-    ok(Math.abs(m.music.gain.value - 0.25) < 0.02, 'setVolume(0,5) ⇒ ganancia 0,25 (curva cuadrática)');
+    ok(Math.abs(m.music.gain.value - 0.5 ** 1.25) < 0.02, `setVolume(0,5) ⇒ ganancia ${(0.5 ** 1.25).toFixed(3)} (−7,5 dB: curva v^(1+(1−v)²))`);
+    eng.setVolume(0.8);
+    await sim.advance(0.5, each);
+    ok(Math.abs(20 * Math.log10(m.music.gain.value) + 2.02) < 0.1, `setVolume(0,8) ⇒ −2 dB (${(20 * Math.log10(m.music.gain.value)).toFixed(2)} dB; antes −3,9)`);
+    // Dinámica a nivel fijo antes del volumen y de la voz: glue suave + limitador (techo −3 dB, ataque 1 ms)
+    ok(m.glue && m.limiter && m.drive && m.trim, 'maestro: drive → glue → limitador → trim → duck → fade → volumen → destino');
+    ok(m.glue && m.glue.ratio.value === 2 && m.glue.threshold.value === -18 && m.glue.attack.value === 0.01, 'glue: −18 dB, 2:1, ataque 10 ms');
+    ok(m.limiter && m.limiter.ratio.value === 20 && m.limiter.threshold.value === -3 && m.limiter.attack.value === 0.001, 'limitador: −3 dB, 20:1, ataque 1 ms');
+    ok(m.trim && Math.abs(20 * Math.log10(m.trim.gain.value) + 1.7) < 0.01, 'trim −1,7 dB (descuenta la compensación automática del limitador)');
+    const dyn = eng.status().dyn;
+    ok(dyn && Number.isFinite(dyn.glue) && Number.isFinite(dyn.limiter), 'status().dyn: reducción de ganancia del glue y del limitador');
+    // Al 100 % la música suena 2 dB más: el coach la agacha esos 2 dB de más (la voz queda igual de clara)
+    eng.setVolume(1);
+    globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } }));
+    await sim.advance(0.3, each);
+    ok(Math.abs(20 * Math.log10(m.duck.gain.value) + 13.02) < 0.3, `voz al 100 % ⇒ −13 dB (${(20 * Math.log10(m.duck.gain.value)).toFixed(1)} dB)`);
+    eng.setVolume(0.8);
+    await sim.advance(0.3, each);
+    ok(Math.abs(20 * Math.log10(m.duck.gain.value) + 11) < 0.3, `bajar el volumen con la voz sonando re-ajusta el agachado (${(20 * Math.log10(m.duck.gain.value)).toFixed(1)} dB)`);
+    globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } }));
+    await sim.advance(1, each);
     eng.setEffects(false);
     // Apagar y encender
     eng.setEnabled(false);
@@ -1186,7 +1209,7 @@ await asection('Motor DJ: reloj atascado, salto a compás, ducking en transició
     if (jf) {
       globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } }));
       await sim.advance(0.25, each);
-      ok(Math.abs(m.duck.gain.value - 10 ** (-6 / 20)) < 0.04, `voz en una transición filtrada ⇒ −6 dB (${(20 * Math.log10(m.duck.gain.value)).toFixed(1)} dB)`);
+      ok(Math.abs(m.duck.gain.value - 10 ** (-10 / 20)) < 0.04, `voz en una transición filtrada ⇒ −10 dB (${(20 * Math.log10(m.duck.gain.value)).toFixed(1)} dB)`);
       globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } }));
       await sim.advance(1, each);
       ok(m.duck.gain.value > 0.97, 'tras la voz vuelve a 0 dB');
@@ -1200,6 +1223,70 @@ await asection('Motor DJ: reloj atascado, salto a compás, ducking en transició
     ok(sim.voices(sim.ctx.currentTime).some((v) => v.g > 0.3), 'setEnabled(true): vuelve a sonar (redecodifica)');
     eng.destroy();
   } finally { sim.restore(); }
+});
+
+// Reanudar a menos de RESUME_FADE (0,6 s) de la primera acción de una mezcla: con el fundido de entrada en la ganancia
+// de la voz, la mezcla la reprogramaba (setAt(O.gain, 1, inicio)) → silencio hasta su arranque y golpe a pleno.
+await asection('Motor DJ: reanudar justo antes de una mezcla (sin hueco ni golpe)', async () => {
+  const w = buildWorkout('pyramid', { minutes: 20, levels: LEVELS, seed: 3 });
+  const plan = buildMusicPlan(w, libTracks, { seed: 3 });
+  const firstAction = (c) => c.atSec - Math.max(c.leadSec, c.atSec - c.entryAt);
+  const cues = plan.cues.filter((c) => c.change === 'track' && c.transition === 'riser-drop').slice(0, 2);
+  ok(cues.length === 2, 'Pirámide 20′ s3: hay dos riser-drop para probar');
+  for (const c of cues) {
+    for (const d of [0.15, 0.45]) {
+      const sim = makeSim();
+      try {
+        const { createMusicEngine } = await import('../js/audio/music.js');
+        const eng = createMusicEngine({ getAudioContext: () => sim.ctx });
+        eng.unlock();
+        eng.load(plan, LIB_BY_ID);
+        await sim.advance(1.5);
+        const t0 = sim.clock.ms / 1000;
+        let off = 0;
+        let running = true;
+        eng.start(0);
+        let acc = 0;
+        const each = (now) => { acc += 0.01; if (acc >= 0.25) { acc = 0; if (running) eng.update(now - t0 - off, { status: 'running' }); } };
+        await sim.advance(3, each);
+        const Tp = firstAction(c) - d;
+        off -= Tp - 8 - (sim.clock.ms / 1000 - t0 - off);
+        eng.seek(Tp - 8);
+        await sim.advance(8, each);
+        eng.pause();
+        running = false;
+        await sim.advance(3);
+        off += 3;
+        running = true;
+        // Nivel real hasta el destino: todas las GainNode de cada camino (también drive, trim, duck, fade y volumen)
+        const toDest = (n, t, seen = new Set()) => {
+          if (n === sim.ctx.destination) return 1;
+          if (seen.has(n) || seen.size > 30) return 0;
+          seen.add(n);
+          let s = 0;
+          for (const o of n.outs) s += toDest(o, t, seen);
+          seen.delete(n);
+          return (n.kind === 'gain' ? n.gain.at(t) : 1) * s;
+        };
+        const level = (t) => sim.ctx.sources.filter((s) => s.buffer?.isFake && s.playing(t)).reduce((a, s) => a + toDest(s, t), 0);
+        const cRes = sim.ctx.currentTime;
+        eng.resume();
+        let prev = null;
+        let jump = 0;
+        let silent = 0;
+        await sim.advance(1.5, (now) => {
+          each(now);
+          const ct = sim.ctx.currentTime;
+          const a = level(ct);
+          if (prev != null && ct - cRes > 0.08) jump = Math.max(jump, Math.abs(a - prev));
+          if (ct - cRes > 0.25 && ct - cRes < 1 && a < 0.05) silent += 0.01;
+          prev = a;
+        });
+        ok(jump < 0.3 && silent < 0.02, `reanudar ${d} s antes de la mezcla de ${c.atSec} s: sin golpe (${jump.toFixed(2)}/10 ms) ni hueco (${silent.toFixed(2)} s)`);
+        eng.destroy();
+      } finally { sim.restore(); }
+    }
+  }
 });
 
 await asection('Motor DJ: contexto inyectado ({ context, now }) sin temporizadores', async () => {

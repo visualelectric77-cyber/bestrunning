@@ -170,7 +170,8 @@ section('music.js · getAnalyser() tras musicGain');
     ok(eng.getAnalyser() === a && analysers.length === 1, 'siempre el mismo nodo (no se crean más)');
     // está enganchado en derivación: algún GainNode (musicGain) lo tiene entre sus salidas y el analizador no tiene salidas
     ok(a.outs.size === 0, 'el analizador no tiene salidas (no altera el sonido)');
-    ok(gains.some((g) => g.outs.has(a) && [...g.outs].some((o) => o.threshold)), 'enganchado a musicGain (la ganancia que va al limitador)');
+    ok(gains.some((g) => g.outs.has(a) && g.outs.has(ctx.destination)), 'enganchado a musicGain (el volumen, lo último antes del destino)');
+    ok(a.minDecibels === -97 && a.maxDecibels === -27, 'ventana de dB desplazada +3 dB (la salida sube ≈ 3 dB: la escena reacciona igual)');
     eng.setEnabled(false);
     ok(eng.getAnalyser() === null, 'música apagada → null');
     eng.setEnabled(true);
@@ -359,6 +360,25 @@ section('pantallas · carga en Node');
   for (const id of ['st-vq', 'st-ghost', 'st-bob', 'st-tvmode']) ok(src.includes(`'${id}'`), `ajuste ${id}`);
   const msrc = readFileSync(join(ROOT, 'js/audio/music.js'), 'utf8');
   ok(/nowPlaying, beatPhase, getAnalyser,/.test(msrc), 'music.js devuelve getAnalyser en su API');
+  // Hoja «Sonido» (mantener ♪): volumen de música y voz en vivo, guardado en los mismos ajustes que Perfil
+  ok(/const SND_HOLD_MS = 450;/.test(psrc) && /function bindSoundHold\(/.test(psrc), 'mantener ♪ 450 ms abre «Sonido»');
+  ok(/openSheet\(\{[\s\S]{0,80}cls: 'mu-snd'/.test(psrc), "la hoja usa openSheet({ cls: 'mu-snd' })");
+  ok(/mcall\('setVolume', v\)/.test(psrc) && /coachCall\('updateSettings', \{ volume: v \}\)/.test(psrc), 'aplica al instante: music.setVolume y coach.updateSettings({ volume })');
+  ok(/d\.music\.volume = /.test(psrc) && /d\.audio\.volume = /.test(psrc), 'guarda state.music.volume y state.audio.volume');
+  ok(/act === 'music' && performance\.now\(\) - sndHeldAt < 1200/.test(psrc), 'soltar tras la pulsación larga no apaga la música');
+  ok(/'touchend'[\s\S]{0,80}preventDefault/.test(psrc), 'iOS: sin clic sintético sobre el fondo de la hoja recién abierta');
+  ok(/SND_HINT_KEY = 'br:snd-hint'/.test(psrc) && /SND_HINT_CLASSES = 2/.test(psrc) && /later\(maybeSoundHint, /.test(psrc), 'aviso de descubrimiento en las 2 primeras clases');
+  ok(/\|\| snd\) return false;/.test(psrc), 'con la hoja abierta los controles se recogen');
+  const csrc = readFileSync(join(ROOT, 'js/ui/components.js'), 'utf8');
+  ok(/onClose = null, cls = '' \} = \{\}\)/.test(csrc), 'openSheet acepta cls');
+  const musicCss = readFileSync(join(ROOT, 'css/music.css'), 'utf8');
+  const sndCss = musicCss.slice(musicCss.indexOf('.sheet-backdrop.mu-snd'), musicCss.indexOf('/* Importar */'));
+  ok(sndCss.length > 200 && /\.sheet\.mu-snd \{[^}]*backdrop-filter: none/.test(sndCss) && /\.sheet-backdrop\.mu-snd \{[^}]*backdrop-filter: none/.test(sndCss), '«Sonido» sin backdrop-filter (§15.3)');
+  ok(/\.mu-snd__step \{[^}]*width: 52px;[^}]*height: 52px/.test(sndCss) && /\.mu-snd__bar \{[^}]*height: 52px/.test(sndCss), '«Sonido»: objetivos táctiles de 52 px');
+  ok(/@media \(orientation: landscape\) and \(max-height: 620px\) \{\s*(\/\*[\s\S]*?\*\/\s*)?\.sheet\.mu-snd \{[^}]*right: max\(var\(--gutter\), var\(--safe-r\)\);[^}]*\* 0\.44/.test(sndCss),
+    '«Sonido» en horizontal: la columna derecha del HUD (44 % del ancho útil, márgenes de zona segura): no tapa la cifra');
+  const ssrc = readFileSync(join(ROOT, 'js/screens/settings.js'), 'utf8');
+  ok(/mantén pulsado ♪/.test(ssrc), 'Perfil → Música explica el ajuste en plena clase');
   for (const f of ['js/screens/player.js', 'js/screens/settings.js', 'js/core/store.js', 'sw.js']) {
     const t = readFileSync(join(ROOT, f), 'utf8');
     ok(!/console\.log\(|\balert\(|\bconfirm\(/.test(t), `${f}: sin console.log/alert/confirm`);

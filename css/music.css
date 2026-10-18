@@ -60,6 +60,29 @@
 .pl.is-own-music .mu-duo__btn--music,
 .pl.is-music-na .mu-duo__btn--music { color: var(--text-3); }
 .pl.is-music-na .mu-duo__btn--music svg { filter: none; }
+/* Mantener ♪ (450 ms) abre «Sonido»: anillo que se llena mientras mantienes; aviso de descubrimiento que late */
+.mu-duo__hold {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(#fff calc(var(--mu-p) * 1turn), rgba(255, 255, 255, 0.16) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+}
+.mu-duo__btn--music.is-holding { transform: scale(0.92); background: rgba(255, 255, 255, 0.14); }
+.mu-duo__btn--music.is-holding .mu-duo__hold { opacity: 1; animation: mu-ring 450ms linear forwards; }
+.mu-duo__btn--music.is-hint::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--zc) 75%, #fff);
+  pointer-events: none;
+  opacity: 0;
+  animation: mu-hint 1.5s var(--ease-out) 0.2s 3;
+}
 @media (max-width: 400px) {
   .mu-duo { height: 46px; padding: 0 2px; }
   .mu-duo__btn { width: 38px; height: 42px; }
@@ -307,6 +330,139 @@ button.mu-ready:active { transform: scale(0.985); }
 .mu-range::-moz-range-progress { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #ff9500, #ff375f); }
 .mu-range::-moz-range-thumb { width: 28px; height: 28px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4); }
 .mu-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent), 0 2px 8px rgba(0, 0, 0, 0.4); }
+
+/* ═════════════════ Reproductor: hoja «Sonido» (mantener ♪) ═════════════════
+   Compacta y opaca, sin backdrop-filter (§15.3): el HUD y la escena siguen viéndose detrás, apenas atenuados.
+   Dos barras grandes de arrastre relativo (Música · Voz del coach) con − / + de 52 px para manos sudadas. */
+.sheet-backdrop.mu-snd {
+  background: rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.sheet.mu-snd {
+  --sheet-r: 30px;
+  max-width: 460px;
+  background: rgb(22, 24, 30);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.mu-snd .sheet__header { min-height: 42px; padding: 4px 14px 2px 20px; }
+.mu-snd .sheet__title { font-size: 19px; }
+.mu-snd .sheet__body { padding: 6px 16px 8px; }
+.mu-snd__rows { display: flex; flex-direction: column; gap: 16px; }
+.mu-snd__row {
+  --fa: #d1d1d6;
+  --fb: #f5f5f7;
+  --knob: rgba(0, 0, 0, 0.34);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mu-snd__row[data-snd="music"] { --fa: #ff9500; --fb: #ff375f; --knob: rgba(255, 255, 255, 0.92); }
+.mu-snd__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 4px; }
+.mu-snd__lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font: 600 15px/1.2 var(--font);
+  color: var(--text);
+  white-space: nowrap;
+}
+.mu-snd__lbl > svg { flex: none; color: var(--text-2); }
+.mu-snd__row[data-snd="music"] .mu-snd__lbl > svg { color: #ff9f0a; }
+.mu-snd__tag {
+  padding: 3px 7px;
+  border-radius: 6px;
+  font: 700 10.5px/1 var(--font);
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.08);
+}
+.mu-snd__val { flex: none; min-width: 4.4ch; text-align: right; font: 700 18px/1 var(--font-display); font-variant-numeric: tabular-nums; color: #fff; transition: color 160ms ease; }
+.mu-snd__ctl { display: flex; align-items: center; gap: 10px; }
+.mu-snd__step {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform 160ms var(--ease-spring), background-color 160ms ease, opacity 200ms ease;
+}
+.mu-snd__step:active, .mu-snd__step.is-pressed { transform: scale(0.9); background: rgba(255, 255, 255, 0.2); }
+.mu-snd__row.is-min [data-snd-step="-1"], .mu-snd__row.is-max [data-snd-step="1"] { opacity: 0.35; }
+/* Barra: el relleno llega al borde derecho del pulgar (18 px) y el pulgar es una muesca de 4 px dentro del relleno */
+.mu-snd__bar {
+  --f: 0.8;
+  --edge: calc(18px + var(--f) * (100% - 18px));
+  flex: 1;
+  min-width: 0;
+  height: 52px;
+  margin: 0;
+  padding: 0;
+  border-radius: 16px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.mu-snd__bar:focus { outline: none; }
+.mu-snd__bar:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.mu-snd__bar::-webkit-slider-runnable-track {
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, var(--fa) 0, var(--fb) var(--edge), rgba(255, 255, 255, 0.1) var(--edge));
+  transition: filter 160ms ease;
+}
+.mu-snd__bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 18px;
+  height: 26px;
+  margin-top: 13px;
+  border: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-radius: 0;
+  background: var(--knob);
+  background-clip: padding-box;
+  box-shadow: none;
+}
+.mu-snd__bar::-moz-range-track { height: 52px; border-radius: 16px; background: rgba(255, 255, 255, 0.1); }
+.mu-snd__bar::-moz-range-progress { height: 52px; border-radius: 16px; background: linear-gradient(90deg, var(--fa), var(--fb)); }
+.mu-snd__bar::-moz-range-thumb { width: 4px; height: 26px; border: 0; border-radius: 2px; background: var(--knob); }
+.mu-snd__row.is-active .mu-snd__bar::-webkit-slider-runnable-track { filter: brightness(1.12); }
+.mu-snd__row.is-active .mu-snd__val { color: var(--fb); }
+.mu-snd__note { margin: 14px 4px 2px; font: 500 12.5px/1.35 var(--font); color: var(--text-3); text-align: center; }
+/* Horizontal (iPhone en el soporte): la hoja va a la columna derecha y la velocidad de la izquierda sigue a la vista */
+@media (orientation: landscape) and (max-height: 620px) {
+  /* = la columna derecha del HUD horizontal (player.css: minmax(320px, 44%) del ancho útil, con sus mismos márgenes):
+     con 50vw tapaba el último dígito de «13,0» en un iPhone de 852 × 393 pt */
+  .sheet.mu-snd {
+    left: auto;
+    right: max(var(--gutter), var(--safe-r));
+    width: min(420px, max(300px, calc((100vw - max(var(--gutter), var(--safe-l)) - max(var(--gutter), var(--safe-r))) * 0.44)));
+    max-width: none;
+    margin: 0;
+    bottom: 6px;
+  }
+  .mu-snd .sheet__header { min-height: 38px; padding-top: 2px; }
+  .mu-snd .sheet__body { padding-top: 2px; }
+  .mu-snd__rows { gap: 12px; }
+  .mu-snd__note { margin-top: 10px; }
+}
 
 /* Importar */
 .mu-import { display: flex; flex-direction: column; gap: var(--s-3); }
@@ -652,6 +808,7 @@ button.mu-ready:active { transform: scale(0.985); }
 @keyframes mu-shimmer { from { background-position: 0% 0; } to { background-position: -200% 0; } }
 @keyframes mu-hit { 0% { transform: scale(0.96); background-color: rgba(255, 106, 26, 0.35); } 100% { transform: scale(1); } }
 @keyframes mu-nudge { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+@keyframes mu-hint { 0% { opacity: 0.95; transform: scale(0.92); } 100% { opacity: 0; transform: scale(1.45); } }
 @keyframes mu-heart { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.22); } 30% { transform: scale(1); } 45% { transform: scale(1.12); } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -663,4 +820,6 @@ button.mu-ready:active { transform: scale(0.985); }
   .mu-tap.is-hit, .mu-play.is-playing:not(.is-live) .mu-play__ring { animation: none !important; }
   .mu-hero__eq i { transform: scaleY(0.6); }
   .mu-switch span, .mu-duo__slash { transition: none; }
+  .mu-duo__btn--music.is-hint::after { animation: none; }
+  .mu-snd__step, .mu-snd__bar::-webkit-slider-runnable-track { transition: none; }
 }

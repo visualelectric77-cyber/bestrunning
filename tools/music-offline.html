@@ -18,7 +18,9 @@
 <body>
 <h1>Motor DJ · render offline (OfflineAudioContext a 48 y 44,1 kHz)</h1>
 <p>Clase real + plan real + motor real sobre un contexto offline; analiza huecos, clics, baches relativos y sonoridad, y sube informe y WAV al servidor del laboratorio.
-  Parámetros: <code>?only=piramide|bloques|lenta|retardo3|retardo12|congelado</code> (varias con comas) · <code>?step=0.25</code> · <code>?upload=0</code></p>
+  Parámetros: <code>?only=piramide|bloques|lenta|retardo3|retardo12|congelado</code> (varias con comas) · <code>?step=0.25</code> · <code>?upload=0</code> ·
+  <code>?vols=0.8,1</code> (cada sesión a esos volúmenes) · <code>?ch=2</code> (todas en estéreo) · <code>?lite=1</code> (solo niveles: sin clics/huecos/baches) ·
+  <code>?tag=nombre</code> (informe <code>nombre.json</code>) · <code>?ab=1</code> (sube el pasaje de 15 s con aviso del coach de la Pirámide) · <code>?master={…}</code> (ajustes del maestro, pruebas)</p>
 <div id="status">Preparando…</div>
 <pre id="log"></pre>
 <script type="module">
@@ -26,8 +28,23 @@ import { buildWorkout } from '../js/training/generator.js';
 import { buildMusicPlan, trackGrid } from '../js/audio/music-plan.js';
 import { loadLibrary, libraryById, fetchTrackData } from '../js/audio/music-library.js';
 import { createMusicEngine } from '../js/audio/music.js';
+import { clipGapAfter } from '../js/audio/audio-engine.js';
+import { speedClip, PACK_SCRIPT } from '../js/audio/voice-pack.js';
 
 const qs = new URLSearchParams(location.search);
+const VOLS = qs.get('vols') ? qs.get('vols').split(',').map(Number).filter((v) => v >= 0 && v <= 1) : [null];
+const FORCE_CH = Number(qs.get('ch')) || 0;
+const LITE = qs.get('lite') === '1';
+const TAG = (qs.get('tag') || '').replace(/[^a-z0-9._-]/gi, '');
+const AB = qs.get('ab') === '1';
+let MASTER = null;
+try { MASTER = qs.get('master') ? JSON.parse(qs.get('master')) : null; } catch { MASTER = null; }
+// Coach simulado con el pack grabado (audio-engine.js): pre-aviso «sube/baja a…» + velocidad, por su propia cadena
+// (ganancia → compresor −10 dB, rodilla 8, 4:1, 3 ms / 150 ms) y sumado a la música en el destino, como en el iPhone
+const PACK = '../audio/packs/eva/';
+const VOICE_PREROLL = 0.08;
+const VOICE_COMP = { threshold: -10, knee: 8, ratio: 4, attack: 0.003, release: 0.15 };
+const SCRIPT = new Map(PACK_SCRIPT.map((c) => [c.id, c]));
 let SR = 44100;                       // frecuencia del render en curso (la de cada sesión)
 const CAL_SR = 48000;                 // la del iPhone
 const STEP = Number(qs.get('step')) || 0.25;
@@ -99,6 +116,76 @@ const SESSIONS = [
 
 /* ───────────── Render ───────────── */
 
+/* ───────────── Coach simulado (clips reales del pack) ───────────── */
+
+const coachCache = new Map();   // `${id}@${sr}` → AudioBuffer recortado como en audio-engine.js
+
+/** trimSilence de audio-engine.js: quita el relleno del mp3 dejando `head` s delante y hasta `tail` s detrás. */
+function trimClip(c, buf, head, tail) {
+  const data = buf.getChannelData(0);
+  let a = 0;
+  let b = data.length - 1;
+  while (a < b && Math.abs(data[a]) < 0.008) a++;
+  while (b > a && Math.abs(data[b]) < 0.008) b--;
+  a = Math.max(0, a - Math.round(buf.sampleRate * head));
+  b = Math.min(data.length - 1, b + Math.round(buf.sampleRate * tail));
+  const len = b - a + 1;
+  if (len <= 0 || len >= data.length - buf.sampleRate * 0.01) return buf;
+  const out = c.createBuffer(buf.numberOfChannels, len, buf.sampleRate);
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) out.copyToChannel(buf.getChannelData(ch).subarray(a, b + 1), ch);
+  return out;
+}
+
+async function coachClip(id, sr) {
+  const key = `${id}@${sr}`;
+  if (coachCache.has(key)) return coachCache.get(key);
+  const c = new OfflineAudioContext(1, 1, sr);
+  const res = await fetch(`${PACK}${id}.mp3`);
+  if (!res.ok) throw new Error(`clip ${id}: HTTP ${res.status}`);
+  const buf = await c.decodeAudioData(await res.arrayBuffer());
+  const out = trimClip(c, buf, 0.012, SCRIPT.get(id)?.kind === 'carrier' ? 0.17 : 0.06);
+  coachCache.set(key, out);
+  return out;
+}
+
+/** Pre-aviso del cambio de tramo: «sube a…» / «baja a…» / pre-aviso de sprint + la velocidad del tramo siguiente. */
+function coachIds(prev, next) {
+  const carrier = next.zone === 'sprint' ? 'sprintpre_1' : (Number(next.speed) || 0) >= (Number(prev.speed) || 0) ? 'up_1' : 'down_1';
+  const s = speedClip(Math.min(15.5, Math.max(6, Number(next.speed) || 8.3)));
+  return s ? [carrier, s] : [carrier];
+}
+
+/** Secuencia como la de playClips: [{ buffer, at }] y su duración (sin el preroll). */
+async function coachSeq(ids, sr) {
+  let at = 0;
+  const items = [];
+  for (const [k, id] of ids.entries()) {
+    const buffer = await coachClip(id, sr);
+    items.push({ buffer, at });
+    at += buffer.duration + (k < ids.length - 1 ? clipGapAfter(id) : 0);
+  }
+  return { items, sec: at };
+}
+
+/** La voz sola por su cadena (gain 1 → master 1 → compresor del coach → destino), desde el instante 0. */
+async function renderCoach(seq, sr, channels) {
+  const c = new OfflineAudioContext(channels, Math.round((seq.sec + 0.3) * sr), sr);
+  const comp = c.createDynamicsCompressor();
+  for (const [k, v] of Object.entries(VOICE_COMP)) comp[k].value = v;
+  const master = c.createGain();
+  const g = c.createGain();
+  g.connect(master);
+  master.connect(comp);
+  comp.connect(c.destination);
+  for (const it of seq.items) {
+    const s = c.createBufferSource();
+    s.buffer = it.buffer;
+    s.connect(g);
+    s.start(it.at);
+  }
+  return c.startRendering();
+}
+
 async function render(S, tracks) {
   SR = S.sr || 44100;
   const byId = libraryById(tracks);
@@ -135,15 +222,22 @@ async function render(S, tracks) {
       p.go = () => { p.state = 'go'; fetchTrackData(t).then(resolve, reject).finally(() => { p.state = 'done'; }); };
       pendingLoads.push(p);
     }) : null;
-  const eng = createMusicEngine({ context: ctx, now: () => ctx.currentTime, decodeTimeoutMs: 120000, loadData });
-  log(`${S.label}: ${w.segments.length} tramos · ${plan.cues.length} cues · ${Math.round(w.totalSec)} s de clase · render ${Math.round(renderSec)} s · ${ctx.destination.channelCount} canal(es)`);
+  const eng = createMusicEngine({ context: ctx, now: () => ctx.currentTime, decodeTimeoutMs: 120000, loadData, ...(MASTER ? { master: MASTER } : {}) });
+  if (S.volume != null) eng.setVolume(S.volume);
+  log(`${S.label}${S.volume != null ? ` · volumen ${Math.round(S.volume * 100)} %` : ''}: ${w.segments.length} tramos · ${plan.cues.length} cues · ${Math.round(w.totalSec)} s de clase · render ${Math.round(renderSec)} s · ${ctx.destination.channelCount} canal(es)`);
   setStatus(`${S.label}: decodificando la primera pista…`);
   const loaded = await eng.load(plan, byId);
   if (!loaded) throw new Error('load() devolvió false');
 
-  // Voz del coach: avisos de 2,2 s en cada cambio de tramo (10 s antes), como el ducking real
+  // Voz del coach: pre-aviso grabado 10 s antes de cada cambio de tramo («sube a… once coma cinco»); br:voice al
+  // empezar (la voz suena 80 ms después, como playClips) y al acabar, como el ducking real
   const voice = [];
-  for (const s of starts.slice(1)) voice.push({ on: s - 10, off: s - 7.8 });
+  for (let k = 1; k < w.segments.length; k++) {
+    const ids = coachIds(w.segments[k - 1], w.segments[k]);
+    const seq = await coachSeq(ids, SR);
+    voice.push({ on: starts[k] - 10, off: starts[k] - 10 + VOICE_PREROLL + seq.sec, ids, seq, zone: w.segments[k].zone, ctxOn: null, ctxOff: null });
+  }
+  const grLog = [];               // [ctxT, glue, limiter] reducción de ganancia muestreada en cada paso
 
   const marks = [];               // [ctxT, classT, estado]
   const voiceLog = [];            // voces del motor (pista, c0, p0, rate, inicio y fin) para verificar los clics
@@ -207,14 +301,22 @@ async function render(S, tracks) {
       }
     }
     // Voz del coach
-    while (vi < voice.length && classT >= voice[vi].off) { if (speaking) { dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } })); speaking = false; } vi++; }
-    if (vi < voice.length && !speaking && classT >= voice[vi].on) { dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } })); speaking = true; }
+    while (vi < voice.length && classT >= voice[vi].off) {
+      if (speaking) { dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } })); speaking = false; voice[vi].ctxOff = ctx.currentTime; }
+      vi++;
+    }
+    if (vi < voice.length && !speaking && classT >= voice[vi].on) {
+      dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } }));
+      speaking = true;
+      voice[vi].ctxOn = ctx.currentTime;
+    }
     if (classT >= w.totalSec) {
       if (!finished) { finished = true; eng.update(w.totalSec, { status: 'finished' }); }
       else eng.update(w.totalSec, { status: 'finished' });
     } else eng.update(classT, { status: 'running' });
     marks.push([ctx.currentTime, classT, 'run']);
     const st = eng.status();
+    if (st.dyn) grLog.push([ctx.currentTime, st.dyn.glue ?? null, st.dyn.limiter ?? null]);
     // Voces que ya no están (paradas en una pausa o fundidas sin pasar por un paso): su fin es ahora
     const present = new Set(st.voices.map((v) => `${v.trackId}|${v.c0.toFixed(6)}|${v.p0.toFixed(6)}`));
     for (const [k, v] of voiceMap) if (v.stopC === Infinity && !present.has(k)) v.stopC = ctx.currentTime;
@@ -259,7 +361,7 @@ async function render(S, tracks) {
   const finalStatus = eng.status();
   eng.destroy();
   for (const v of voiceLog) if (!(v.stopC < Infinity)) v.stopC = Infinity;
-  return { S, w, plan, starts, buf, marks, decodes, kinds, jobs, pauses, seeks, sleeps, freezes, renderMs, waitMs, finalStatus, voice, byId, voiceLog };
+  return { S, w, plan, starts, buf, marks, decodes, kinds, jobs, pauses, seeks, sleeps, freezes, renderMs, waitMs, finalStatus, voice, byId, voiceLog, grLog };
 }
 
 /* ───────────── Análisis ───────────── */
@@ -651,6 +753,182 @@ function integrated(blocks) {
   return g.length ? meanE(g) : meanE(abs);
 }
 
+/* ───────────── Niveles: true peak, sonoridad a corto plazo, reducción de ganancia, coach ───────────── */
+
+const r2 = (x) => Math.round(x * 100) / 100;
+const TP_HALF = 16;
+// Sobremuestreo ×4 (BS.1770-4, anexo 2): 3 fases fraccionarias de un sinc con ventana de Hann de 32 coeficientes
+const TP_PH = [0.25, 0.5, 0.75].map((f) => {
+  const h = new Float64Array(2 * TP_HALF);
+  let s = 0;
+  for (let j = 0; j < h.length; j++) {
+    const x = f - (j - TP_HALF + 1);
+    const sinc = Math.abs(x) < 1e-9 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x);
+    h[j] = sinc * (0.5 + 0.5 * Math.cos((Math.PI * x) / (TP_HALF + 0.5)));
+    s += h[j];
+  }
+  for (let j = 0; j < h.length; j++) h[j] /= s;
+  return h;
+});
+
+/**
+ * True peak (dBTP) y pico de muestra (dBFS) de unos canales en [from, to) muestras. Solo se interpola alrededor de las
+ * muestras a menos de 3 dB del pico (un pico entre muestras > 3 dB sobre sus vecinas no se da en música). `hop`:
+ * además cuenta las ventanas de `hop` muestras con true peak > `lim` dBTP.
+ */
+function truePeak(chs, { from = 0, to = Infinity, hop = 0, lim = -1 } = {}) {
+  let sp = 0;
+  for (const ch of chs) for (let i = from, e = Math.min(ch.length, to); i < e; i++) { const a = Math.abs(ch[i]); if (a > sp) sp = a; }
+  const thr = sp * 10 ** (-3 / 20);
+  const L = 10 ** (lim / 20);
+  const over = new Set();
+  let tp = sp;
+  for (const ch of chs) {
+    const e = Math.min(ch.length - TP_HALF - 1, to);
+    for (let i = Math.max(from, TP_HALF - 1); i < e; i++) {
+      const a0 = Math.abs(ch[i]);
+      if (a0 < thr && Math.abs(ch[i + 1]) < thr) continue;
+      let m = a0;
+      for (const h of TP_PH) {
+        let y = 0;
+        for (let j = 0, b = i - TP_HALF + 1; j < h.length; j++) y += h[j] * ch[b + j];
+        const a = Math.abs(y);
+        if (a > m) m = a;
+      }
+      if (m > tp) tp = m;
+      if (hop && m > L) over.add(Math.floor(i / hop));
+    }
+  }
+  return { tpDb: r2(db(tp)), spDb: r2(db(sp)), over: over.size };
+}
+
+/** Sonoridad a corto plazo (ventana de 3 s, salto de 100 ms) desde los saltos K-ponderados por canal. */
+function shortTerm(hopsPerCh) {
+  const nh = Math.min(...hopsPerCh.map((h) => h.length));
+  const out = new Float32Array(Math.max(0, nh - 29));
+  const acc = hopsPerCh.map((h) => { let s = 0; for (let i = 0; i < 30 && i < h.length; i++) s += h[i]; return s; });
+  for (let i = 0; i < out.length; i++) {
+    let e = 0;
+    for (let c = 0; c < hopsPerCh.length; c++) {
+      e += acc[c] / 30;
+      if (i + 30 < hopsPerCh[c].length) acc[c] += hopsPerCh[c][i + 30] - hopsPerCh[c][i];
+    }
+    out[i] = -0.691 + 10 * Math.log10(Math.max(1e-12, e));
+  }
+  return out;
+}
+
+function pctl(arr, p) {
+  if (!arr.length) return null;
+  const s = Float64Array.from(arr).sort();
+  return s[Math.min(s.length - 1, Math.max(0, Math.round(p * (s.length - 1))))];
+}
+
+/** LRA (EBU Tech 3342): corto plazo con puerta absoluta −70 y relativa −20 LU; p95 − p10. */
+function lraOf(st) {
+  const abs = st.filter((l) => l > -70);
+  if (!abs.length) return { lra: 0, p10: null, p50: null, p95: null };
+  const mean = 10 * Math.log10(abs.reduce((a, l) => a + 10 ** (l / 10), 0) / abs.length);
+  const g = abs.filter((l) => l > mean - 20);
+  const p10 = pctl(g, 0.1);
+  const p95 = pctl(g, 0.95);
+  return { lra: r1(p95 - p10), p10: r1(p10), p50: r1(pctl(g, 0.5)), p95: r1(p95), max: r1(Math.max(...g)) };
+}
+
+/** Distribución de la reducción de ganancia muestreada (dB ≥ 0) y su modulación de un paso al siguiente (bombeo). */
+function grStats(xs) {
+  const v = xs.filter((x) => Number.isFinite(x));
+  if (!v.length) return null;
+  const d = [];
+  for (let i = 1; i < v.length; i++) d.push(Math.abs(v[i] - v[i - 1]));
+  const frac = (k) => r1((100 * v.filter((x) => x > k).length) / v.length);
+  return {
+    samples: v.length, mean: r2(v.reduce((a, x) => a + x, 0) / v.length), p50: r2(pctl(v, 0.5)), p90: r2(pctl(v, 0.9)),
+    p99: r2(pctl(v, 0.99)), max: r2(Math.max(...v)), pctOver1dB: frac(1), pctOver3dB: frac(3), pctOver6dB: frac(6),
+    stepMean: d.length ? r2(d.reduce((a, x) => a + x, 0) / d.length) : 0, stepP95: d.length ? r2(pctl(d, 0.95)) : 0,
+  };
+}
+
+/** Sonoridad integrada (BS.1770, con sus puertas) de unos canales en [a, b) muestras, con 1 s de precalentamiento. */
+function lufsSpan(chs, sr, a, b) {
+  const pre = Math.min(a, sr);
+  const hops = chs.map((ch) => kHops(ch.subarray(a - pre, Math.min(ch.length, b)), sr).subarray(Math.round(pre / (0.1 * sr))));
+  return integrated(blockLoudness(hops));
+}
+
+/**
+ * Coach: en cada pre-aviso, la voz real (su cadena) frente a la música agachada en la misma ventana, la música justo
+ * antes (−3,5…−0,3 s) y el pico de la suma (lo que llega al DAC del iPhone).
+ */
+async function coachStats(R, chs, sr, skip) {
+  const cues = [];
+  const jobs = [...R.jobs.values()];
+  for (const v of R.voice) {
+    if (v.ctxOn == null || v.ctxOff == null || skip(v.ctxOn) || skip(v.ctxOff)) continue;
+    const v0 = v.ctxOn + VOICE_PREROLL;
+    const n0 = Math.round(v0 * sr);
+    const nv = Math.round(v.seq.sec * sr);
+    if (n0 - 4 * sr < 0 || n0 + nv + sr > chs[0].length) continue;
+    const vb = await renderCoach(v.seq, sr, chs.length);
+    const vch = [];
+    for (let k = 0; k < vb.numberOfChannels; k++) vch.push(vb.getChannelData(k));
+    const Lm = lufsSpan(chs, sr, n0, n0 + nv);
+    const Lv = lufsSpan(vch, sr, 0, nv);
+    const Lpre = lufsSpan(chs, sr, Math.round((v.ctxOn - 3.5) * sr), Math.round((v.ctxOn - 0.3) * sr));
+    const a = n0 - Math.round(0.2 * sr);
+    const len = nv + Math.round(0.4 * sr);
+    const sum = chs.map((ch, k) => {
+      const out = new Float32Array(len);
+      const src = vch[Math.min(k, vch.length - 1)];
+      for (let i = 0; i < len; i++) { const j = a + i - n0; out[i] = ch[a + i] + (j >= 0 && j < src.length ? src[j] : 0); }
+      return out;
+    });
+    const tpSum = truePeak(sum);
+    const tpVoice = truePeak(vch);
+    const tpMusic = truePeak(chs, { from: n0, to: n0 + nv });
+    const job = jobs.find((j) => j.first < v.ctxOff && j.end > v.ctxOn);
+    cues.push({
+      t: r3(v.ctxOn), classT: r1(v.on), next: v.zone, ids: v.ids, mix: job ? job.kind : null,
+      musicPreLufs: r1(Lpre), musicLufs: r1(Lm), voiceLufs: r1(Lv), voiceOverMusic: r1(Lv - Lm), duckDb: r1(Lm - Lpre),
+      musicTruePeakDb: tpMusic.tpDb, voiceTruePeakDb: tpVoice.tpDb, sumTruePeakDb: tpSum.tpDb,
+    });
+    v.render = vch;
+  }
+  const col = (k, f = (x) => true) => cues.filter(f).map((c) => c[k]).filter(Number.isFinite);
+  const sumUp = (xs) => (xs.length ? { min: r1(Math.min(...xs)), p50: r1(pctl(xs, 0.5)), max: r1(Math.max(...xs)) } : null);
+  const filt = (c) => ['riser-drop', 'echo-out', 'filter-fade', 'start'].includes(c.mix);
+  return {
+    cues,
+    summary: {
+      count: cues.length, voiceOverMusic: sumUp(col('voiceOverMusic')), voiceOverMusicInFilteredMix: sumUp(col('voiceOverMusic', filt)),
+      voiceOverMusicPlain: sumUp(col('voiceOverMusic', (c) => !filt(c))), duckDb: sumUp(col('duckDb')), musicLufs: sumUp(col('musicLufs')),
+      voiceLufs: sumUp(col('voiceLufs')), sumTruePeakMaxDb: cues.length ? Math.max(...col('sumTruePeakDb')) : null,
+      cuesUnder8LU: cues.filter((c) => c.voiceOverMusic < 8).length,
+    },
+  };
+}
+
+/** Pasaje de 15 s (música + voz del coach) alrededor del primer pre-aviso de sprint, para la comparación A/B. */
+function abPassage(R, chs, sr) {
+  const v = R.voice.find((x) => x.zone === 'sprint' && x.render) || R.voice.find((x) => x.render);
+  if (!v) return null;
+  const a = Math.round((v.ctxOn - 3) * sr);
+  const len = Math.round(15 * sr);
+  const n0 = Math.round((v.ctxOn + VOICE_PREROLL) * sr);
+  const fade = Math.round(0.01 * sr);
+  const out = chs.map((ch, k) => {
+    const o = new Float32Array(len);
+    const src = v.render[Math.min(k, v.render.length - 1)];
+    for (let i = 0; i < len; i++) {
+      const j = a + i - n0;
+      o[i] = (ch[a + i] || 0) + (j >= 0 && j < src.length ? src[j] : 0);
+    }
+    for (let i = 0; i < fade; i++) { o[i] *= i / fade; o[len - 1 - i] *= i / fade; }
+    return o;
+  });
+  return { chans: out, from: r3(a / sr), cueAt: r3(v.ctxOn), classT: v.on, zone: v.zone, ids: v.ids };
+}
+
 /** Una pista decodificada a la frecuencia del contexto (como el motor) reproducida `sec` s, sin el motor. */
 async function playedThrough(dec, t, fromSec, sec = 60) {
   const b = await dec.decodeAudioData(await fetchTrackData(t));
@@ -738,20 +1016,24 @@ async function analyse(R, cal) {
   const cand = [];
   let worst = 0;
   let worstAt = 0;
-  for (let c = 0; c < buf.numberOfChannels; c++) {
-    const r = clickScan(buf.getChannelData(c), { K: cal.K, from: Math.round(sr * (T0 + 0.2)), collect: 20000 });
-    cand.push(...r.hits.map((h) => ({ ...h, ch: c })));
-    if (r.worst > worst) { worst = r.worst; worstAt = r.worstAt; }
+  if (!LITE) {
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const r = clickScan(buf.getChannelData(c), { K: cal.K, from: Math.round(sr * (T0 + 0.2)), collect: 20000 });
+      cand.push(...r.hits.map((h) => ({ ...h, ch: c })));
+      if (r.worst > worst) { worst = r.worst; worstAt = r.worstAt; }
+    }
   }
   const chs = [];
   for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
   const fxTimes = [...R.jobs.values()].filter((j) => j.kind === 'riser-drop').map((j) => j.swap);
   const refs = makeRefs(R.byId, buf.numberOfChannels);
   setStatus(`${R.S.label}: verificando ${cand.length} candidatos a clic contra la música sola…`);
-  const ver = await verifyClicks(chs, sr, cand, R.voiceLog, fxTimes, R.byId, refs);
-  // Huecos: los de la propia música (paradas antes de un drop) no cuentan como fallo del motor
-  const mixDb = 20 * Math.log10(0.8 ** 2);
-  const gapsAll = await verifyGaps(gapsRaw, R.voiceLog, refs, mixDb);
+  const ver = LITE ? { clicks: [], explained: 0, inaudible: 0, fx: 0, candidates: 0 } : await verifyClicks(chs, sr, cand, R.voiceLog, fxTimes, R.byId, refs);
+  // Huecos: los de la propia música (paradas antes de un drop) no cuentan como fallo del motor. Ganancia nominal del
+  // motor a este volumen: la que declara status().levels o, en el motor antiguo, la curva v²
+  const nominal = R.finalStatus?.levels?.nominalDb;
+  const mixDb = Number.isFinite(nominal) ? nominal : 20 * Math.log10((R.S.volume ?? 0.8) ** 2);
+  const gapsAll = LITE ? gapsRaw.map((g) => ({ ...g, refDb: null, music: false, voices: [] })) : await verifyGaps(gapsRaw, R.voiceLog, refs, mixDb);
   const gaps = gapsAll.filter((g) => !g.music);
   setStatus(`${R.S.label}: baches relativos…`);
   const dipQuiet = [[0, T0 + 4.5], ...quiet.slice(1)];
@@ -759,8 +1041,8 @@ async function analyse(R, cal) {
   for (const x of [...seeks, ...(R.sleeps || [])]) dipQuiet.push([x.ctxT - 0.05, x.ctxT + 0.05]);
   const isDipQuiet = (t) => dipQuiet.some(([a, b]) => t >= a && t <= b);
   const drops = [...R.jobs.values()].filter((j) => j.kind === 'riser-drop').map((j) => j.swap);
-  const voiceWin = R.voice.map((x) => [map(x.on) - 0.1, map(x.off) + 0.8]);
-  const dipsAll = await verifyDips(relDips(rms10, rms50, F10, F50, sr, isDipQuiet), R.voiceLog, refs, drops, voiceWin);
+  const voiceWin = R.voice.map((x) => [(x.ctxOn ?? map(x.on)) - 0.1, (x.ctxOff ?? map(x.off)) + 0.8]);
+  const dipsAll = LITE ? [] : await verifyDips(relDips(rms10, rms50, F10, F50, sr, isDipQuiet), R.voiceLog, refs, drops, voiceWin);
   const dips = dipsAll.filter((d) => d.kind === 'motor');
   const clicks = { hits: ver.clicks, count: ver.clicks.length, candidates: ver.candidates, explained: ver.explained, inaudible: ver.inaudible, fx: ver.fx, worst: r1(worst), worstAt: r3(worstAt / sr) };
   // Sonoridad (K) por bloques
@@ -824,12 +1106,12 @@ async function analyse(R, cal) {
   });
   // ¿Cuánto cambia el motor la sonoridad de cada pista? Bloques con UNA sola voz a pleno (sin mezclas, sin voz del
   // coach): sonoridad del render frente a la de la pista sola en esas mismas posiciones
-  const duckWin = R.voice.map((x) => [map(x.on) - 0.2, map(x.off) + 1.6]);
+  const duckWin = R.voice.map((x) => [(x.ctxOn ?? map(x.on)) - 0.2, (x.ctxOff ?? map(x.off)) + 1.6]);
   // ocupados: otras voces y, en la propia, el tramo en que su intro va subida (+dB a propósito)
   const busy = R.voiceLog.map((v) => [v.startC, v.stopC, v]);
   for (const v of R.voiceLog) if (v.ride) busy.push([v.ride.from, v.ride.to, null]);
   setStatus(`${R.S.label}: sonoridad por tramo frente a las pistas solas…`);
-  for (const sg of segments) {
+  for (const sg of LITE ? [] : segments) {
     const vs = R.voiceLog.filter((v) => v.startC < sg.cb && v.stopC > sg.ca);
     let bestV = null;
     let bestLen = 0;
@@ -862,15 +1144,59 @@ async function analyse(R, cal) {
     sg.trackLufs = r1(ref);
     sg.engineDelta = r1(meas - ref);
   }
+  // Sonoridad por tramo sin las ventanas del coach (lo que pesa la música sola, para la dispersión entre tramos)
+  for (const sg of segments) {
+    const keep = [];
+    for (let j = Math.floor((sg.ca + 0.5) * 10); j < Math.floor((sg.cb - 0.9) * 10) && j < blocks.length; j++) {
+      const t = j / 10;
+      if (!duckWin.some(([d0, d1]) => t + 0.4 > d0 && t < d1)) keep.push(blocks[j]);
+    }
+    sg.lufsNoCoach = r1(integrated(Float32Array.from(keep)));
+  }
   for (const sg of segments) { delete sg.ca; delete sg.cb; }
   const lv = segments.map((s) => s.lufs).filter((x) => x > -60);
+  const lvn = segments.map((s) => s.lufsNoCoach).filter((x) => x > -60);
   const dl = segments.map((x) => x.engineDelta).filter((x) => Number.isFinite(x));
   const loud = {
     min: r1(Math.min(...lv)), max: r1(Math.max(...lv)), spread: r1(Math.max(...lv) - Math.min(...lv)), session: r1(integrated(blocks)),
-    engineDeltaMin: r1(Math.min(...dl)), engineDeltaMax: r1(Math.max(...dl)), engineDeltaSpread: r1(Math.max(...dl) - Math.min(...dl)),
-    expectedDelta: r1(mixDb), measuredSegments: dl.length,
+    noCoachMin: r1(Math.min(...lvn)), noCoachMax: r1(Math.max(...lvn)), noCoachSpread: r1(Math.max(...lvn) - Math.min(...lvn)),
+    engineDeltaMin: dl.length ? r1(Math.min(...dl)) : null, engineDeltaMax: dl.length ? r1(Math.max(...dl)) : null,
+    engineDeltaSpread: dl.length ? r1(Math.max(...dl) - Math.min(...dl)) : null, expectedDelta: r1(mixDb), measuredSegments: dl.length,
   };
-  return { gaps, gapsAll, dips, dipsAll, clicks, transitions, extra, segments, loud, map, quiet };
+  // Niveles: corto plazo (3 s) y LRA sin arranque/pausas/final ni ventanas del coach, true peak, reducción de ganancia
+  setStatus(`${R.S.label}: true peak, corto plazo y reducción de ganancia…`);
+  const skip = (t) => isQuiet(t) || t < T0 + 5 || seeks.some((s) => t > s.ctxT - 0.5 && t < s.ctxT + 2) || (R.sleeps || []).some((z) => t > z.ctxT && t < z.ctxT + (z.to - z.from) + 2);
+  const st = shortTerm(hops);
+  const stMusic = [];
+  const stAll = [];
+  for (let i = 0; i < st.length; i++) {
+    const a = i / 10;
+    const b = a + 3;
+    if (skip(a) || skip(b)) continue;
+    stAll.push(st[i]);
+    if (!duckWin.some(([d0, d1]) => b > d0 && a < d1)) stMusic.push(st[i]);
+  }
+  const playEnd = Math.round(Math.min(buf.length, map(w.totalSec - (plan.endFadeSec || 8)) * sr));
+  const tp = truePeak(chs, { from: Math.round((T0 + 0.5) * sr), to: playEnd, hop: Math.round(0.1 * sr), lim: -1 });
+  const grLive = R.grLog.filter(([t]) => !skip(t));
+  const blocksMusic = blocks.filter((_, j) => !skip(j / 10) && !duckWin.some(([d0, d1]) => j / 10 + 0.4 > d0 && j / 10 < d1));
+  const levels = {
+    volume: R.S.volume ?? 0.8, channels: buf.numberOfChannels, sampleRate: sr,
+    integratedLufs: r1(integrated(blocks)), integratedNoCoachLufs: r1(integrated(blocksMusic)),
+    shortTerm: { ...lraOf(stMusic), withCoach: lraOf(stAll) },
+    segments: { min: loud.min, max: loud.max, spread: loud.spread, noCoachMin: loud.noCoachMin, noCoachMax: loud.noCoachMax, noCoachSpread: loud.noCoachSpread },
+    truePeakDb: tp.tpDb, samplePeakDb: tp.spDb, plrDb: r1(tp.tpDb - integrated(blocks)),
+    windowsOverMinus1dBTP: tp.over, pctTimeOverMinus1dBTP: r2((100 * tp.over) / Math.max(1, Math.round((playEnd / sr) * 10))),
+    gr: {
+      limiter: grStats(grLive.map((g) => g[2])), glue: grStats(grLive.map((g) => g[1])),
+      total: grLive.some((g) => g[1] != null) ? grStats(grLive.map((g) => (g[1] || 0) + (g[2] || 0))) : null,
+    },
+    nominalDb: Number.isFinite(nominal) ? r2(nominal) : r2(mixDb), master: R.finalStatus?.levels || null,
+  };
+  setStatus(`${R.S.label}: coach (voz grabada frente a la música agachada)…`);
+  const coach = await coachStats(R, chs, sr, skip);
+  const ab = AB && R.S.key === 'piramide' ? abPassage(R, chs, sr) : null;
+  return { gaps, gapsAll, dips, dipsAll, clicks, transitions, extra, segments, loud, map, quiet, levels, coach, ab };
 }
 
 /* ───────────── WAV ───────────── */
@@ -919,16 +1245,28 @@ async function main() {
   setStatus('Biblioteca…');
   const tracks = await loadLibrary({ useImported: false });
   log(`Biblioteca: ${tracks.length} pistas integradas`);
-  setStatus('Calibrando el detector de clics con las pistas originales…');
-  const cal = await calibrate(tracks);
-  const K = cal.K;
-  log(`Detector de clics (${cal.method}): candidatos > ${K} σ; música limpia: ${cal.falsePositives} falsos positivos (transitorios de la música hasta ${cal.worstMusicRatio} σ, explicados por la referencia) · fallos simulados detectados: corte de 30 ms ${cal.detected.corte}/10 · arranque seco ${cal.detected.arranque}/10 · ganancia ×0,5 de golpe ${cal.detected.ganancia}/10 · escalón de 0,1 ${cal.detected.escalon}/10`, cal.selfTest ? 'ok' : 'bad');
+  let cal = { K: CAND_K, selfTest: true, skipped: true };
+  if (!LITE) {
+    setStatus('Calibrando el detector de clics con las pistas originales…');
+    cal = await calibrate(tracks);
+    log(`Detector de clics (${cal.method}): candidatos > ${cal.K} σ; música limpia: ${cal.falsePositives} falsos positivos (transitorios de la música hasta ${cal.worstMusicRatio} σ, explicados por la referencia) · fallos simulados detectados: corte de 30 ms ${cal.detected.corte}/10 · arranque seco ${cal.detected.arranque}/10 · ganancia ×0,5 de golpe ${cal.detected.ganancia}/10 · escalón de 0,1 ${cal.detected.escalon}/10`, cal.selfTest ? 'ok' : 'bad');
+  }
   const summary = {
     when: new Date().toISOString(), ua: navigator.userAgent, calibrationSr: CAL_SR, step: STEP, gapRule: `${GAP_DB} dBFS > ${GAP_MS} ms`,
-    dipRule: `${DIP_DB} dB bajo la mediana de 4 s > ${DIP_MS} ms (verificado contra la pista sola)`, calibration: cal, sessions: [],
+    dipRule: `${DIP_DB} dB bajo la mediana de 4 s > ${DIP_MS} ms (verificado contra la pista sola)`, calibration: cal, lite: LITE,
+    master: MASTER, coach: { pack: 'eva', phrase: 'pre-aviso (sube_1/baja_1/sprintpre_1 + velocidad) 10 s antes de cada cambio', chain: VOICE_COMP, preroll: VOICE_PREROLL },
+    sessions: [],
   };
-  for (const S of SESSIONS) {
-    if (ONLY_SET && !ONLY_SET.has(S.key)) continue;
+  const runs = [];
+  for (const S0 of SESSIONS) {
+    if (ONLY_SET && !ONLY_SET.has(S0.key)) continue;
+    for (const v of VOLS) {
+      const S = { ...S0, events: S0.events.map((e) => ({ ...e })), channels: FORCE_CH || S0.channels, volume: v };
+      if (v != null) { S.name = `${S0.name}-v${Math.round(v * 100)}`; S.label = `${S0.label} · ${Math.round(v * 100)} %`; }
+      runs.push(S);
+    }
+  }
+  for (const S of runs) {
     const R = await render(S, tracks);
     setStatus(`${S.label}: analizando…`);
     const A = await analyse(R, cal);
@@ -945,6 +1283,12 @@ async function main() {
       log(`   ${String(tr.atSec).padStart(7)} s ${tr.zone.padEnd(8)} ${tr.transition.padEnd(11)}→ ${tr.engine.padEnd(11)} mín ${String(tr.minRmsDb).padStart(6)} dB (antes ${tr.preDb}, después ${tr.postDb}, bache ${pre(tr.dipDb)}${tr.worstDipDb ? `, relativo −${tr.worstDipDb}` : ''}) · ΔLUFS ${pre(tr.lufsJump)}${tr.gaps ? ` · ${tr.gaps} hueco(s)` : ''}${tr.musicSilences ? ` · silencio de la música` : ''}${tr.clicks ? ` · ${tr.clicks} clic(s)` : ''}`, tr.smooth ? '' : 'bad');
     }
     for (const x of A.extra) log(`   ${x.kind} en ${x.t} s${x.minRmsDb != null ? ` · mín ${x.minRmsDb} dB` : ''} · clics ${x.clicks}`, x.clicks ? 'bad' : '');
+    const L = A.levels;
+    const fmtGr = (g) => (g ? `p50 ${g.p50} · p90 ${g.p90} · p99 ${g.p99} · máx ${g.max} dB · >1 dB ${g.pctOver1dB} % · >3 dB ${g.pctOver3dB} % · paso p95 ${g.stepP95} dB` : '—');
+    log(`  NIVELES (${L.channels} canal(es), volumen ${Math.round(L.volume * 100)} %): integrada ${L.integratedLufs} LUFS (sin el coach ${L.integratedNoCoachLufs}) · corto plazo p10 ${L.shortTerm.p10} / p50 ${L.shortTerm.p50} / p95 ${L.shortTerm.p95} LUFS · LRA ${L.shortTerm.lra} LU · tramos ${L.segments.noCoachMin}…${L.segments.noCoachMax} (dispersión ${L.segments.noCoachSpread} LU) · true peak ${L.truePeakDb} dBTP (muestra ${L.samplePeakDb}) · PLR ${L.plrDb} dB · ventanas > −1 dBTP ${L.windowsOverMinus1dBTP}`);
+    log(`  Reducción de ganancia · limitador: ${fmtGr(L.gr.limiter)}${L.gr.glue ? ` · compresor: ${fmtGr(L.gr.glue)}` : ''}`);
+    const C = A.coach.summary;
+    if (C.count) log(`  COACH (${C.count} avisos): voz ${C.voiceLufs.p50} LUFS sobre música agachada ${C.musicLufs.p50} LUFS → voz − música ${C.voiceOverMusic.min}…${C.voiceOverMusic.max} LU (mediana ${C.voiceOverMusic.p50}; en transición filtrada ${C.voiceOverMusicInFilteredMix?.min ?? '—'}…, fuera ${C.voiceOverMusicPlain?.min ?? '—'}…) · agachado ${C.duckDb.p50} dB · pico de la suma ${C.sumTruePeakMaxDb} dBTP · avisos < 8 LU: ${C.cuesUnder8LU}`, C.cuesUnder8LU || C.sumTruePeakMaxDb > -0.5 ? 'bad' : 'ok');
     const decodeLead = [];
     for (const [i, c] of R.plan.cues.entries()) {
       if (c.change !== 'track' || i === 0) continue;
@@ -966,9 +1310,15 @@ async function main() {
       buffersPeak: R.finalStatus.buffers.peak, buffersPeakMB: Math.round(R.finalStatus.buffers.peakBytes / 2 ** 20),
       decodeRates: Object.values(R.finalStatus.buffers.info).reduce((a, x) => { a[x.rate] = (a[x.rate] || 0) + 1; return a; }, {}),
       subst: R.finalStatus.subst, rides: R.voiceLog.filter((v) => v.ride).length, stalls: R.finalStatus.stalls, seeks: R.finalStatus.seeks,
+      volume: S.volume ?? 0.8, levels: A.levels, coach: A.coach,
     };
+    if (A.ab) {
+      const up = await upload('audio', `${TAG || 'music-offline'}-pasaje-${S.name}.wav`, wav(A.ab.chans, R.buf.sampleRate));
+      sess.abPassage = { from: A.ab.from, cueAt: A.ab.cueAt, classT: A.ab.classT, zone: A.ab.zone, ids: A.ab.ids, file: up?.file || null };
+      if (up) log(`  Pasaje A/B (15 s, aviso del coach a los 3 s) → ${up.file}`);
+    }
     log(`  Decodificaciones: ${sess.decodes} (${Object.entries(sess.decodeRates).map(([r, n]) => `${n} a ${r / 1000} kHz`).join(', ')}) · máx. ${sess.buffersPeak} en memoria (${sess.buffersPeakMB} MB) · antelación mínima ${sess.decodeLeadMinSec} s · intros subidas ${sess.rides} · transiciones suaves ${sess.smoothTransitions}/${sess.totalTransitions}`);
-    if (S.excerpts) {
+    if (S.excerpts && !LITE && S.volume == null) {
       const tr = A.transitions;
       const jogSprint = tr.find((t) => t.zone === 'sprint' && R.plan.cues[t.i - 1] && ['jog'].includes(prevZone(R.plan, t.i)));
       const sprintJog = tr.find((t) => t.zone === 'jog' && prevZone(R.plan, t.i) === 'sprint');
@@ -987,7 +1337,7 @@ async function main() {
     await sleep(50);
   }
   summary.ok = cal.selfTest && summary.sessions.every((s) => s.gapCount === 0 && s.clickCount === 0);
-  const up = await upload('report', `music-offline${ONLY ? `-${ONLY.replace(/,/g, '-')}` : ''}.json`, JSON.stringify(summary, null, 2));
+  const up = await upload('report', TAG ? `${TAG}.json` : `music-offline${ONLY ? `-${ONLY.replace(/,/g, '-')}` : ''}.json`, JSON.stringify(summary, null, 2));
   if (up) log(`Informe → ${up.file}`);
   window.__result = summary;
   setStatus(summary.ok ? '✓ 0 huecos · 0 clics' : '✗ hay huecos o clics (ver arriba)');

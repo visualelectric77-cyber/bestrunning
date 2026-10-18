@@ -55,7 +55,15 @@ const WAKE_WARN_KEY = 'br:wake-warned';
 const WAKE_WARN_EVERY_MS = 30 * 86400e3; // el aviso del bloqueo automático: una vez (y un recordatorio al mes)
 const SESSION_HOLD_MS = 7000;            // 'playback' se mantiene hasta que acaba la frase final del coach
 const STORAGE_RETRY_MS = 60000;          // almacenamiento lleno: la instantánea se reintenta cada minuto, no cada 5 s
+const SND_HOLD_MS = 450;                 // mantener ♪ abre la hoja «Sonido» (música y voz del coach, en vivo)
+const SND_IDLE_MS = 8000;                // corriendo, la hoja se recoge sola tras 8 s sin tocarla (vuelven los datos)
+const SND_SAVE_MS = 350;                 // mientras arrastras se guarda con retardo (aplicar es inmediato)
+const SND_STEP = 5;                      // − / +: 5 puntos por toque
+const SND_HINT_KEY = 'br:snd-hint';      // aviso «Mantén pulsado ♪…»: en las 2 primeras clases (o hasta usar la hoja)
+const SND_HINT_CLASSES = 2;
 let sessionGen = 0;                      // montajes del reproductor (un reajuste diferido de la sesión no pisa al siguiente)
+/** Volumen guardado (0..1) → % entero de la hoja «Sonido», recortado a [min, 100]. */
+const sndPct = (v, d, min) => clamp(Math.round((Number.isFinite(Number(v)) ? Number(v) : d) * 100), min, 100);
 
 /** Ejecuta fn y devuelve false si el store avisó de un fallo de almacenamiento (persist() se lo traga y emite
  *  'br:storage-error' de forma síncrona) o si fn lanzó. */
@@ -273,6 +281,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let lastPulse = -1;
   const musicTracks = [];     // ids que han sonado (→ session.music.tracks)
   let npBpm = 0;              // BPM efectivo de lo que suena (setBeat de la escena)
+  // Hoja «Sonido» (mantener ♪): volumen de la música y de la voz del coach sin salir de la clase
+  let snd = null;             // { el, close } abierta
+  let sndPend = null;         // { music?, voice? } aplicado pero aún sin guardar en Perfil
+  let sndSaveT = null;
+  let sndIdleT = null;
+  let sndHeldAt = -1e9;       // la pulsación larga acaba de abrirla: el clic al soltar no apaga la música
+  let sndHintOff = null;      // retira el aviso «Mantén pulsado ♪…» si la abres mientras se ve
   // Escena 3D
   const visuals = { ...VISUAL_DEFAULTS, ...(state.visuals || {}) };
   let scene = null;           // controlador de createScene3D (null = fondo 2D)
@@ -577,9 +592,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
               <button class="mu-duo__btn" data-act="mute" aria-label="Silenciar coach" aria-pressed="false">
                 <span class="pl-ctl__on">${icon('speaker', 20)}</span><span class="pl-ctl__off">${icon('speaker-off', 20)}</span>
               </button>
-              <button class="mu-duo__btn mu-duo__btn--music" data-act="music" data-ref="musicBtn" aria-label="${musicLbl}" aria-pressed="${appMusic && musicOn}">
-                ${icon('music', 19)}<span class="mu-duo__slash" aria-hidden="true"></span>
+              <button class="mu-duo__btn mu-duo__btn--music" data-act="music" data-ref="musicBtn" aria-label="${musicLbl}" aria-pressed="${appMusic && musicOn}" aria-describedby="pl-snd-desc">
+                ${icon('music', 19)}<span class="mu-duo__slash" aria-hidden="true"></span><i class="mu-duo__hold" aria-hidden="true"></i>
               </button>
+              <span class="sr-only" id="pl-snd-desc">Mantén pulsado para ajustar el volumen de la música y de la voz</span>
             </div>
           </div>
           <div class="hud-lockbar">
@@ -669,6 +685,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     });
     root.querySelectorAll('.hud-adj').forEach((b) => bindHold(b, () => doAdjust(Number(b.dataset.adj))));
     bindUnlock();
+    bindSoundHold();
     // Evita el menú contextual / lupa en pulsaciones largas
     root.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -1444,7 +1461,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /* ───────── Controles: ocultos mientras corres; un toque los muestra 4 s; siempre visibles en pausa (§16) ───────── */
   function ctlWanted() {
-    if (!root || countingDown || finale || locked || cache.cdShow) return false;
+    // Con la hoja «Sonido» abierta los controles se recogen (no asoman cortados por encima de la hoja)
+    if (!root || countingDown || finale || locked || cache.cdShow || snd) return false;
     if (cache.status !== 'running') return true;
     return Date.now() < ctlUntil;
   }
@@ -1535,10 +1553,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
   /**
    * Avisos del reproductor en marcha: rótulo pequeño bajo los bugs (arriba a la derecha), sin desenfoque y sin tapar
    * nunca la barra superior ni la cifra (§15.3, §16). Fuera del HUD en marcha, el toast de siempre.
+   * Devuelve una función que lo retira antes de tiempo.
    */
   function notify(message, { icon: ic = 'info', duration = 2600 } = {}) {
     const host = refs.notes;
-    if (!host || !liveMounted() || finale || disposed) { toast(message, { icon: ic, duration }); return; }
+    if (!host || !liveMounted() || finale || disposed) {
+      const t = toast(message, { icon: ic, duration });
+      return () => { try { t?.close?.(); } catch { /* nada */ } };
+    }
     const node = document.createElement('div');
     node.className = 'hud-note';
     node.innerHTML = `<span class="hud-note__ic" aria-hidden="true">${icon(ic, 15, { stroke: 2.3 })}</span><span class="hud-note__msg">${esc(message)}</span>`;
@@ -1547,11 +1569,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     void node.offsetWidth;
     node.classList.add('is-on');
     scheduleHudRects();
-    later(() => {
+    let gone = false;
+    const dismiss = () => {
+      if (gone) return;
+      gone = true;
       node.classList.remove('is-on');
       node.classList.add('is-off');
       later(() => { node.remove(); scheduleHudRects(); }, reducedMotion() ? 0 : 320);
-    }, duration);
+    };
+    later(dismiss, duration);
+    return dismiss;
   }
 
   /** Línea fina que barre el lower third una vez (cambio de tramo): sustituye a cualquier destello (§15). */
@@ -1898,6 +1925,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       syncPosition();
       if (!quietPause) coachCall('say', 'pause', {});
       if (musicStarted) { mcall('pause'); stopBeat(); }
+      if (snd) armSoundIdle(); // en pausa la hoja «Sonido» no se recoge sola
       persist();
     } else if (type === 'resume') {
       mark(true);
@@ -1914,12 +1942,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
         lastMusicPos = s.totalElapsed;
         startBeat();
       } else startMusic();
+      if (snd) armSoundIdle();
       keepAwake();
     } else if (type === 'start') {
       mark(true);
       setPlaybackState('playing');
       syncPosition();
       startMusic();
+      later(maybeSoundHint, 2600);
     } else if (type === 'finish') {
       onFinished(data && data.status ? data : engine.getState());
     }
@@ -2147,6 +2177,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       return;
     }
     const act = b.dataset.act;
+    // Soltar el dedo tras la pulsación larga de ♪ (que ya abrió «Sonido») no apaga la música
+    if (act === 'music' && performance.now() - sndHeldAt < 1200) { sndHeldAt = -1e9; return; }
     if (cache.status === 'running' && act !== 'toggle') showCtl();
     if (act === 'toggle') onToggle();
     else if (act === 'tv') toggleTv();
@@ -2321,9 +2353,280 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(muted ? 'Coach en silencio' : 'Coach activado', { icon: muted ? 'speaker-off' : 'speaker', duration: 1600 });
   }
 
+  /* ───────── Hoja «Sonido»: mantener ♪ → música y voz del coach en vivo (se guarda en Perfil) ───────── */
+  // Un toque en ♪ sigue encendiendo/apagando la música; mantenerlo SND_HOLD_MS (anillo que se llena + tic) abre una
+  // hoja compacta y opaca (sin desenfoque, §15.3) con dos barras grandes. Se aplica al instante (music.setVolume y el
+  // volumen de la voz/pitidos) y se guarda en los mismos ajustes que Perfil → Música y Perfil → Voz y audio.
+  function bindSoundHold() {
+    const btn = refs.musicBtn;
+    if (!btn) return;
+    let holdT = null;
+    let pid = null;
+    let x0 = 0;
+    let y0 = 0;
+    let fired = false;
+    const stop = () => {
+      clearTimeout(holdT);
+      holdT = null;
+      pid = null;
+      btn.classList.remove('is-holding');
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      if (locked || countingDown || finale || e.button > 0 || e.isPrimary === false) return;
+      stop();
+      fired = false;
+      pid = e.pointerId;
+      x0 = e.clientX;
+      y0 = e.clientY;
+      btn.classList.add('is-holding');
+      holdT = setTimeout(() => {
+        holdT = null;
+        btn.classList.remove('is-holding');
+        if (locked || countingDown || finale || disposed) return;
+        fired = true;
+        sndHeldAt = performance.now();
+        haptic('medium');
+        openSound();
+      }, SND_HOLD_MS);
+    });
+    btn.addEventListener('pointermove', (e) => {
+      if (holdT && e.pointerId === pid && Math.hypot(e.clientX - x0, e.clientY - y0) > 12) stop();
+    });
+    for (const ev of ['pointerup', 'pointercancel']) {
+      btn.addEventListener(ev, (e) => {
+        if (e.pointerId !== pid) return;
+        // la ventana que ignora el clic de soltar cuenta desde que levantas el dedo (aunque mantengas varios segundos)
+        if (fired) sndHeldAt = performance.now();
+        stop();
+      });
+    }
+    // iOS: el clic sintético al levantar el dedo caería en el fondo de la hoja recién abierta (y la cerraría)
+    btn.addEventListener('touchend', (e) => { if (fired) { fired = false; if (e.cancelable) e.preventDefault(); } }, { passive: false });
+    // Ratón y teclado: botón derecho o tecla de menú contextual → la misma hoja
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!locked && !countingDown && !finale) openSound();
+    });
+    disposers.push(stop);
+  }
+
+  function soundRowHtml(kind, label, ic, pct, min, tag) {
+    const id = `pl-snd-${kind}`;
+    const low = label.toLowerCase();
+    return `<div class="mu-snd__row" data-snd="${kind}">
+      <div class="mu-snd__head">
+        <span class="mu-snd__lbl" id="${id}-l">${icon(ic, 17)}<span>${esc(label)}</span>${tag ? `<em class="mu-snd__tag">${esc(tag)}</em>` : ''}</span>
+        <b class="mu-snd__val num" data-snd-val aria-hidden="true">${pct} %</b>
+      </div>
+      <div class="mu-snd__ctl no-drag">
+        <button type="button" class="mu-snd__step" data-snd-step="-1" aria-label="Bajar ${esc(low)}">${icon('minus', 20, { stroke: 2.6 })}</button>
+        <input class="mu-snd__bar" id="${id}" type="range" min="${min}" max="100" step="1" value="${pct}" style="--f:${((pct - min) / (100 - min)).toFixed(3)}" aria-labelledby="${id}-l" aria-valuetext="${pct} %">
+        <button type="button" class="mu-snd__step" data-snd-step="1" aria-label="Subir ${esc(low)}">${icon('plus', 20, { stroke: 2.6 })}</button>
+      </div>
+    </div>`;
+  }
+
+  function openSound() {
+    if (snd || disposed || finale || !root) return;
+    soundHintDone();
+    if (sndHintOff) { sndHintOff(); sndHintOff = null; }
+    refs.musicBtn?.classList.remove('is-hint');
+    const st = getState();
+    const a = st.audio || {};
+    const rows = [];
+    if (appMusic) rows.push(soundRowHtml('music', 'Música', 'music', sndPct(st.music?.volume, 0.8, 0), 0, musicOn ? '' : 'Apagada'));
+    rows.push(soundRowHtml('voice', 'Voz del coach', 'speaker', sndPct(a.volume, 1, 10), 10,
+      muted ? 'En silencio' : a.voiceEnabled === false ? 'Solo pitidos' : ''));
+    const note = appMusic ? 'Se guarda para tus próximas clases' : 'Con «Mi música», su volumen va con los botones del iPhone';
+    snd = openSheet({
+      title: 'Sonido',
+      cls: 'mu-snd',
+      html: `<div class="mu-snd__rows">${rows.join('')}</div><p class="mu-snd__note">${esc(note)}</p>`,
+      onMount: (el) => {
+        el.querySelectorAll('.mu-snd__row').forEach((row) => bindSoundRow(row));
+        // Cualquier toque o tecla en la hoja aplaza su cierre automático
+        el.addEventListener('pointerdown', () => armSoundIdle(), true);
+        el.addEventListener('keydown', () => armSoundIdle(), true);
+      },
+      onClose: () => {
+        snd = null;
+        cancel(sndIdleT);
+        sndIdleT = null;
+        flushSound();
+        syncCtl();
+      },
+    });
+    if (!snd?.el) { snd = null; return; }
+    syncCtl();
+    armSoundIdle();
+  }
+
+  function closeSound() {
+    const s = snd;
+    if (!s) return;
+    try { s.close(); } catch { snd = null; }
+  }
+
+  /** Corriendo, la hoja se recoge sola tras SND_IDLE_MS sin tocarla (vuelven los datos); en pausa se queda. */
+  function armSoundIdle() {
+    cancel(sndIdleT);
+    sndIdleT = null;
+    if (!snd || engine?.getState().status !== 'running') return;
+    sndIdleT = later(() => {
+      sndIdleT = null;
+      if (snd?.el?.querySelector('.mu-snd__row.is-active, .mu-snd__step.is-pressed')) armSoundIdle();
+      else closeSound();
+    }, SND_IDLE_MS);
+  }
+
+  function bindSoundRow(row) {
+    const kind = row.dataset.snd;
+    const bar = row.querySelector('.mu-snd__bar');
+    const val = row.querySelector('[data-snd-val]');
+    if (!bar || (kind !== 'music' && kind !== 'voice')) return;
+    const min = Number(bar.min) || 0;
+    const max = Number(bar.max) || 100;
+    let cur = clamp(Number(bar.value) || 0, min, max);
+    const paint = () => {
+      bar.value = String(cur);
+      bar.style.setProperty('--f', ((cur - min) / (max - min)).toFixed(3));
+      bar.setAttribute('aria-valuetext', `${cur} %`);
+      if (val) val.textContent = `${cur} %`;
+      row.classList.toggle('is-min', cur <= min);
+      row.classList.toggle('is-max', cur >= max);
+    };
+    /** Fija el valor (0..100), lo aplica ya y lo guarda (con retardo mientras arrastras). Devuelve si cambió. */
+    const set = (v, commit = false) => {
+      const n = clamp(Math.round(Number(v) || 0), min, max);
+      const changed = n !== cur;
+      if (changed) {
+        // tic al cruzar cada 10 % y al tocar un extremo
+        if (Math.floor(n / 10) !== Math.floor(cur / 10) || n === min || n === max) haptic('selection');
+        cur = n;
+        paint();
+        applySound(kind, n);
+        armSoundIdle(); // también con VoiceOver (deslizar arriba/abajo no pasa por pointerdown ni keydown)
+      }
+      if (commit) flushSound();
+      else if (changed) scheduleSoundSave();
+      return changed;
+    };
+    paint();
+    // Arrastre RELATIVO en toda la barra (como el Centro de control): tocar no salta de valor, deslizar sube o baja.
+    // Sin arrastre nativo (iOS solo deja coger el pulgar) ni desplazamiento ni cierre de la hoja.
+    let pid = null;
+    let x0 = 0;
+    let v0 = 0;
+    let w = 1;
+    let moved = false;
+    bar.addEventListener('touchstart', (e) => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+    bar.addEventListener('pointerdown', (e) => {
+      if (e.button > 0 || pid != null) return;
+      e.preventDefault();
+      pid = e.pointerId;
+      x0 = e.clientX;
+      v0 = cur;
+      moved = false;
+      w = Math.max(1, bar.getBoundingClientRect().width);
+      try { bar.setPointerCapture(pid); } catch { /* sin captura */ }
+      row.classList.add('is-active');
+    });
+    bar.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pid) return;
+      const dx = e.clientX - x0;
+      if (!moved && Math.abs(dx) < 4) return;
+      moved = true;
+      set(v0 + (dx / w) * (max - min));
+    });
+    const end = (e) => {
+      if (e.pointerId !== pid) return;
+      pid = null;
+      row.classList.remove('is-active');
+      flushSound();
+    };
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) bar.addEventListener(ev, end);
+    // Teclado y VoiceOver (deslizar arriba/abajo): el control nativo cambia el valor
+    bar.addEventListener('input', () => set(bar.value));
+    bar.addEventListener('change', () => set(bar.value, true));
+    // − / +: de 5 en 5 (al múltiplo de 5 más cercano), con repetición al mantener
+    row.querySelectorAll('[data-snd-step]').forEach((b) => {
+      const dir = Number(b.dataset.sndStep) > 0 ? 1 : -1;
+      bindHold(b, () => {
+        const next = dir > 0 ? Math.floor(cur / SND_STEP) * SND_STEP + SND_STEP : Math.ceil(cur / SND_STEP) * SND_STEP - SND_STEP;
+        return set(next);
+      });
+      b.addEventListener('pointerup', () => flushSound());
+    });
+  }
+
+  /** Aplica al momento: la música por el motor DJ (curva de volGain, §11.4); la voz y los pitidos por el coach. */
+  function applySound(kind, pct) {
+    sndPend = sndPend || {};
+    if (kind === 'music') {
+      const v = clamp(pct, 0, 100) / 100;
+      sndPend.music = v;
+      mcall('setVolume', v);
+    } else {
+      const v = clamp(pct, 10, 100) / 100;
+      sndPend.voice = v;
+      if (coach) coachCall('updateSettings', { volume: v });
+      else { try { audioMod?.applyAudioSettings?.({ volume: v }); } catch { /* sin audio */ } }
+    }
+  }
+
+  function scheduleSoundSave() {
+    cancel(sndSaveT);
+    sndSaveT = later(() => { sndSaveT = null; flushSound(); }, SND_SAVE_MS);
+  }
+
+  /** Guarda en Perfil (state.music.volume y state.audio.volume) lo aplicado desde la hoja. */
+  function flushSound() {
+    cancel(sndSaveT);
+    sndSaveT = null;
+    const p = sndPend;
+    sndPend = null;
+    if (!p) return;
+    storageOk(() => setState((d) => {
+      if (p.music != null) {
+        if (!d.music || typeof d.music !== 'object') d.music = {};
+        d.music.volume = Math.round(p.music * 100) / 100;
+      }
+      if (p.voice != null) {
+        if (!d.audio || typeof d.audio !== 'object') d.audio = {};
+        d.audio.volume = Math.round(p.voice * 100) / 100;
+      }
+    }));
+  }
+
+  /* Descubrimiento: en las SND_HINT_CLASSES primeras clases, al arrancar, un aviso señala ♪ (controles a la vista y
+     ♪ que late); deja de salir en cuanto se usa la hoja. */
+  function soundHintDone() {
+    try { localStorage.setItem(SND_HINT_KEY, String(SND_HINT_CLASSES)); } catch { /* sin almacenamiento */ }
+  }
+
+  function maybeSoundHint() {
+    if (!appMusic || !musicOn || musicFailed || locked || finale || snd || !liveMounted()) return;
+    if (engine?.getState().status !== 'running') return;
+    let n = 0;
+    try { n = Number(localStorage.getItem(SND_HINT_KEY)) || 0; } catch { return; }
+    if (n >= SND_HINT_CLASSES) return;
+    try { localStorage.setItem(SND_HINT_KEY, String(n + 1)); } catch { return; }
+    const ms = 5200;
+    showCtl(ms);
+    const b = refs.musicBtn;
+    if (b && !reducedMotion()) {
+      b.classList.remove('is-hint');
+      void b.offsetWidth;
+      b.classList.add('is-hint');
+      later(() => b.classList.remove('is-hint'), ms);
+    }
+    sndHintOff = notify('Mantén pulsado ♪ para subir la música', { icon: 'music', duration: ms });
+  }
+
   /* ───────── Bloqueo de pantalla: el candado ocupa el sitio de los controles; el resto del HUD sigue visible ───────── */
   function setLocked(on) {
     locked = on;
+    if (on) closeSound();
     const ov = refs.lock;
     if (!ov || !root) return;
     ov.hidden = !on;
@@ -2458,6 +2761,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function onFinished(s) {
     if (finishedHandled) return;
     finishedHandled = true;
+    closeSound();
     clearInterval(snapTimer);
     const st = getState();
     if ((s.activeSec || 0) < MIN_SAVE_SEC) {
@@ -2618,6 +2922,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function cleanup() {
     if (disposed) return;
     persist();
+    closeSound();
+    flushSound();
     disposed = true;
     destroyScene();
     mo('destroy');

@@ -1627,7 +1627,7 @@ function musicHtml(s) {
         ${toggleRow('mu-effects', 'Efectos de DJ', 'Subidas de tensión, ecos y barridos de filtro en los cambios', m.effects !== false).replace('<div class="list__row', '<div data-mu-dep class="list__row')}
         ${segRow('Energía', m.energy === 'max' ? 'Pistas más potentes y entradas directas al subidón' : 'Equilibrada: la intensidad sigue a cada tramo', 'mu-energy', [{ value: 'normal', label: 'Normal' }, { value: 'max', label: 'Máxima' }], m.energy === 'max' ? 'max' : 'normal').replace('<div class="list__row', '<div data-mu-dep class="list__row')}
       </div>
-      <p class="st-note">La voz del coach baja la música unos segundos cuando habla. Los pitidos suenan siempre por encima.</p>
+      <p class="st-note">80 % es el nivel de partida; al 100 %, algo más fuerte y sin saturar. En plena clase, <b>mantén pulsado ♪</b> para ajustarla. Cuando habla el coach la música baja un momento; los pitidos suenan siempre por encima.</p>
     </div>
     <div class="st-group">
       <div class="st-group__title">Fuentes</div>

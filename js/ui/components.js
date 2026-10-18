@@ -719,16 +719,18 @@ const ACTION_CLS = {
   destructive: 'btn btn--danger btn--lg btn--block',
 };
 
-export function openSheet({ title = '', html = '', onMount = null, actions = [], large = false, dismissible = true, onClose = null } = {}) {
+export function openSheet({ title = '', html = '', onMount = null, actions = [], large = false, dismissible = true, onClose = null, cls = '' } = {}) {
   if (!hasDOM) return { el: null, close: () => {} };
   const root = overlayRoot();
   const prevFocus = document.activeElement;
   const titleId = nextId('sheet-t');
 
   const backdrop = document.createElement('div');
-  backdrop.className = 'sheet-backdrop';
+  // cls: modificador propio de una hoja (p. ej. 'mu-snd'), en la hoja y en su fondo
+  const mod = typeof cls === 'string' && /^[\w-]+$/.test(cls) ? cls : '';
+  backdrop.className = `sheet-backdrop${mod ? ` ${mod}` : ''}`;
   const sheet = document.createElement('div');
-  sheet.className = `sheet${large ? ' sheet--large' : ''}`;
+  sheet.className = `sheet${large ? ' sheet--large' : ''}${mod ? ` ${mod}` : ''}`;
   sheet.setAttribute('role', 'dialog');
   sheet.setAttribute('aria-modal', 'true');
   sheet.tabIndex = -1;

@@ -6,8 +6,9 @@
 //
 // Voz:     fuente → trim (gainDb) → hp → lp → lowShelf 200 Hz (graves) → gain (mezcla) → kill (cortes/pausa)
 //          → dry → bus;   kill → send → eco.
-// Maestro: bus → hp → lp → duck (voz) → fade (pausa/fin) → music (volumen) → limitador → destino (+ analizador).
-// Eco:     DelayNode (3/4 de tiempo) ⟲ lowpass/highpass · feedback 0,45 → duck.  FX (riser, impact) → fx → duck.
+// Maestro: bus → hp → lp → drive → glue (compresor suave) → limitador → trim → duck (voz) → fade (pausa/fin)
+//          → music (volumen) → destino (+ analizador). Dinámica a nivel fijo; voz, pausas y volumen, después.
+// Eco:     DelayNode (3/4 de tiempo) ⟲ lowpass/highpass · feedback 0,45 → drive.  FX (riser, impact) → fx → drive.
 // Tiempo:  c (reloj del contexto) = base + T (s de clase); update(T) re-ancla base poco a poco.
 // Tempo:   cada voz suena a un rate fijo (±3 % como mucho; en beatmix el que iguala a la saliente). Sin rampas.
 // Memoria: cada buffer guarda solo la ventana de la pista que usa el plan (music-buffers.js): las posiciones son
@@ -39,8 +40,22 @@ const STALL_SEC = 1;               // reloj del contexto quieto con estado 'runn
 const LOOP_MS = 200;
 const XF_STEPS = 16;
 const HALF_PI = Math.PI / 2;
-const DUCK_GAIN = 10 ** (-9 / 20);
-const DUCK_MIX = 10 ** (-6 / 20);  // con una transición filtrada en curso la música ya va más baja
+// Ganancias del maestro (SPEC §11.4). Las pistas llegan normalizadas a −14 LUFS; la dinámica (glue + limitador) trabaja
+// SIEMPRE al nivel del 100 % (≈ −12,2 LUFS, true peak ≤ −1,2 dBTP) y el volumen, la voz y las pausas atenúan después:
+// subir el volumen nunca aprieta más el limitador. Medido en tools/music-offline.html (docs/audio-tests/volumen-*.json):
+// glue ≈ 3 dB de reducción típica (sube las intros y los valles: LRA 4,8 → 3 LU), limitador > 1 dB solo un 13–16 % del
+// tiempo y > 3 dB un 0,2 %. Los DynamicsCompressor de WebKit/Blink suman una compensación automática (0,6 × lo que su
+// curva baja a 0 dBFS): la del glue es la subida de lo flojo; la del limitador (+1,7 dB) la descuenta `trimDb`.
+export const MASTER = Object.freeze({
+  driveDb: 0.5,
+  glue: Object.freeze({ threshold: -18, knee: 12, ratio: 2, attack: 0.01, release: 0.25 }),
+  limiter: Object.freeze({ threshold: -3, knee: 0, ratio: 20, attack: 0.001, release: 0.1 }),
+  trimDb: -1.7,
+  duckDb: -11,         // voz del coach: la música, 11 dB por debajo (al 80 %; más al subir el volumen)
+  duckMixDb: -10,      // … en una transición filtrada (riser, eco, filtro): ya va algo más baja
+  analyserDb: 3,       // el analizador (escena 3D) ve el mismo nivel que con el maestro anterior
+});
+const VOL_REF = 0.8;               // volumen por defecto (state.music.volume): la referencia del ducking
 const DUCK_ATTACK = 0.12;
 const DUCK_RELEASE = 0.45;
 const FILTER_MIXES = new Set(['riser-drop', 'echo-out', 'filter-fade', 'start']);
@@ -68,7 +83,12 @@ const AUDIBLE_LEAD = 0.08;
 const perfNow = () => (globalThis.performance?.now ? globalThis.performance.now() : Date.now()) / 1000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const dbToGain = (db) => 10 ** ((Number(db) || 0) / 20);
-const volGain = (v) => clamp(Number(v) || 0, 0, 1) ** 2;
+/**
+ * Curva del volumen (0..1 → ganancia): casi lineal en dB arriba (≈ 1 dB por cada 10 %: 80 % → −2 dB, 60 % → −5,2 dB)
+ * y cada vez más fina abajo (50 % → −7,5 dB, 20 % → −23 dB, 0 → silencio). La anterior (v²) bajaba 3,9 dB al 80 %.
+ */
+export const volGain = (v) => { const x = clamp(Number(v) || 0, 0, 1); return x ** (1 + (1 - x) ** 2); };
+const gainDb = (g) => (g > 1e-6 ? 20 * Math.log10(g) : -120);
 const fitRate = (r) => clamp(Number(r) || 1, 1 - RATE_TOL, 1 + RATE_TOL);
 const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
@@ -89,6 +109,12 @@ export function createMusicEngine(opts = {}) {
   const manualClock = typeof now === 'function';
   const clock = manualClock ? now : perfNow;
   const autoTick = opts.autoTick ?? !manualClock;
+  // opts.master: ajustes del maestro solo para pruebas/ajuste (tools/music-offline.html ?master={…})
+  const mo = opts.master && typeof opts.master === 'object' ? opts.master : {};
+  const M = {
+    ...MASTER, ...mo,
+    glue: { ...MASTER.glue, ...(mo.glue || {}) }, limiter: { ...MASTER.limiter, ...(mo.limiter || {}) },
+  };
   const store = createBufferStore({
     getContext: () => ctx, loadData: opts.loadData || null, timeoutMs: opts.decodeTimeoutMs, budgetBytes: opts.budgetBytes,
     windowFor: (t) => windowFor(t), now: clock,
@@ -195,20 +221,28 @@ export function createMusicEngine(opts = {}) {
     return n;
   }
 
+  function compressor(p) {
+    const n = ctx.createDynamicsCompressor();
+    for (const k of ['threshold', 'knee', 'ratio', 'attack', 'release']) n[k].value = p[k];
+    return n;
+  }
+
+  /** Volumen por encima del de referencia (dB ≥ 0): la voz del coach agacha la música eso de más. */
+  const volBoostDb = () => Math.max(0, gainDb(volGain(volume)) - gainDb(volGain(VOL_REF)));
+  const duckGain = (inMix) => dbToGain((inMix ? M.duckMixDb : M.duckDb) - volBoostDb());
+
   function ensureGraph() {
     if (graph) return true;
     if (graphFailed || !ensureCtx()) return false;
     try {
       const g = {};
-      g.limiter = ctx.createDynamicsCompressor();
-      g.limiter.threshold.value = -1.5;
-      g.limiter.knee.value = 0;
-      g.limiter.ratio.value = 20;
-      g.limiter.attack.value = 0.002;
-      g.limiter.release.value = 0.12;
+      g.drive = gainNode(dbToGain(M.driveDb));
+      g.glue = compressor(M.glue);
+      g.limiter = compressor(M.limiter);
+      g.trim = gainNode(dbToGain(M.trimDb));
       g.music = gainNode(volGain(volume));
       g.fade = gainNode(0);
-      g.duck = gainNode(speaking && ducking ? DUCK_GAIN : 1);
+      g.duck = gainNode(speaking && ducking ? duckGain(false) : 1);
       g.hp = biquad('highpass', HP_OPEN);
       g.lp = biquad('lowpass', LP_OPEN);
       g.bus = gainNode(1);
@@ -222,19 +256,22 @@ export function createMusicEngine(opts = {}) {
       g.ret = gainNode(0.8);
       g.bus.connect(g.hp);
       g.hp.connect(g.lp);
-      g.lp.connect(g.duck);
+      g.lp.connect(g.drive);
+      g.drive.connect(g.glue);
+      g.glue.connect(g.limiter);
+      g.limiter.connect(g.trim);
+      g.trim.connect(g.duck);
       g.duck.connect(g.fade);
       g.fade.connect(g.music);
-      g.music.connect(g.limiter);
-      g.limiter.connect(ctx.destination);
-      g.fx.connect(g.duck);
+      g.music.connect(ctx.destination);
+      g.fx.connect(g.drive);
       g.echoIn.connect(g.delay);
       g.delay.connect(g.fbLp);
       g.fbLp.connect(g.fbHp);
       g.fbHp.connect(g.fb);
       g.fb.connect(g.delay);
       g.fbHp.connect(g.ret);
-      g.ret.connect(g.duck);
+      g.ret.connect(g.drive);
       graph = g;
       return true;
     } catch {
@@ -1330,7 +1367,10 @@ export function createMusicEngine(opts = {}) {
     applyDuck();
   }
 
-  /** −9 dB mientras habla el coach; −6 dB si coincide con una transición filtrada (la música ya va más baja). */
+  /**
+   * Mientras habla el coach la música baja `duckDb` (−11 dB; −10 dB si coincide con una transición filtrada, que ya va
+   * más baja) y, por encima del volumen de referencia (80 %), lo que se haya subido: la voz queda igual de clara.
+   */
   function applyDuck() {
     if (!graph || !ctx) return;
     const on = ducking && speaking;
@@ -1341,9 +1381,9 @@ export function createMusicEngine(opts = {}) {
       if (!on) { p.setTargetAtTime(1, t, DUCK_RELEASE / 3); return; }
       const m = mix && FILTER_MIXES.has(mix.kind) && mix.end > t ? mix : null;
       const inMix = !!m && t >= m.first;
-      p.setTargetAtTime(inMix ? DUCK_MIX : DUCK_GAIN, t, DUCK_ATTACK / 3);
-      if (m && !inMix) p.setTargetAtTime(DUCK_MIX, m.first, DUCK_ATTACK / 3);
-      if (m) p.setTargetAtTime(DUCK_GAIN, m.end, DUCK_RELEASE / 3);
+      p.setTargetAtTime(duckGain(inMix), t, DUCK_ATTACK / 3);
+      if (m && !inMix) p.setTargetAtTime(duckGain(true), m.first, DUCK_ATTACK / 3);
+      if (m) p.setTargetAtTime(duckGain(false), m.end, DUCK_RELEASE / 3);
     } catch { /* nada */ }
   }
 
@@ -1482,9 +1522,17 @@ export function createMusicEngine(opts = {}) {
         const t0 = Math.max(c + MIN_LEAD, a);
         const v = makeVoice(h.track, h.buf, h.rate, t0, h.pos);
         if (v) { setAt(v.gain.gain, 1, t0); cur = v; if (h.ride) rideIntro(v); }
+        // El fundido de entrada va ANTES de la dinámica, en `drive` (nada más lo automatiza): el glue y el limitador (en
+        // reposo tras la pausa) ven una entrada suave; con la fuente a pleno y solo el fade del final apretaban de golpe
+        // (clic). En la propia voz no: una mezcla que empiece en ese medio segundo reprograma su ganancia (setAt(O, 1, …))
+        // y dejaba silencio hasta su arranque y luego un golpe a pleno.
+        const dg = graph.drive.gain;
+        holdAt(dg, a);
+        setAt(dg, 0, t0);
+        rampAt(dg, dbToGain(M.driveDb), t0 + RESUME_FADE);
         holdAt(graph.fade.gain, a);
         rampAt(graph.fade.gain, 0, t0);
-        rampAt(graph.fade.gain, 1, t0 + RESUME_FADE);
+        rampAt(graph.fade.gain, 1, t0 + 0.05);
         openMaster(a, 0.05);
       }
       startLoop();
@@ -1558,6 +1606,7 @@ export function createMusicEngine(opts = {}) {
     try {
       if (graph) { const a = soon(); holdAt(graph.music.gain, a); graph.music.gain.setTargetAtTime(volGain(volume), a, 0.05); }
     } catch { /* nada */ }
+    if (speaking) applyDuck();
   }
 
   function setEnabled(on) {
@@ -1651,6 +1700,8 @@ export function createMusicEngine(opts = {}) {
         const a = ctx.createAnalyser();
         a.fftSize = 1024;
         a.smoothingTimeConstant = 0.8;
+        // ventana de dB desplazada lo que ha subido la salida: la escena reacciona igual que antes
+        try { a.minDecibels = -100 + M.analyserDb; a.maxDecibels = -30 + M.analyserDb; } catch { /* valores por defecto */ }
         graph.music.connect(a);
         graph.analyser = a;
       }
@@ -1715,7 +1766,20 @@ export function createMusicEngine(opts = {}) {
         sr: x.buf?.sampleRate || 0, ride: x.ride ? { ...x.ride } : null,
       })),
       buffers: store.stats(), deckMem: Object.fromEntries(deckMem), subst: Object.fromEntries(subst),
+      dyn: graph ? { glue: grOf(graph.glue), limiter: grOf(graph.limiter) } : null,
+      levels: {
+        volume, volumeDb: Math.round(gainDb(volGain(volume)) * 100) / 100, duckDb: Math.round((M.duckDb - volBoostDb()) * 10) / 10,
+        duckMixDb: Math.round((M.duckMixDb - volBoostDb()) * 10) / 10,
+        // ganancia nominal bus → salida (sin la compensación automática de los compresores)
+        nominalDb: Math.round((M.driveDb + M.trimDb + gainDb(volGain(volume))) * 100) / 100,
+        drive: M.driveDb, glue: { ...M.glue }, limiter: { ...M.limiter }, trimDb: M.trimDb,
+      },
     };
+  }
+
+  /** Reducción de ganancia (dB ≥ 0) de un DynamicsCompressorNode (en Safari antiguo, AudioParam). */
+  function grOf(n) {
+    try { const r = n?.reduction; return Math.round(-(Number(r?.value ?? r) || 0) * 100) / 100; } catch { return 0; }
   }
 
   function destroy() {

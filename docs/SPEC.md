@@ -237,9 +237,9 @@ export function profileChart(segments, { height = 120, compact = false, progress
 export function zoneBar(timeInZone /*{zona:seg}*/, { showLegend = true } = {})  // barra apilada horizontal + leyenda
 export function emptyState({ icon: ic, title, text, action = '' })
 export function sectionHeader(title, actionHtml = '')
-export function openSheet({ title = '', html = '', onMount = null, actions = [], large = false, dismissible = true })
+export function openSheet({ title = '', html = '', onMount = null, actions = [], large = false, dismissible = true, onClose = null, cls = '' })
    // Hoja inferior iOS con asa, arrastre para cerrar, fondo oscurecido. actions: [{label, kind:'primary'|'secondary'|'destructive', onClick(close)}]
-   // Devuelve { el, close }. onMount(el, close).
+   // Devuelve { el, close }. onMount(el, close). cls: clase modificadora en la hoja y en su fondo (p. ej. 'mu-snd').
 export function toast(message, { icon: ic = null, kind = 'info', duration = 2600, onClick = null } = {})
 export function confirmDialog({ title, message = '', confirmText = 'Aceptar', cancelText = 'Cancelar', destructive = false }) // Promise<boolean>
 export function actionSheet({ title = '', options /*[{label,value,icon,destructive}]*/ })   // Promise<value|null>
@@ -658,8 +658,18 @@ en cada tick daba en iOS silencios en los cambios de tramo y tirones). Mismo `Au
 - **Voz** = `AudioBufferSourceNode` → trim (`gainDb`) → hp → lp → lowShelf 200 Hz (graves) → gain (mezcla) → kill (cortes)
   → dry → bus (y kill → send → eco). `start(cuándo, desde)` en el reloj del contexto (exacto a la muestra) y `playbackRate`
   fijo desde el arranque. Red de seguridad sin JS: `loop` en su última frase de 16 compases.
-- **Maestro**: bus → hp → lp → duck (voz) → fade (pausa/fin) → music (volumen) → limitador → destino (+ `getAnalyser()`).
-  Eco: `DelayNode` 3/4 de tiempo ⟲ lowpass/highpass, feedback 0,45. FX (riser + impact) → fx → duck.
+- **Maestro** (`MASTER` en `music.js`): bus → hp → lp → drive (+0,5 dB) → **glue** (DynamicsCompressor −18 dB, rodilla 12,
+  2:1, ataque 10 ms, relajación 250 ms) → **limitador** (−3 dB, rodilla 0, 20:1, 1 ms / 100 ms) → trim (−1,7 dB: descuenta
+  la compensación automática del limitador) → duck (voz) → fade (pausa/fin) → music (volumen) → destino (+ `getAnalyser()`,
+  con su ventana de dB desplazada +3 dB). La dinámica trabaja SIEMPRE al nivel del 100 %; volumen, voz y pausas atenúan
+  después (subir el volumen no aprieta más el limitador). Medido (`docs/audio-tests/volumen-*.json`, estéreo): **80 % ≈
+  −14,2 LUFS** integrados (antes −16,5), **100 % ≈ −12,2 LUFS** con true peak ≤ −1,2 dBTP (antes −12,7 LUFS y +0,9 dBTP);
+  LRA 4,8 → 3 LU (Pirámide) y 6,1 → 3,8 LU (Bloques); glue ≈ 3 dB de reducción típica, limitador > 1 dB el 13–16 % del
+  tiempo y > 3 dB el 0,1–0,2 %. Curva del volumen `volGain(v) = v^(1+(1−v)²)`: 80 % → −2 dB, 50 % → −7,5 dB, 20 % → −23 dB
+  (antes v²: −3,9 / −12 / −28 dB); el 0,8 guardado suena ya más fuerte sin migrar nada. Al reanudar, el fundido de entrada
+  va en `drive` (antes de la dinámica): con la fuente a pleno el glue y el limitador en reposo apretaban de golpe. No en la
+  ganancia de la voz: una mezcla que arranca en ese medio segundo la reprograma (hueco y golpe a pleno).
+  Eco: `DelayNode` 3/4 de tiempo ⟲ lowpass/highpass, feedback 0,45. FX (riser + impact) → fx → drive (pasan por la dinámica).
 - Todo (fundidos de potencia constante, intercambio de graves, barridos, riser/eco, ducking) son automatizaciones de
   AudioParam programadas por delante (≈ 3 s antes de la primera acción); nada se mueve fotograma a fotograma. Lo
   "inmediato" (pausa, salto, apagar, ducking) va ≥ 25 ms por delante (iOS renderiza a lotes) y los cortes duran ≥ 80 ms.
@@ -700,12 +710,19 @@ Transiciones (cuadradas a compás con `barOffset` + `bpm×rate` de la saliente r
 - Si la entrante no está decodificada a tiempo, sigue la actual (con bucle de frase a compás si se acaba) y entra con un
   fundido simple en cuanto esté. **Nunca silencios**.
 - **Ducking de voz**: `speech.js` y `audio-engine.playClips` emiten `window.dispatchEvent(new CustomEvent('br:voice',
-  { detail: { speaking } }))`; el motor baja la música −9 dB (−6 dB si cae en una transición filtrada; ataque 120 ms,
-  relajación 450 ms). Los pitidos no ducken.
+  { detail: { speaking } }))`; el motor baja la música −11 dB (−10 dB si cae en una transición filtrada) y, por encima del
+  80 %, además lo que se haya subido el volumen (100 % → −13 dB): ataque 120 ms, relajación 450 ms. Va tras el limitador, así
+  que agacha de verdad. Medido con la voz grabada del coach (pre-aviso «sube a…/sprint» + velocidad, −11,4 LUFS por su
+  compresor): voz ≥ 10,9 LU sobre la música agachada (mediana 13–14 LU; antes 8,4 al 80 % y 4,5 al 100 % en los risers) y
+  la suma voz + música ≤ −0,55 dBTP (antes hasta +1,4). Los pitidos no ducken.
 - Pruebas: `tools/test-music.mjs` (navegador simulado a 48 kHz: mezclas, memoria, reintentos, reloj atascado…) y
   `tools/music-offline.html` (render real en un OfflineAudioContext: Pirámide 20′ a 48 kHz, Bloques 45′ a 44,1 kHz, red a
   3/12 s, decodificación lenta, JS dormido y reloj parado: huecos, clics, baches relativos verificados contra la pista sola
-  y sonoridad → `docs/audio-tests/`, con `transiciones.mp3` para escuchar).
+  y sonoridad → `docs/audio-tests/`, con `transiciones.mp3` para escuchar). Mide también niveles: integrada, corto plazo y
+  LRA, true peak ×4, reducción de ganancia del glue y del limitador (muestreada en cada paso) y el coach con sus clips
+  reales (voz frente a la música agachada y pico de la suma). `?vols=0.8,1&ch=2&lite=1&tag=…&ab=1&master={…}`: volúmenes,
+  estéreo, solo niveles, nombre del informe, pasaje A/B de 15 s y ajustes del maestro para probar
+  (`volumen-antes.json`, `volumen-despues.json`, `volumen-antes-despues.wav/.mp3`).
 - **En el iPhone** (lo que el render offline no ve): abrir por **HTTPS** (GitHub Pages, o `tools/serve.mjs --https` con un
   certificado de mkcert): por http en la red local no hay wake lock ni service worker y la pantalla se apaga y congela la
   app. Con `?debug=music` un panel muestra contexto (estado, Hz, latencias), wake lock, sesión de audio, MB decodificados,
@@ -724,10 +741,21 @@ en Worker, guardado en IndexedDB), `listUserTracks()`, `updateUserTrack(id, patc
 (Cache API `br-music`), `offlineStatus()`, `TIER_INFO` (nombres en español y colores).
 
 ### 11.6 Estado e interfaz
-`state.music = { enabled: true, mode: 'app' /*'app'|'own'*/, volume: 0.8, effects: true, energy: 'normal' /*'normal'|'max'*/,
+`state.music = { enabled: true, mode: 'app' /*'app'|'own'*/, volume: 0.8 /*curva §11.4: −2 dB*/, effects: true, energy: 'normal' /*'normal'|'max'*/,
 useBuiltIn: true, useImported: true, disabled: [] /*ids*/ }`.
 - **Reproductor**: botón música (on/off) junto al de silencio; "Sonando: título · 128 BPM" discreto; la velocidad gigante y
   el anillo **laten a ritmo** con `beatPhase()` (escala 1→1,03 y brillo en cada tiempo; desactivado con reduced-motion).
+  - **Hoja «Sonido»** (feedback del gimnasio: «la música estaba un poquito bajita»): un toque en ♪ sigue encendiendo/apagando;
+    **mantenerlo 450 ms** (anillo que se llena + háptica; también botón derecho/tecla de menú) abre una hoja compacta y opaca
+    (`openSheet({ cls: 'mu-snd' })`, sin backdrop-filter, fondo apenas atenuado; en horizontal en la columna derecha para que la
+    velocidad siga a la vista) con dos barras grandes de **arrastre relativo** (tocar no salta de valor) y − / + de 52 px
+    (de 5 en 5, repetición al mantener): **Música** 0–100 % → `music.setVolume()` y **Voz del coach** 10–100 % →
+    `coach.updateSettings({ volume })` (voz y pitidos). Se aplica al instante y se guarda en `state.music.volume` /
+    `state.audio.volume` (los mismos de Perfil). Con «Mi música» solo sale la voz. Mientras está abierta los controles se
+    recogen; corriendo se cierra sola tras 8 s sin tocarla, en pausa se queda; se cierra tocando fuera, deslizando abajo,
+    con ✕ o Escape, y al bloquear o terminar. Descubrimiento: en las 2 primeras clases (`localStorage['br:snd-hint']`, o
+    hasta usarla) a los 2,6 s del arranque el aviso «Mantén pulsado ♪ para subir la música» con los controles a la vista y ♪
+    latiendo.
 - **Perfil → Música** (`#/settings/music`): modo (Música BestRunning / Mi música — Spotify o Apple Music con la voz encima),
   volumen, efectos de DJ, energía, biblioteca agrupada por zona (título, artista, BPM, mini barra de energía, escuchar 15 s
   desde el drop, activar/desactivar), **Importar canciones** (input file `accept="audio/*"` múltiple → progreso de análisis →
