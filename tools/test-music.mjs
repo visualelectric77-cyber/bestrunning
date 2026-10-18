@@ -13,15 +13,18 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VERBOSE = process.argv.includes('--verbose');
+const BUDGET_MB = Number(process.env.BR_BUDGET_MB) || 0;   // solo para experimentar con el presupuesto de memoria
 const LIB = JSON.parse(readFileSync(join(ROOT, 'audio/music/library.json'), 'utf8'));
 const TRACKS = LIB.tracks;
 const BY_ID = new Map(TRACKS.map((t) => [t.id, t]));
 
 let checks = 0;
 const failures = [];
+const TRACE = (process.argv.find((x) => x.startsWith('--trace=')) || '').slice(8);   // --trace=texto: muestra esas comprobaciones
 function ok(cond, msg) {
   checks++;
   if (!cond) failures.push(msg);
+  if (TRACE && String(msg).includes(TRACE)) process.stdout.write(`    ${cond ? '·' : '✗'} ${msg}\n`);
   return !!cond;
 }
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -358,7 +361,8 @@ section('Robustez y casos límite', () => {
 /* ═════════════ 3. Motor DJ con navegador simulado ═════════════
    AudioContext falso con evaluador de automatizaciones (AudioParam), AudioBufferSourceNode con start(cuándo, desde)
    y velocidad vigilada (no puede cambiar tras arrancar), decodificación asíncrona con latencia en un
-   OfflineAudioContext a 32 kHz, fetch simulado y reloj/temporizadores controlados. Sin <audio>. */
+   OfflineAudioContext a la frecuencia del contexto (48 kHz), ventanas recortadas, fetch simulado y
+   reloj/temporizadores controlados. Sin <audio>. */
 
 async function asection(name, fn) {
   const before = failures.length;
@@ -390,7 +394,7 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
   globalThis.addEventListener = bus.addEventListener.bind(bus);
   globalThis.removeEventListener = bus.removeEventListener.bind(bus);
   globalThis.dispatchEvent = bus.dispatchEvent.bind(bus);
-  const counters = { audioEls: 0, mediaSources: 0, rateChanges: 0, decodes: 0, fetches: 0, offlineCtx: 0, liveBuffers: 0, maxLiveBuffers: 0 };
+  const counters = { audioEls: 0, mediaSources: 0, rateChanges: 0, decodes: 0, fetches: 0, offlineCtx: 0, liveBuffers: 0, maxLiveBuffers: 0, trims: 0, rates: new Set() };
   globalThis.document = { createElement: () => { counters.audioEls++; return {}; }, addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' };
   globalThis.fetch = async (url) => {
     counters.fetches++;
@@ -474,17 +478,35 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
     }
     finish(t) { if (this.ended) return; this.ended = true; this.endedAt = t; this.onended?.(); }
     playing(t) { return this.when != null && t >= this.when && t < Math.min(this.stopAt, this.naturalEnd ?? Infinity); }
+    /** Posición en s de PISTA (el buffer puede ser solo una ventana que empieza en buffer.w0). */
     pos(t) {
       let p = this.offset + (t - this.when) * this.rate;
       if (this.loop && p >= this.loopEnd) p = this.loopStart + ((p - this.loopStart) % (this.loopEnd - this.loopStart));
-      return p;
+      return p + (this.buffer?.w0 || 0);
     }
+    get startPos() { return this.offset + (this.buffer?.w0 || 0); }
+  }
+  // Datos de canal "etiquetados": la ventana recortada sabe de qué pista y desde qué muestra viene (sin PCM real)
+  class Tagged extends Float32Array {
+    subarray(a = 0) { const s = new Tagged(0); s.trackId = this.trackId; s.from = a; return s; }
   }
   const fakeBuffer = (id, sr = 32000) => {
     const d = BY_ID.get(id).duration;
     counters.liveBuffers++;
     counters.maxLiveBuffers = Math.max(counters.maxLiveBuffers, counters.liveBuffers);
-    return { isFake: true, id, duration: d, sampleRate: sr, numberOfChannels: 2, length: Math.round(d * sr), getChannelData: () => new Float32Array(1) };
+    const tag = new Tagged(1);
+    tag.trackId = id;
+    return { isFake: true, id, w0: 0, duration: d, sampleRate: sr, numberOfChannels: 2, length: Math.round(d * sr), getChannelData: () => tag };
+  };
+  const windowBuffer = (ch, len, sr) => {
+    counters.liveBuffers++;
+    counters.trims++;
+    counters.maxLiveBuffers = Math.max(counters.maxLiveBuffers, counters.liveBuffers);
+    return {
+      isFake: true, id: null, w0: 0, duration: len / sr, sampleRate: sr, numberOfChannels: ch, length: len,
+      getChannelData: () => new Tagged(1),
+      copyToChannel(arr, c, off = 0) { if (c === 0 && off === 0) { this.id = arr.trackId; this.w0 = arr.from / sr; } },
+    };
   };
   const decode = (arr, sr) => new Promise((resolve, reject) => {
     counters.decodes++;
@@ -492,7 +514,7 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
     later(() => (BY_ID.has(id) ? resolve(fakeBuffer(id, sr)) : reject(new Error('EncodingError'))), decodeMs(id));
   });
   class Ctx {
-    constructor() { this.state = 'running'; this.frozen = null; this.lost = 0; this.sampleRate = 44100; this.nodes = []; this.sources = []; this.destination = new Node(this, 'dest'); this.outputLatency = 0.012; }
+    constructor() { this.state = 'running'; this.frozen = null; this.lost = 0; this.sampleRate = 48000; this.nodes = []; this.sources = []; this.destination = new Node(this, 'dest'); this.outputLatency = 0.012; }
     get currentTime() { return this.frozen ?? clock.ms / 1000 + 5 - this.lost; }
     resume() { if (this.state === 'interrupted') return Promise.reject(new Error('interrumpido')); this.state = 'running'; return Promise.resolve(); }
     suspend() { this.state = 'suspended'; return Promise.resolve(); }
@@ -508,8 +530,9 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
     decodeAudioData(arr) { return decode(arr, this.sampleRate); }
   }
   globalThis.OfflineAudioContext = class {
-    constructor(ch, len, sr) { counters.offlineCtx++; this.sampleRate = sr; this.length = len; }
+    constructor(ch, len, sr) { counters.offlineCtx++; counters.rates.add(sr); this.sampleRate = sr; this.length = len; }
     decodeAudioData(arr) { return decode(arr, this.sampleRate); }
+    createBuffer(ch, len, sr) { return windowBuffer(ch, len, sr); }
   };
   const ctx = new Ctx();
   async function advance(sec, each = null) {
@@ -583,19 +606,19 @@ function makeSim({ decodeMs = (id) => 300 + (id.length % 7) * 60, broken = new S
 
 const libTracks = TRACKS.map((t) => ({ ...t, url: `https://br.test/audio/music/${t.id}.m4a` }));
 const LIB_BY_ID = new Map(libTracks.map((t) => [t.id, t]));
-const simTotals = { beatmix: 0, drops: 0, resumes: 0 };
+const simTotals = { beatmix: 0, drops: 0, resumes: 0, holds: 0 };
 
 async function simulateSession(templateId, minutes, seed, simOpts = {}) {
   const sim = makeSim(simOpts);
   const out = {
     worstGap: 0, phase: [], drops: [], resumeErr: [], heardOk: 0, expected: 0, stoppedAtEnd: false, loaded: null, unlocked: null,
-    late: 0, rates: [], counters: null, peak: 0, probes: null, resumeDrift: [],
+    late: 0, rates: [], counters: null, peak: 0, probes: null, resumeDrift: [], holds: [],
   };
   try {
     const { createMusicEngine } = await import('../js/audio/music.js');
     const w = buildWorkout(templateId, { minutes, levels: LEVELS, seed });
     const plan = buildMusicPlan(w, libTracks, { seed });
-    const eng = createMusicEngine({ getAudioContext: () => sim.ctx });
+    const eng = createMusicEngine({ getAudioContext: () => sim.ctx, budgetBytes: BUDGET_MB ? BUDGET_MB * 2 ** 20 : undefined });
     out.unlocked = await Promise.race([eng.unlock(), new Promise((r) => sim.advance(1).then(() => r('t')))]);
     eng.load(plan, LIB_BY_ID).then((v) => { out.loaded = v; });
     await sim.advance(2);
@@ -621,10 +644,14 @@ async function simulateSession(templateId, minutes, seed, simOpts = {}) {
         probes.push({ at: c.atSec - c.leadSec * 0.25, kind: 'hp-up', c });
         probes.push({ at: c.atSec + 0.08, kind: 'hp-open', c });
       }
-      if (c.transition === 'echo-out' && c.tailSec >= 1) probes.push({ at: c.atSec + c.tailSec * 0.2 + 1, kind: 'lp-closed', c });
     }
     probes.sort((a, b) => a.at - b.at);
     out.probes = { total: probes.length, bad: [] };
+    // Echo-out: la entrante suena filtrada (lowpass cerrado) justo después del corte y ya ≥ 0,8 en el corte
+    const echoSeen = new Set();
+    const fqOf = (v, i, at = sim.ctx.currentTime) => { const lp = [...[...v.s.outs][0].outs][0]; const lpN = i === 'hp' ? lp : [...lp.outs][0]; return lpN.frequency.at(at); };
+    const rides = new Map();
+    const effects0 = true;
     let nextProbe = 0;
     const firstAction = (c) => c.atSec - Math.max(c.leadSec, c.atSec - c.entryAt);
     await sim.advance(w.totalSec + 3, (now) => {
@@ -683,6 +710,48 @@ async function simulateSession(templateId, minutes, seed, simOpts = {}) {
         lastJob = t;
         const j = eng.status().job;
         jobKind = j?.kind || null;
+        // Riser y eco: su automatización se comprueba POR ADELANTADO (valores programados en el instante clave)
+        if (j && j.idx >= 0 && (j.kind === 'echo-out' || j.kind === 'riser-drop') && !echoSeen.has(j.idx)) {
+          echoSeen.add(j.idx);
+          const st = eng.status();
+          const oId = st.voices.find((v) => v.main)?.trackId;
+          const inId = st.voices.find((v) => !v.main && v.startC >= j.first - 1e-6)?.trackId;
+          const srcAt = (id, t) => sim.voices(t).find((v) => idOfSrc(v.s) === id);
+          const noTrim = (v, t) => (v ? v.g / Math.max(1e-6, [...v.s.outs][0].gain.at(t)) : 0);
+          const c = plan.cues[j.idx];
+          if (j.kind === 'echo-out') {
+            out.probes.total += 2;
+            const inBar = trackGrid(BY_ID.get(inId)).barSec / soloRateOf(c);
+            const vIn = srcAt(inId, j.swap + 1e-3);
+            if (!(noTrim(vIn, j.swap + 1e-3) >= 0.8)) out.probes.bad.push(`eco: entrante ${noTrim(vIn, j.swap + 1e-3).toFixed(2)} en el corte @${c.atSec}`);
+            const tq = j.swap + 0.25 * inBar;
+            if (!(vIn && fqOf(vIn, 'lp', tq) < 12000 && fqOf(vIn, 'lp', j.swap + 1.05 * inBar) > 15000)) out.probes.bad.push(`eco: lowpass @${c.atSec}`);
+          } else if (effects0) {
+            out.probes.total += 3;
+            const beatIn = trackGrid(BY_ID.get(inId)).spb / soloRateOf(c);
+            const lead = Math.min(c.leadSec, j.swap - j.first);
+            const tMid = j.swap - 0.5 * lead;
+            const tCut = j.swap - 0.4 * beatIn;
+            const gMid = noTrim(srcAt(oId, tMid), tMid);
+            const gCut = noTrim(srcAt(oId, tCut), tCut);
+            if (lead > 2 * beatIn && !(gMid > 0.95)) out.probes.bad.push(`riser: saliente a ${gMid.toFixed(2)} en el filtro @${c.atSec}`);
+            if (!(gCut > 0.18 && gCut < 0.32)) out.probes.bad.push(`riser: saliente a ${gCut.toFixed(2)} en el corte @${c.atSec}`);
+            const vO = srcAt(oId, j.swap - 0.01);
+            if (!(vO && fqOf(vO, 'hp', j.swap - 0.01) <= 610)) out.probes.bad.push(`riser: highpass > 600 Hz @${c.atSec}`);
+          }
+        }
+        // Beatmix hacia una intro floja: la saliente sigue a −3 dB (0,71) a mitad de la espera
+        if (j?.kind === 'beatmix' && j.hold > 0 && !echoSeen.has(`h${j.idx}`)) {
+          echoSeen.add(`h${j.idx}`);
+          const st = eng.status();
+          const oId = st.voices.find((v) => v.main)?.trackId;
+          const goBar = trackGrid(BY_ID.get(oId)).barSec / (st.voices.find((v) => v.main)?.rate || 1);
+          const tH = j.swap + (j.hold / 2) * goBar;
+          const vO = sim.voices(tH).find((v) => idOfSrc(v.s) === oId);
+          const gO = vO ? vO.g / Math.max(1e-6, [...vO.s.outs][0].gain.at(tH)) : 0;
+          out.holds.push(gO);
+        }
+        if (j) for (const v of eng.status().voices) if (v.ride && !rides.has(v.c0)) rides.set(v.c0, v.ride);
         if (j && j.idx >= 0 && !jobs.has(j.idx)) { jobs.set(j.idx, j.swap); kinds[j.kind] = (kinds[j.kind] || 0) + 1; }
       }
     });
@@ -702,10 +771,10 @@ async function simulateSession(templateId, minutes, seed, simOpts = {}) {
       if (c.entry === 'resume') {
         const f = (((src.pos(swap) - g.barOffset) / g.barSec) % 1 + 1) % 1;
         const prev = seenSrc.get(src);
-        const drift = prev ? Math.abs(src.offset - prev.pos) : 0;
+        const drift = prev ? Math.abs(src.startPos - prev.pos) : 0;
         out.resumeErr.push(Math.min(f, 1 - f) * g.barSec / src.rate);
         out.resumeDrift.push(drift / g.barSec);
-        if (drift / g.barSec > 1.01 && VERBOSE) line(`      retoma #${i} ${c.transition} ${c.trackId} desde ${src.offset.toFixed(2)} (se oyó por última vez en ${prev?.pos.toFixed(2)})`);
+        if (drift / g.barSec > 1.01 && VERBOSE) line(`      retoma #${i} ${c.transition} ${c.trackId} desde ${src.startPos.toFixed(2)} (se oyó por última vez en ${prev?.pos.toFixed(2)})`);
       }
     });
     const expected = [];
@@ -714,7 +783,14 @@ async function simulateSession(templateId, minutes, seed, simOpts = {}) {
     out.expected = expected.length;
     out.stoppedAtEnd = !sim.ctx.sources.some((s) => s.buffer?.isFake && s.playing(sim.ctx.currentTime));
     out.rates = sim.ctx.sources.filter((s) => s.buffer?.isFake).map((s) => s.rate);
+    out.rides = [...rides.values()];
     out.peak = eng.status().buffers.peak;
+    out.peakBytes = eng.status().buffers.peakBytes;
+    out.budget = eng.status().buffers.budget;
+    const inf = Object.values(eng.status().buffers.info);
+    out.decodes = inf.length;
+    out.atCtxRate = inf.filter((x) => x.rate === sim.ctx.sampleRate).length;
+    out.trimmed = inf.filter((x) => x.w1 - x.w0 < x.sec - 1).length;
     out.kinds = kinds;
     out.counters = { ...sim.counters };
     eng.destroy();
@@ -723,6 +799,7 @@ async function simulateSession(templateId, minutes, seed, simOpts = {}) {
 }
 const idOfSrc = (s) => s.buffer?.id;
 const soloRateOf = (c) => Math.min(1.03, Math.max(0.97, c.rate));
+const sim0Rate = 48000;
 
 for (const [tpl, minutes, seed] of [['sprint-30-60', 20, 7], ['pyramid', 20, 7], ['progressive', 30, 4], ['aerobic-base', 45, 2], ['long-blocks', 45, 2]]) {
   await asection(`Motor DJ simulado: ${tpl} ${minutes}′ (mezclas, fase, drops, sin silencios)`, async () => {
@@ -740,15 +817,21 @@ for (const [tpl, minutes, seed] of [['sprint-30-60', 20, 7], ['pyramid', 20, 7],
     ok(r.counters.rateChanges === 0, `${tpl}: playbackRate fijo desde el arranque de cada fuente (${r.counters.rateChanges} cambios)`);
     ok(r.rates.every((x) => x >= 0.97 - 1e-9 && x <= 1.03 + 1e-9), `${tpl}: rates dentro de ±3 % (${Math.min(...r.rates).toFixed(3)}–${Math.max(...r.rates).toFixed(3)})`);
     ok(r.counters.audioEls === 0 && r.counters.mediaSources === 0, `${tpl}: sin <audio> ni MediaElementSource`);
-    ok(r.counters.offlineCtx === 1, `${tpl}: decodifica en un OfflineAudioContext (${r.counters.offlineCtx})`);
+    ok(r.holds.every((x) => x > 0.6 && x < 0.8), `${tpl}: intro floja ⇒ la saliente sigue a −3 dB (${r.holds.map((x) => x.toFixed(2)).join(', ')})`);
+    simTotals.holds += r.holds.length;
+    ok(r.rides.every((x) => x.db >= 1.5 && x.db <= 6.01 && x.to > x.from), `${tpl}: intros flojas subidas ≤ +6 dB y de vuelta a 0 dB (${r.rides.length})`);
+    ok(r.counters.offlineCtx >= 1 && r.counters.offlineCtx === r.counters.rates.size, `${tpl}: un OfflineAudioContext por frecuencia de decodificación (${r.counters.offlineCtx})`);
     ok(r.peak <= 3, `${tpl}: como mucho 3 pistas decodificadas a la vez (${r.peak})`);
+    ok(r.peakBytes <= r.budget, `${tpl}: memoria residente dentro del presupuesto (${(r.peakBytes / 2 ** 20).toFixed(0)} de ${(r.budget / 2 ** 20).toFixed(0)} MB)`);
+    ok(r.atCtxRate >= r.decodes * 0.5, `${tpl}: la mayoría a la frecuencia del contexto (${r.atCtxRate}/${r.decodes})`);
     ok(r.late === 0, `${tpl}: cada entrante ya decodificada a tiempo (${r.late} tarde)`);
     simTotals.beatmix += r.phase.length;
     simTotals.drops += r.drops.length;
     simTotals.resumes += r.resumeErr.length;
-    line(`    FX ${r.probes.total} · beatmix ${r.phase.length} (peor ${(1000 * Math.max(0, ...r.phase)).toFixed(1)} ms) · drops ${r.drops.length} · retomas ${r.resumeErr.length} · hueco máx. ${r.worstGap.toFixed(2)} s${r.worstGap > 0.05 ? ` en ${r.gapAt.toFixed(1)}` : ''} · ${Object.entries(r.kinds).map(([k, v]) => `${k} ${v}`).join(' ')} · pistas ${r.heardOk}/${r.expected} · decodificaciones ${r.counters.decodes} · máx. ${r.peak} en memoria`);
+    line(`    FX ${r.probes.total} · beatmix ${r.phase.length} (peor ${(1000 * Math.max(0, ...r.phase)).toFixed(1)} ms) · drops ${r.drops.length} · retomas ${r.resumeErr.length} · hueco máx. ${r.worstGap.toFixed(2)} s${r.worstGap > 0.05 ? ` en ${r.gapAt.toFixed(1)}` : ''} · ${Object.entries(r.kinds).map(([k, v]) => `${k} ${v}`).join(' ')} · pistas ${r.heardOk}/${r.expected} · decodificaciones ${r.counters.decodes} (recortadas ${r.trimmed}, a ${sim0Rate} Hz ${r.atCtxRate}/${r.decodes}) · máx. ${r.peak} en memoria, ${(r.peakBytes / 2 ** 20).toFixed(0)} MB · intros subidas ${r.rides.length} (hasta +${Math.max(0, ...r.rides.map((x) => x.db)).toFixed(1)} dB)`);
   });
 }
+ok(simTotals.holds >= 1, `beatmix hacia intros flojas con la saliente sostenida (${simTotals.holds})`);
 ok(simTotals.beatmix >= 10 && simTotals.drops >= 5 && simTotals.resumes >= 5, `simulación con suficientes beatmix (${simTotals.beatmix}), drops (${simTotals.drops}) y retomas (${simTotals.resumes})`);
 
 await asection('Motor DJ: voz, pausa, salto de tramo, apagar y parar', async () => {
@@ -933,6 +1016,192 @@ function plan0() {
   return buildMusicPlan(buildWorkout('minute-on', { minutes: 20, levels: LEVELS, seed: 9 }), libTracks, { seed: 9 });
 }
 
+await asection('Almacén de buffers: presupuesto en bytes, ventanas, reintentos, descarga abortada', async () => {
+  const { createBufferStore, BUDGET_BYTES } = await import('../js/audio/music-buffers.js');
+  // Pistas "importadas" largas (solo existen en este test)
+  const base = BY_ID.get('deep-house-paulyudin');
+  const fakes = { u_long: 30 * 60, u_mid: 12 * 60 };
+  for (const [id, d] of Object.entries(fakes)) BY_ID.set(id, { ...base, id, duration: d });
+  const sim = makeSim({ decodeMs: () => 200 });
+  try {
+    const enc = (id) => new TextEncoder().encode(id).buffer;
+    const tr = (id) => ({ ...(BY_ID.get(id)), id, url: `x/${id}.m4a` });
+    const fail = new Map();      // id → nº de fallos que quedan
+    const hang = new Set();      // id → la descarga no llega nunca (hasta que se aborta)
+    const slow = new Map();      // id → ms de descarga
+    let aborts = 0;
+    const loadData = (t, { signal } = {}) => new Promise((resolve, reject) => {
+      signal?.addEventListener?.('abort', () => { aborts++; reject(Object.assign(new Error('abortada'), { name: 'AbortError' })); });
+      if (fail.get(t.id) > 0) { fail.set(t.id, fail.get(t.id) - 1); sim.later(() => reject(new Error('red')), 50); return; }
+      if (hang.has(t.id)) return;
+      sim.later(() => resolve(enc(t.id)), slow.get(t.id) || 50);
+    });
+    const now = () => sim.clock.ms / 1000;
+    const inUse = new Set();
+    const score = (id) => (inUse.has(id) ? -1 : Infinity);
+    let st = createBufferStore({ getContext: () => sim.ctx, loadData, now });
+    // Presupuesto: con una pista sonando, la de 12 min baja de frecuencia y la de 20 min no cabe (sustituta)
+    const A = 'deep-house-paulyudin';
+    ok(st.request(tr(A), 0, score) === 'loading', 'store: primera petición en curso');
+    await sim.advance(1);
+    ok(st.has(A) && st.stats().rates[A] === 48000, `store: decodifica a la frecuencia del contexto (${st.stats().rates[A]})`);
+    inUse.add(A);
+    ok(st.request(tr('u_long'), 30, score) === 'failed' && st.stats().errors.u_long?.reason === 'memoria', 'store: una pista que no cabe ni a 16 kHz se rechaza (sustituta)');
+    ok(st.request(tr('u_mid'), 30, score) === 'loading', 'store: la de 12 min se decodifica…');
+    await sim.advance(1);
+    const r = st.stats();
+    ok(st.has('u_mid') && r.rates.u_mid < 48000, `store: … a menos frecuencia (${r.rates.u_mid} Hz)`);
+    ok(r.bytes <= BUDGET_BYTES * 1.25, `store: residente ${(r.bytes / 2 ** 20).toFixed(0)} MB dentro del margen`);
+    st.releaseAll();
+    ok(st.stats().decoded === 0 && st.stats().bytes === 0, 'store: releaseAll suelta todo');
+    inUse.clear();
+    // Ventana: solo se guarda el trozo que usa el plan
+    st = createBufferStore({ getContext: () => sim.ctx, loadData, now, windowFor: () => [30, 90] });
+    st.request(tr(A), 0, score);
+    await sim.advance(1);
+    const wb = st.get(A);
+    ok(wb && Math.abs(st.offsetOf(wb) - 30) < 0.01 && Math.abs(wb.duration - 60) < 0.01, `store: ventana [30, 90] s (${st.offsetOf(wb)?.toFixed(2)}, ${wb?.duration?.toFixed(2)} s)`);
+    ok(Math.abs(st.stats().bytes - 60 * 48000 * 8) < 48000 * 8, 'store: los bytes son los de la ventana');
+    // Reintentos: un fallo de red no deja la pista fuera toda la sesión
+    st = createBufferStore({ getContext: () => sim.ctx, loadData, now });
+    const B = 'tropical-deep-house-deep-house-music';
+    fail.set(B, 1);
+    st.request(tr(B), 50, score);
+    await sim.advance(0.5);
+    ok(st.isFailed(B) && st.request(tr(B), 50, score) === 'failed', 'store: fallo ⇒ en espera de reintento');
+    await sim.advance(20.5);
+    ok(!st.isFailed(B) && st.request(tr(B), 50, score) === 'loading', 'store: a los 20 s se reintenta');
+    await sim.advance(1);
+    ok(st.has(B), 'store: el reintento la deja lista');
+    const C = 'rapid-drum-and-bass-catch22music';
+    fail.set(C, 1);
+    st.request(tr(C), 50, score);
+    await sim.advance(0.5);
+    ok(st.isFailed(C), 'store: otro fallo');
+    st.retryNow();
+    ok(st.request(tr(C), 50, score) === 'loading', 'store: retryNow (vuelve la red / la app) reintenta ya');
+    await sim.advance(1);
+    fail.set('the-portal-rizzlas', 9);
+    for (let k = 0; k < 4; k++) { st.retryNow(); st.request(tr('the-portal-rizzlas'), 50, score); await sim.advance(0.5); }
+    ok(st.stats().errors['the-portal-rizzlas']?.permanent === true, 'store: tras 3 intentos queda descartada');
+    // Descarga colgada: se aborta a los 15 s (no a los 60) y libera el turno
+    st = createBufferStore({ getContext: () => sim.ctx, loadData, now });
+    const D = 'drum-bass-watermello';
+    hang.add(D);
+    st.request(tr(D), 50, score);
+    await sim.advance(14);
+    ok(st.loadingId() === D, 'store: descarga en curso a los 14 s');
+    await sim.advance(1.5);
+    ok(st.loadingId() == null && st.isFailed(D) && st.stats().errors[D]?.reason === 'timeout', 'store: abortada a los 15 s');
+    hang.clear();
+    // Prioridad: una descarga que se necesita más tarde cede ante la que urge
+    const E = 'stylish-deep-electronic-nveravetyanmusic';
+    const F = 'synthwave-retro-80s-arpmedia';
+    slow.set(E, 10000);
+    const need = (id) => (id === E ? 80 : Infinity);
+    ok(st.request(tr(E), 80, need) === 'loading', 'store: prefetch lejano en curso');
+    await sim.advance(1);
+    const a0 = aborts;
+    ok(st.request(tr(F), 5, need) === 'loading' && st.loadingId() === F && aborts === a0 + 1, 'store: la urgente aborta la lejana');
+    await sim.advance(1);
+    ok(st.has(F) && !st.isFailed(E), 'store: la abortada no cuenta como fallo');
+    // Red lentísima: una descarga urgente no se aborta (abortar en cadena no dejaría llegar a ninguna)
+    const G = 'midnight-synthwave-the-mountain';
+    const H = 'bhairav-psytrance-buzzpsy';
+    slow.set(G, 30000);
+    const a1 = aborts;
+    ok(st.request(tr(G), 3, () => 3) === 'loading', 'store: descarga urgente en curso');
+    ok(st.request(tr(H), 1, () => 3) === 'busy' && aborts === a1 && st.loadingId() === G, 'store: otra urgente espera (sin abortos en cadena)');
+    ok(st.request(tr(H), 1, () => 30) === 'busy', 'store: ni aunque la urgente en curso haga falta 30 s después');
+  } finally {
+    sim.restore();
+    for (const id of Object.keys(fakes)) BY_ID.delete(id);
+  }
+});
+
+await asection('Motor DJ: reloj atascado, salto a compás, ducking en transición, automatización por delante', async () => {
+  const sim = makeSim();
+  try {
+    const { createMusicEngine } = await import('../js/audio/music.js');
+    const w = buildWorkout('pyramid', { minutes: 20, levels: LEVELS, seed: 7 });
+    const plan = buildMusicPlan(w, libTracks, { seed: 7 });
+    const eng = createMusicEngine({ getAudioContext: () => sim.ctx });
+    eng.unlock();
+    eng.load(plan, LIB_BY_ID);
+    await sim.advance(1.5);
+    const t0 = sim.clock.ms / 1000;
+    let off = 0;
+    eng.start(0);
+    let acc = 0;
+    const each = (now) => { acc += 0.01; if (acc >= 0.25) { acc = 0; eng.update(now - t0 - off, { status: 'running' }); } };
+    await sim.advance(30, each);
+    const m = sim.master();
+    // Automatización "inmediata": nunca en el lote de audio en curso (≥ 25 ms por delante)
+    const ct = sim.ctx.currentTime;
+    eng.pause();
+    const evs = m.fade.gain.ev.filter((e) => e.t >= ct - 1e-9);
+    ok(evs.length && Math.min(...evs.map((e) => e.t)) >= ct + 0.024, `pausa: el fundido empieza ≥ 25 ms por delante (${((Math.min(...evs.map((e) => e.t)) - ct) * 1000).toFixed(1)} ms)`);
+    await sim.advance(1);
+    off += 1;
+    eng.resume();
+    await sim.advance(5, each);
+    // Reloj del contexto atascado ('running' pero quieto): no se acumulan voces ni saltos
+    const seeks0 = eng.status().seeks;
+    sim.ctx.frozen = sim.ctx.currentTime;
+    await sim.advance(8, each);
+    const sa = eng.status();
+    ok(sa.stalled === true && sa.stalls === 1, `reloj atascado: detectado (${sa.stalled}, ${sa.stalls})`);
+    ok(sa.voices.length <= 6 && sa.seeks === seeks0, `reloj atascado: sin saltos ni voces acumuladas (${sa.voices.length} voces, ${sa.seeks - seeks0} saltos)`);
+    ok(sa.ctxLog.some((x) => x.state === 'reloj parado'), 'reloj atascado: queda en el registro');
+    sim.uninterrupt();
+    await sim.advance(3, each);
+    const sb = eng.status();
+    ok(!sb.stalled && sb.seeks - seeks0 <= 1, `reloj de vuelta: un solo salto para re-anclar (${sb.seeks - seeks0})`);
+    ok(Math.abs(sb.t - (sim.clock.ms / 1000 - t0 - off)) < 0.1 && sim.voices(sim.ctx.currentTime).some((v) => v.g > 0.3), 'reloj de vuelta: suena y va al tiempo de clase');
+    // Salto de tramo a otra pista: el centro del fundido cae en un compás de las dos
+    const starts = [];
+    let a2 = 0;
+    for (const s of w.segments) { starts.push(a2); a2 += s.sec; }
+    const tNow = sim.clock.ms / 1000 - t0 - off;
+    const curId = eng.nowPlaying()?.trackId;
+    const target = starts.find((s, k) => s > tNow + 60 && plan.cues[Math.max(0, plan.cues.findLastIndex((c) => c.atSec <= s + 1e-6 && c.change === 'track'))].trackId !== curId);
+    off -= target - tNow;
+    eng.seek(target);
+    await sim.advance(0.3, each);
+    const sj = eng.status();
+    const inV = sj.voices.find((v) => !v.main && v.startC >= sim.ctx.currentTime - 0.5);
+    const outV = sj.voices.find((v) => v.main);
+    if (sj.job?.kind === 'fast' && inV && outV) {
+      const ph = (v) => { const g = trackGrid(BY_ID.get(v.trackId)); const p = v.p0 + (sj.job.swap - v.c0) * v.rate; const f = (((p - g.barOffset) / g.barSec) % 1 + 1) % 1; return Math.min(f, 1 - f) * g.barSec / v.rate; };
+      ok(ph(inV) < 0.002 && ph(outV) < 0.002, `salto: compás con compás en el centro del fundido (${(ph(inV) * 1000).toFixed(1)} / ${(ph(outV) * 1000).toFixed(1)} ms)`);
+    } else ok(false, `salto: transición rápida con dos voces (${sj.job?.kind})`);
+    await sim.advance(4, each);
+    // Ducking −6 dB si la voz cae dentro de una transición filtrada
+    let jf = null;
+    for (let k = 0; k < 2400 && !jf; k++) {
+      await sim.advance(0.25, each);
+      const j = eng.status().job;
+      if (j && ['riser-drop', 'echo-out', 'filter-fade'].includes(j.kind) && sim.ctx.currentTime > j.first + 0.3 && sim.ctx.currentTime < j.end - 0.6) jf = j;
+    }
+    if (jf) {
+      globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: true } }));
+      await sim.advance(0.25, each);
+      ok(Math.abs(m.duck.gain.value - 10 ** (-6 / 20)) < 0.04, `voz en una transición filtrada ⇒ −6 dB (${(20 * Math.log10(m.duck.gain.value)).toFixed(1)} dB)`);
+      globalThis.dispatchEvent(new CustomEvent('br:voice', { detail: { speaking: false } }));
+      await sim.advance(1, each);
+      ok(m.duck.gain.value > 0.97, 'tras la voz vuelve a 0 dB');
+    } else ok(false, 'no se encontró una transición filtrada');
+    // Apagar la música suelta los buffers
+    eng.setEnabled(false);
+    await sim.advance(1, each);
+    ok(eng.status().buffers.decoded === 0, `setEnabled(false): sin buffers decodificados (${eng.status().buffers.decoded})`);
+    eng.setEnabled(true);
+    await sim.advance(4, each);
+    ok(sim.voices(sim.ctx.currentTime).some((v) => v.g > 0.3), 'setEnabled(true): vuelve a sonar (redecodifica)');
+    eng.destroy();
+  } finally { sim.restore(); }
+});
+
 await asection('Motor DJ: contexto inyectado ({ context, now }) sin temporizadores', async () => {
   const sim = makeSim();
   try {
@@ -964,12 +1233,13 @@ section('music.js: AudioBuffers, sin MediaElementSource ni playbackRate en direc
   const src = readFileSync(join(ROOT, 'js/audio/music.js'), 'utf8');
   const code = src.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok(!/createMediaElementSource|createElement\(['"]audio/.test(code), 'sin <audio> ni MediaElementSource');
-  ok(/createBufferSource\(\)/.test(code) && /\.start\(Math\.max\(0, startC\), p0\)/.test(code), 'AudioBufferSourceNode con start(cuándo, desde)');
+  ok(/createBufferSource\(\)/.test(code) && /src\.start\(Math\.max\(0, startC\) \+ late, p0 - w0 \+ late \* rate\)/.test(code), 'AudioBufferSourceNode con start(cuándo, desde) (desde = posición − inicio de su ventana)');
   const rateWrites = code.match(/playbackRate\.[a-zA-Z]+/g) || [];
   ok(rateWrites.length === 1 && rateWrites[0] === 'playbackRate.value', `playbackRate solo se fija al crear la fuente (${rateWrites.join(', ')})`);
   ok(!/preservesPitch|currentTime\s*=/.test(code), 'sin preservesPitch ni saltos de currentTime');
   const bsrc = readFileSync(join(ROOT, 'js/audio/music-buffers.js'), 'utf8');
-  ok(/DECODE_RATE = 32000/.test(bsrc) && /MAX_DECODED = 3/.test(bsrc) && /OfflineAudioContext/.test(bsrc), 'music-buffers: 32 kHz, LRU de 3, OfflineAudioContext');
+  ok(/BUDGET_BYTES = /.test(bsrc) && /MAX_DECODED = 3/.test(bsrc) && /OfflineAudioContext/.test(bsrc) && /windowFor/.test(bsrc) && /AbortController/.test(bsrc),
+    'music-buffers: presupuesto en bytes, como mucho 3, OfflineAudioContext, ventanas y descarga abortable');
 });
 
 /* ═════════════ Resultado ═════════════ */

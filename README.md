@@ -53,14 +53,23 @@ node tools/serve.mjs            # http://127.0.0.1:8095
 
 Abre `http://127.0.0.1:8095/?nosw=1` en Chrome o Safari. `?nosw=1` desactiva el service worker para ver
 siempre los archivos recién editados. Usa este servidor y no `python3 -m http.server`: admite peticiones por
-rangos (como GitHub Pages) y sin eso la música DJ no puede saltar dentro de una pista.
+rangos (como GitHub Pages).
 
 Para probarla en el iPhone desde el Mac (misma wifi): `node tools/serve.mjs 8095 --host 0.0.0.0` y abre
-`http://<ip-del-mac>:8095/?nosw=1`. Ojo: el modo offline, la instalación y el bloqueo de pantalla solo
-funcionan con `https`, es decir, ya publicada en GitHub Pages.
+`http://<ip-del-mac>:8095/?nosw=1`. Ojo: por `http` el iPhone no mantiene la pantalla encendida (al bloquearse
+congela la app y la música se queda repitiendo frase o se corta), ni hay modo offline ni instalación: para
+entrenar de verdad usa la versión publicada en GitHub Pages (`https`) o sirve en local con certificado
+(`mkcert -install && mkcert <ip-del-mac>`, luego `node tools/serve.mjs 8095 --host 0.0.0.0 --https <ip>.pem <ip>-key.pem`)
+y, por si acaso, pon el bloqueo automático en «Nunca». Añade `?debug=music` a la dirección para ver el panel
+del motor de música (estado del audio, memoria, fallos) y hacer una captura si algo suena mal.
 
 Laboratorio 3D (ver los escenarios sin entrenar, capturas y vídeos): `node tools/snap-server.mjs` y abre
 `http://127.0.0.1:8096/tools/scene-lab.html`.
+
+Motor DJ sin iPhone: con el mismo servidor, `http://127.0.0.1:8096/tools/music-offline.html` renderiza en un
+OfflineAudioContext una Pirámide 20′ (a 48 kHz, como el iPhone), unos Bloques de resistencia 45′ y casos difíciles
+(red lenta, decodificación lenta, JS dormido, reloj parado) con el plan y el motor reales y mide huecos, clics, baches
+relativos y sonoridad (informe y WAV de 3 cambios en `docs/audio-tests/`; `transiciones.mp3` para escucharlos).
 
 ## Antes de publicar (cada vez que cambies algo)
 

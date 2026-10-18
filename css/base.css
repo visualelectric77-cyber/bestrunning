@@ -236,7 +236,8 @@ li {
   justify-content: center;
   gap: 3px;
   padding-top: 4px;
-  color: rgba(235, 235, 245, 0.46);
+  /* --text-3 (≈4,6:1 sobre la barra): con 0,46 los rótulos de 10 px quedaban por debajo de AA */
+  color: var(--text-3);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.01em;

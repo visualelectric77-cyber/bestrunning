@@ -795,7 +795,7 @@ T({
 });
 
 T({
-  id: 'aerobic-base', title: 'Base aeróbica Z2', subtitle: 'Rodaje en zona 2, el motor de todo', category: 'endurance', focus: 'Base aeróbica (Z2)',
+  id: 'aerobic-base', title: 'Base aeróbica Z2', subtitle: 'Rodaje en zona 2, el motor de todo', category: 'endurance', focus: 'Motor aeróbico',
   description: 'Rodaje a ritmo de conversación para construir capilares, mitocondrias y un corazón más eficiente. Parece sencillo; es la base de todo lo demás.',
   coachNotes: ['Deberías poder hablar sin jadear: si no, baja una décima.', 'Cadencia ligera y pisada silenciosa.', 'Con el Apple Watch, intenta quedarte en zona 2 de pulso.'],
   build: (ctx) => frame(ctx, (k, B) => {

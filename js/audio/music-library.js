@@ -130,7 +130,11 @@ async function userTracks() {
       }
     }
     if (!url) continue;
-    const t = normTrack(r, { url, source: 'user', user: true, enabled: true, addedAt: r.addedAt || null, mime: r.mime || '' });
+    const t = normTrack(r, {
+      url, source: 'user', user: true, enabled: true, addedAt: r.addedAt || null, mime: r.mime || '',
+      // el Blob (de IndexedDB) se lee directo con blob.arrayBuffer(): sin pasar por fetch(blob:)
+      blob: r.blob || null, sizeBytes: num(r.size, num(r.blob?.size, 0)),
+    });
     if (t) out.push(t);
   }
   return out.sort((a, b) => String(a.addedAt || '').localeCompare(String(b.addedAt || '')));
@@ -210,13 +214,35 @@ export async function resolveTrackSource(track) {
   return { src: track.url, revoke: null, cached: false };
 }
 
+/** Bytes de una importada: su Blob y, si iOS lo perdió (WebKitBlobResource tras ir a segundo plano), uno nuevo de IndexedDB. */
+async function userTrackData(track, fetchImpl, signal) {
+  if (typeof track.blob?.arrayBuffer === 'function') {
+    try { return await track.blob.arrayBuffer(); } catch { /* Blob caducado: se pide otra vez */ }
+  }
+  if (signal?.aborted) throw new Error('abortada');
+  const mod = await import('./music-import.js').catch(() => null);
+  try {
+    const rec = typeof mod?.getUserTrack === 'function' ? await mod.getUserTrack(track.id) : null;
+    if (typeof rec?.blob?.arrayBuffer === 'function') {
+      track.blob = rec.blob;
+      return await rec.blob.arrayBuffer();
+    }
+  } catch { /* último recurso: su objectURL */ }
+  if (typeof fetchImpl !== 'function') throw new Error('sin fetch');
+  const res = await fetchImpl(track.url, signal ? { signal } : undefined);
+  if (!res || !res.ok) throw new Error(`HTTP ${res?.status}`);
+  return res.arrayBuffer();
+}
+
 /**
  * Bytes comprimidos de la pista (ArrayBuffer listo para decodeAudioData): de la caché sin conexión si está y, si no,
- * de la red (el service worker la guarda al pasar). Las importadas van por su objectURL. Lanza si no hay forma.
+ * de la red (el service worker la guarda al pasar). Las importadas, de su Blob. `signal` aborta la descarga.
+ * Lanza si no hay forma.
  */
-export async function fetchTrackData(track, fetchImpl = globalThis.fetch) {
-  if (!track?.url) throw new Error('sin fuente');
-  if (!track.user && !/^(blob|data):/.test(track.url) && hasCaches()) {
+export async function fetchTrackData(track, fetchImpl = globalThis.fetch, { signal = null } = {}) {
+  if (!track?.url && !track?.blob) throw new Error('sin fuente');
+  if (track.user) return userTrackData(track, fetchImpl, signal);
+  if (!/^(blob|data):/.test(track.url) && hasCaches()) {
     try {
       const hit = await (await caches.open(MUSIC_CACHE)).match(track.url);
       if (hit) {
@@ -226,7 +252,7 @@ export async function fetchTrackData(track, fetchImpl = globalThis.fetch) {
     } catch { /* sin caché: red */ }
   }
   if (typeof fetchImpl !== 'function') throw new Error('sin fetch');
-  const res = await fetchImpl(track.url);
+  const res = await fetchImpl(track.url, signal ? { signal } : undefined);
   if (!res || !res.ok) throw new Error(`HTTP ${res?.status}`);
   return res.arrayBuffer();
 }

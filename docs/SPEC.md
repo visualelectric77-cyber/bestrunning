@@ -624,9 +624,10 @@ Nivel exigido: **muy pro** (mezclas cuadradas a compás, sin cortes bruscos ni s
 | run | 128–130 | jog/run (estiradas) |
 | fast | 136–140 | fast (y jog/run estiradas solo si falta) |
 | sprint | 172 (DnB) o el nativo si 148–190 | sprint |
-`rate = clamp(targetBpm / track.bpm, 0.94, 1.06)` con `audio.preservesPitch = true` (y `webkitPreservesPitch`): cambia el
-tempo sin desafinar. Una pista es candidata si su BPM estirado cae a ±2 % del objetivo; si el pool queda vacío, se toma la
-más cercana (y para sprint se acepta su BPM nativo).
+El plan calcula `rate = clamp(targetBpm / track.bpm, 0.94, 1.06)`. Una pista es candidata si su BPM estirado cae a ±2 % del
+objetivo; si el pool queda vacío, se toma la más cercana (y para sprint se acepta su BPM nativo). **El motor (§11.4) no
+estira en directo**: cada voz suena a un rate FIJO recortado a ±3 % (≈ medio semitono), el del plan o, en un beatmix, el que
+iguala el tempo de la saliente.
 
 ### 11.3 Plan musical — `buildMusicPlan(workout, tracks, { seed, announceLead, prefs }) → MusicPlan` (sin DOM)
 `MusicPlan = { cues: [{ segIndex, atSec /*inicio del segmento*/, zone, targetBpm, trackId, offsetSec /*posición en la
@@ -640,37 +641,76 @@ pista al llegar atSec*/, rate, transition: 'start'|'beatmix'|'riser-drop'|'echo-
   antes del `outro`) con `beatmix` hacia otra pista del mismo pool. Nunca repetir pista en una sesión si hay alternativas.
 - Selección determinista con `seed` (misma clase ⇒ misma música; otro día ⇒ otra mezcla).
 
-### 11.4 Motor DJ — `js/audio/music.js`
-Grafo Web Audio (mismo `AudioContext` que `audio-engine.js`, exportado como `getAudioContext()`):
-`deckA/deckB <audio>` → `MediaElementSource` → `deckGain` → `lowShelf` (200 Hz, bass swap) → `bus`
-`bus` → `djFilter` (BiquadFilter, highpass/lowpass para barridos) → `duckGain` (voz) → `musicGain` (volumen) → destino.
-Envío de eco por deck (`DelayNode` 3/4 de tiempo, feedback 0,45 con lowpass). Generador FX (riser de ruido blanco con
-bandpass ascendente + "impact" grave sintetizado) → `fxGain` → destino.
+### 11.4 Motor DJ — `js/audio/music.js` (+ `js/audio/music-buffers.js`)
+**Sobre AudioBuffers** (la versión con dos `<audio>` + `MediaElementSource`, `currentTime` y `playbackRate` corrigiendo la fase
+en cada tick daba en iOS silencios en los cambios de tramo y tirones). Mismo `AudioContext` que `audio-engine.js`.
+- **Carga** (`music-buffers.js`): cada pista se descarga entera (`fetchTrackData`: caché `br-music` o red; las importadas,
+  `blob.arrayBuffer()` de su Blob de IndexedDB, que se vuelve a pedir si iOS lo perdió) y se decodifica en un
+  `OfflineAudioContext` propio a la **frecuencia del contexto** (48 kHz en el iPhone: a velocidad 1 no hay remuestreo).
+  Memoria acotada en **bytes**: residente + 2× la decodificación en curso + el archivo ≤ 320 MB (≈ el pico del motor
+  anterior); si no cabe, se expulsa la que más tarde se va a usar según el plan (Belady) y, si aun así no cabe, esa pista se
+  decodifica a 32/24/16 kHz (solo pistas largas o importadas); si ni así, se sustituye. Tras decodificar se guarda solo la
+  **ventana** que usa el plan (primera entrada − 2 compases → última salida + 6 compases + 6 % del tiempo que suena), copiada
+  a trozos; las voces restan su inicio (`w0`) al arrancar. Como mucho **3** pistas y **1** descarga/decodificación a la vez:
+  la descarga se aborta a los 15 s, una petición urgente (< 20 s) aborta una descarga que hace falta más tarde, y los fallos
+  se reintentan a los 20 s y 60 s (o ya, al volver la red o la app). Pre-carga: la primera en `load()` y las siguientes hasta
+  100 s antes (≥ 45 s garantizados). Si una pista no carga, se sustituye por otra del mismo tramo. `setEnabled(false)` suelta todo.
+- **Voz** = `AudioBufferSourceNode` → trim (`gainDb`) → hp → lp → lowShelf 200 Hz (graves) → gain (mezcla) → kill (cortes)
+  → dry → bus (y kill → send → eco). `start(cuándo, desde)` en el reloj del contexto (exacto a la muestra) y `playbackRate`
+  fijo desde el arranque. Red de seguridad sin JS: `loop` en su última frase de 16 compases.
+- **Maestro**: bus → hp → lp → duck (voz) → fade (pausa/fin) → music (volumen) → limitador → destino (+ `getAnalyser()`).
+  Eco: `DelayNode` 3/4 de tiempo ⟲ lowpass/highpass, feedback 0,45. FX (riser + impact) → fx → duck.
+- Todo (fundidos de potencia constante, intercambio de graves, barridos, riser/eco, ducking) son automatizaciones de
+  AudioParam programadas por delante (≈ 3 s antes de la primera acción); nada se mueve fotograma a fotograma. Lo
+  "inmediato" (pausa, salto, apagar, ducking) va ≥ 25 ms por delante (iOS renderiza a lotes) y los cortes duran ≥ 80 ms.
+- Intros flojas: una entrante que cambia en su intro sube su trim lo que le falta para sonar como el cuerpo de la pista
+  (por la energía de cada compás, ≤ +6 dB) y vuelve a 0 dB en los 8 compases antes de su primer drop.
+- Reloj atascado ('running' sin avanzar > 1 s): no se programa ni se salta nada; en el siguiente toque, suspend()+resume().
+  Nunca más de 6 voces. `beatPhase()` resta la latencia de salida (getOutputTimestamp, o outputLatency + baseLatency).
+- Tiempo de clase T ↔ reloj del contexto: `c = base + T`; `update(T)` re-ancla `base` suavemente (salto > 1,5 s ⇒ `seek`).
+  Un `seek` a otra pista cruza en 1 s con el centro del fundido en el siguiente compás de la saliente y la entrante en el
+  suyo (sin dos bombos desfasados).
+- iOS: `unlock()` (en el gesto) reanuda el contexto y suena un buffer de 1 muestra; el contexto 'interrupted'/'suspended'
+  se reanuda en visibilitychange/pageshow/toque; `navigator.audioSession.type = 'playback'` con la música (`keepSession`).
 ```js
-export function createMusicEngine({ getAudioContext }) → {
-  unlock(),                       // EN EL GESTO de Empezar: crea los 2 <audio>, play()/pause() silenciado para desbloquearlos
-  load(plan, tracksById),         // pre-carga el primer track
+export function createMusicEngine({ getAudioContext, keepSession, context, now }) → {   // context/now: pruebas offline
+  unlock() → Promise<bool>, load(plan, tracksById) → Promise<bool>,  // load decodifica la primera pista
   start(atSec = 0), pause(), resume(), seek(totalSec),   // seek tras saltar segmento: transición rápida (1 s)
-  update(totalSec, engineState),  // cada tick: programa transiciones con antelación (pre-carga a −20 s), corrige fase
-  setVolume(0..1), setEnabled(bool), setEffects(bool), stop({ fadeSec = 2 } = {}),
-  nowPlaying() → { title, artist, bpm /*efectivo*/, trackId } | null,
-  beatPhase() → 0..1 (posición dentro del tiempo actual, para animaciones a ritmo), destroy() }
+  update(totalSec, engineState),  // cada tick: programa transiciones, pre-carga y re-ancla el reloj (sin asignaciones)
+  setVolume(0..1), setEnabled(bool), setEffects(bool), setDucking(bool), stop({ fadeSec = 2 } = {}) → Promise,
+  nowPlaying() → { title, artist, bpm /*efectivo*/, trackId } | null, getAnalyser(), status(),
+  beatPhase() → 0..1 (del reloj del contexto, para animaciones a ritmo), destroy() }
 ```
-Transiciones (todas cuadradas a compás usando `barOffset` + `bpm×rate`):
-- `beatmix` (ΔBPM ≤ 6 %): la entrante arranca alineada al siguiente compás de la saliente, mismo tempo; mezcla de 8 compases
-  (o lo que permita el tramo) con graves de la entrante cortados y **intercambio de graves** a mitad; después la entrante
-  rampa a su tempo objetivo en 8 compases. Bucle de corrección de fase (ajuste fino de `playbackRate` ±1 %) hasta < 15 ms.
-- `riser-drop` (sube la intensidad): durante `leadSec` la saliente se va filtrando (highpass 200→1500 Hz) mientras crece el
-  riser; último tiempo en corte; en `atSec` entra la entrante justo en su drop con "impact" y filtro abierto.
-- `echo-out` (baja la intensidad): la saliente se despide con eco a compás (1 compás); la entrante entra filtrada (lowpass
-  abriéndose en 2 compases) en su `mixIn` o en la posición recordada.
-- `filter-fade`: inicio de sesión (fundido desde lowpass) y final (vuelta a la calma → fundido a silencio en los últimos 8 s).
-- Pausa: fundido de 0,4 s y pausa de ambos decks; reanudar: fundido de entrada.
+Transiciones (cuadradas a compás con `barOffset` + `bpm×rate` de la saliente real):
+- `beatmix`: la entrante a la velocidad que iguala la de la saliente (si cabe en ±3 %; con tempo casi igual, mezcla más
+  corta para que la deriva en los bordes quede < 0,03 tiempos), compases cuadrados, potencia constante en toda la mezcla e
+  **intercambio de graves** en el cambio. Si en el cambio la entrante aún está en una intro floja (energía < 0,6 × la de la
+  saliente), la saliente sigue a −3 dB 4–16 compases más (sus graves se van en la primera mitad) hasta el cuerpo o el drop
+  de la entrante. Si los tempos no casan ni con ±3 %, pasa a `filter-fade`.
+- `riser-drop`: durante `leadSec` la saliente se filtra (highpass hasta 600 Hz, a pleno volumen: el pre-aviso del coach cae
+  aquí) mientras crece el riser; en el último tiempo queda a 0,25 bajo el riser (sin efectos no hay corte); en `atSec` la
+  entrante entra justo en su drop con "impact".
+- `echo-out`: la saliente se despide con eco a compás (seco fuera en 1/16 de compás; realimentación con highpass a 120 Hz);
+  la entrante asoma 1/4 de compás antes y está a ≥ 0,8 en el corte, filtrada (lowpass desde 1,5 kHz que se abre en 1 compás),
+  en su `mixIn` o donde se dejó (memoria de discos con la posición REAL).
+- `filter-fade`: la saliente se cierra (lowpass hasta 1 kHz) y cruzan con potencia constante centrada en el compás del
+  cambio (las dos a 0,71 ahí), con los graves de uno en uno; la entrante, desde un lowpass de 1,5 kHz que se abre en un
+  compás. Arranque: fundido de 2,5 s desde lowpass. Final: fundido a silencio en los últimos 8 s.
+- Pausa: fundido de 0,3 s y fuentes paradas (se guarda la posición); reanudar: fuente nueva ahí con fundido de entrada.
+- Si la entrante no está decodificada a tiempo, sigue la actual (con bucle de frase a compás si se acaba) y entra con un
+  fundido simple en cuanto esté. **Nunca silencios**.
 - **Ducking de voz**: `speech.js` y `audio-engine.playClips` emiten `window.dispatchEvent(new CustomEvent('br:voice',
-  { detail: { speaking } }))`; el motor baja la música −9 dB (ataque 120 ms, relajación 450 ms). Los pitidos no ducken.
-- Con música activa: `navigator.audioSession.type = 'playback'` (la app es la fuente de música; Spotify se pausa).
-- Pre-carga y robustez: asignar `src` y `currentTime` del deck entrante ≥ 20 s antes; si no está listo a tiempo, fundido simple.
-  Nunca silencios: si algo falla, mantener la pista actual sonando.
+  { detail: { speaking } }))`; el motor baja la música −9 dB (−6 dB si cae en una transición filtrada; ataque 120 ms,
+  relajación 450 ms). Los pitidos no ducken.
+- Pruebas: `tools/test-music.mjs` (navegador simulado a 48 kHz: mezclas, memoria, reintentos, reloj atascado…) y
+  `tools/music-offline.html` (render real en un OfflineAudioContext: Pirámide 20′ a 48 kHz, Bloques 45′ a 44,1 kHz, red a
+  3/12 s, decodificación lenta, JS dormido y reloj parado: huecos, clics, baches relativos verificados contra la pista sola
+  y sonoridad → `docs/audio-tests/`, con `transiciones.mp3` para escuchar).
+- **En el iPhone** (lo que el render offline no ve): abrir por **HTTPS** (GitHub Pages, o `tools/serve.mjs --https` con un
+  certificado de mkcert): por http en la red local no hay wake lock ni service worker y la pantalla se apaga y congela la
+  app. Con `?debug=music` un panel muestra contexto (estado, Hz, latencias), wake lock, sesión de audio, MB decodificados,
+  frecuencia y tiempos de cada pista, fallos y los últimos cambios de estado: captura a mitad de clase, con altavoz y con
+  AirPods (el pulso del HUD debe latir con el bombo). Si hay chasquidos con la escena 3D: `?latency=playback`.
 
 ### 11.5 Análisis en el iPhone — `js/audio/music-analysis.js` (sin DOM) + `js/audio/music-worker.js` + `js/audio/music-import.js`
 `analyzePcm(float32Mono, sampleRate, { priorBpm = 125 }) → { bpm, confidence, beatOffset, barOffset, bars, energy, cues,

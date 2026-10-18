@@ -83,10 +83,22 @@ function buildGraph() {
   }
 }
 
+/**
+ * latencyHint del contexto: 'interactive' (búferes pequeños: cuenta atrás y pitidos al instante). Para probar en el
+ * iPhone si hay chasquidos con la escena 3D a tope: ?latency=playback|balanced (solo desplaza toda la salida por igual).
+ */
+function latencyHint() {
+  try {
+    const m = /[?&]latency=(playback|balanced|interactive)(?:&|$)/.exec(globalThis.location?.search || '');
+    if (m) return m[1];
+  } catch { /* sin location */ }
+  return 'interactive';
+}
+
 function createContext() {
   const C = AC();
   if (!C || ctx) return ctx;
-  try { ctx = new C({ latencyHint: 'interactive' }); } catch {
+  try { ctx = new C({ latencyHint: latencyHint() }); } catch {
     try { ctx = new C(); } catch { ctx = null; }
   }
   if (ctx) {
@@ -100,6 +112,24 @@ function createContext() {
     } catch { /* sin eventos */ }
   }
   return ctx;
+}
+
+/** Datos del contexto para el panel de depuración (sin crearlo): null si aún no existe. */
+export function audioContextInfo() {
+  if (!ctx) return null;
+  // clips de voz en memoria (promesas de AudioBuffer): nº y MB aproximados por su duración (mono float32)
+  let clips = 0;
+  let clipBytes = 0;
+  try {
+    for (const id of pack?.buffers?.keys?.() || []) {
+      clips++;
+      clipBytes += (pack.durations.get(id) || 1.5) * ctx.sampleRate * 4;
+    }
+  } catch { /* sin pack */ }
+  return {
+    state: ctx.state, sampleRate: ctx.sampleRate, baseLatency: Number(ctx.baseLatency) || 0,
+    outputLatency: Number(ctx.outputLatency) || 0, latencyHint: latencyHint(), session: effectiveType(), clips, clipBytes,
+  };
 }
 
 /** AudioContext compartido (lo crea si hace falta; NO lo reanuda: eso solo vale dentro de un gesto). */

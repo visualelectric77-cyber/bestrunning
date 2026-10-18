@@ -15,7 +15,7 @@ import { icon, profileChart, openSheet, toast, confirmDialog, actionSheet } from
 import { haptic } from '../core/haptics.js';
 import { workoutFromId, parseWorkoutId } from '../training/generator.js';
 import { createEngine, restoreEngine, buildSession } from '../player/engine.js';
-import { requestWakeLock, releaseWakeLock } from '../player/wakelock.js';
+import { requestWakeLock, releaseWakeLock, isWakeLockSupported } from '../player/wakelock.js';
 import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, setPosition } from '../player/media-session.js';
 import { logoDataUrl } from '../integrations/share-card.js';
 
@@ -159,6 +159,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
       import('../audio/music-library.js').catch(() => null),
     ]).then(([engineMod, planMod, libMod]) => { musicMods = { engineMod, planMod, libMod }; return musicMods; })
     : Promise.resolve(null);
+  // Solo con ?debug=music: panel con el estado del motor DJ y del audio de iOS (para capturas en el móvil)
+  if (/[?&]debug=music(?:&|$)/.test(globalThis.location?.search || '')) {
+    import('../player/music-debug.js')
+      .then((m) => { if (!disposed) disposers.push(m.mountMusicDebug(globalThis.document?.body, { getMusic: () => music })); })
+      .catch(() => {});
+  }
   // Escena 3D: el módulo (three.js) se descarga ya en la preparación para que esté listo al empezar
   const scene3dModP = visuals0Quality() !== 'off'
     ? import('../player/scene3d.js').catch(() => null)
@@ -1648,13 +1654,20 @@ export function mount(el, { params = {}, query = {} } = {}) {
     requestWakeLock().then((ok) => {
       if (ok || wakeWarned || disposed) return;
       wakeWarned = true;
-      // Una vez por instalación (y un recordatorio al mes), no en cada arranque ni en cada reanudación
-      let last = 0;
-      try { last = Number(localStorage.getItem(WAKE_WARN_KEY)) || 0; } catch { /* sin almacenamiento */ }
-      if (Date.now() - last < WAKE_WARN_EVERY_MS) return;
-      try { localStorage.setItem(WAKE_WARN_KEY, String(Date.now())); } catch { /* idem */ }
-      later(() => notify('Tu iPhone podría apagar la pantalla: pon el bloqueo automático en «Nunca» mientras entrenas', { icon: 'info', duration: 5200 }),
-        countingDown ? 3600 : 0);
+      // Sin la API (p. ej. abierta por http en la red local, sin HTTPS): en CADA clase, porque con la pantalla
+      // bloqueada iOS congela la app y la música se queda repitiendo frase o se corta
+      const unsupported = !isWakeLockSupported();
+      if (!unsupported) {
+        // Con la API pero denegado: una vez por instalación (y un recordatorio al mes)
+        let last = 0;
+        try { last = Number(localStorage.getItem(WAKE_WARN_KEY)) || 0; } catch { /* sin almacenamiento */ }
+        if (Date.now() - last < WAKE_WARN_EVERY_MS) return;
+        try { localStorage.setItem(WAKE_WARN_KEY, String(Date.now())); } catch { /* idem */ }
+      }
+      const msg = unsupported
+        ? 'Sin HTTPS la pantalla puede apagarse y cortar la música: abre BestRunning desde su web o pon el bloqueo automático en «Nunca»'
+        : 'Tu iPhone podría apagar la pantalla: pon el bloqueo automático en «Nunca» mientras entrenas';
+      later(() => notify(msg, { icon: 'info', duration: unsupported ? 6500 : 5200 }), countingDown ? 3600 : 0);
     }).catch(() => {});
   }
 

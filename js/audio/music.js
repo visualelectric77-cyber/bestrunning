@@ -10,35 +10,51 @@
 // Eco:     DelayNode (3/4 de tiempo) ⟲ lowpass/highpass · feedback 0,45 → duck.  FX (riser, impact) → fx → duck.
 // Tiempo:  c (reloj del contexto) = base + T (s de clase); update(T) re-ancla base poco a poco.
 // Tempo:   cada voz suena a un rate fijo (±3 % como mucho; en beatmix el que iguala a la saliente). Sin rampas.
+// Memoria: cada buffer guarda solo la ventana de la pista que usa el plan (music-buffers.js): las posiciones son
+//          SIEMPRE s de pista y la voz resta el inicio de su ventana (w0) al arrancar la fuente.
 // Nunca silencio: si la entrante no está decodificada a tiempo sigue la actual (con un bucle de frase si se acaba).
 //
 // API (compatible con el SPEC): unlock() y load() → Promise<boolean>; stop() → Promise; setDucking(bool);
 // status() para depurar; getAnalyser() → AnalyserNode (fftSize 1024) tras musicGain, o null sin música (§14.1).
 // Pruebas: createMusicEngine({ context, now }) acepta un contexto inyectado (p. ej. OfflineAudioContext) y un reloj.
 import * as audioEngine from './audio-engine.js';
-import { trackGrid, cueIndexAt, snapToBar, beatPhaseAt, END_FADE_SEC, ZONE_POOLS } from './music-plan.js';
+import { trackGrid, cueIndexAt, cuePosition, snapToBar, beatPhaseAt, END_FADE_SEC, ZONE_POOLS } from './music-plan.js';
 import { createBufferStore } from './music-buffers.js';
 
 export const RATE_TOL = 0.03;      // velocidad fija de cada voz: 1 ± 3 % como mucho
 const MAX_DRIFT_BEATS = 0.03;      // deriva tolerada en los bordes de un beatmix con tempo casi igual
 const SCHEDULE_AHEAD = 3;          // s: las transiciones se programan con esta antelación
 const MIN_LEAD = 0.1;              // s: margen entre programar y sonar
+const SOON_MIN = 0.025;            // s: lo "inmediato" va como mínimo así de adelantado (iOS renderiza a lotes)
+const KILL_MIN = 0.08;             // s: fundido de corte mínimo
 const PREFETCH_AHEAD = 100;        // s: horizonte de decodificación (siempre ≥ 45 s antes de hacer falta)
 const LOOP_PREP = 10;              // s: antelación del bucle de frase cuando una pista se acaba
 const LOOP_JUMP_BARS = 16;
 const SAFETY_LOOP_BARS = 16;       // red de seguridad sin JS: la fuente repite su última frase
+const WIN_PRE_BARS = 2;            // ventana de cada pista: desde su primera entrada en el plan − 2 compases
+const WIN_POST_BARS = 6;           // … hasta su última salida prevista + 6 compases
+const WIN_DRIFT = 0.06;            // … + 6 % del tiempo que suena (el rate fijo del motor no es el del plan)
+const MAX_VOICES = 6;
+const STALL_SEC = 1;               // reloj del contexto quieto con estado 'running' durante más de esto: atascado
 const LOOP_MS = 200;
 const XF_STEPS = 16;
 const HALF_PI = Math.PI / 2;
 const DUCK_GAIN = 10 ** (-9 / 20);
+const DUCK_MIX = 10 ** (-6 / 20);  // con una transición filtrada en curso la música ya va más baja
 const DUCK_ATTACK = 0.12;
 const DUCK_RELEASE = 0.45;
+const FILTER_MIXES = new Set(['riser-drop', 'echo-out', 'filter-fade', 'start']);
 const VOICE_STUCK = 20;
 const BASS_CUT_DB = -26;
 const LP_OPEN = 20000;
 const HP_OPEN = 20;
+const RISER_HP = 600;              // highpass de la saliente en el riser (con efectos; 400 Hz sin ellos)
+const CUT_LEVEL = 0.25;            // la saliente en el tiempo de corte, bajo el riser
+const ECHO_LP = 1500;              // lowpass inicial de la entrante tras el eco (se abre en 1 compás)
 const ECHO_FEEDBACK = 0.45;
 const FX_LEVEL = 0.75;
+const LIFT_MAX_DB = 6;             // intro floja: la entrante sube hasta +6 dB hasta su drop
+const LIFT_MIN_DB = 1.5;
 const PAUSE_FADE = 0.3;
 const RESUME_FADE = 0.6;
 const SEEK_FADE = 1;
@@ -73,7 +89,10 @@ export function createMusicEngine(opts = {}) {
   const manualClock = typeof now === 'function';
   const clock = manualClock ? now : perfNow;
   const autoTick = opts.autoTick ?? !manualClock;
-  const store = createBufferStore({ getContext: () => ctx, loadData: opts.loadData || null, timeoutMs: opts.decodeTimeoutMs });
+  const store = createBufferStore({
+    getContext: () => ctx, loadData: opts.loadData || null, timeoutMs: opts.decodeTimeoutMs, budgetBytes: opts.budgetBytes,
+    windowFor: (t) => windowFor(t), now: clock,
+  });
 
   let ctx = null;
   let graph = null;
@@ -109,10 +128,28 @@ export function createMusicEngine(opts = {}) {
   const deckMem = new Map();  // trackId → posición al dejarla (memoria de discos real, con nuestros rates)
   const subst = new Map();    // trackId que no carga → sustituta del mismo tramo
   const cueCache = new Map();
+  // Reloj del contexto atascado ('running' sin avanzar) y registro para el panel de depuración
+  let lastCtxT = -1;
+  let lastMoveW = 0;
+  let quietChecks = 0;
+  let stalled = false;
+  let stalls = 0;
+  let kickArmed = false;
+  const ctxLog = [];          // últimos cambios de estado: { at (s de reloj), state, t (contexto) }
+  let latAt = -Infinity;
+  let latVal = 0;
+  let latSrc = 'none';
+  let seeks = 0;
 
   const live = (v) => (v && !v.dead ? v : null);
-  const ctxRunning = () => !!ctx && (offline || ctx.state === 'running');
+  const ctxRunning = () => !!ctx && (offline || (ctx.state === 'running' && !stalled));
   const nowT = () => (state === 'playing' && ctx ? ctx.currentTime - base : frozenT);
+  /** Instante del contexto para automatizaciones "inmediatas": nunca en un lote de audio ya en curso. */
+  const soon = () => ctx.currentTime + Math.max(SOON_MIN, (Number(ctx.baseLatency) || 0) + 256 / (ctx.sampleRate || 48000));
+  const logCtx = (what) => {
+    ctxLog.push({ at: Math.round(clock() * 10) / 10, state: what, t: ctx ? Math.round(ctx.currentTime * 100) / 100 : null });
+    if (ctxLog.length > 10) ctxLog.shift();
+  };
 
   /* ───────────── Reloj interno (temporizadores reales o del reloj inyectado) ───────────── */
 
@@ -137,7 +174,10 @@ export function createMusicEngine(opts = {}) {
   function ensureCtx() {
     if (ctx) return ctx;
     try { ctx = getCtx?.() || null; } catch { ctx = null; }
-    if (ctx && !offline) { try { ctx.addEventListener?.('statechange', onCtxState); } catch { /* sin eventos */ } }
+    if (ctx && !offline) {
+      try { ctx.addEventListener?.('statechange', onCtxState); } catch { /* sin eventos */ }
+      logCtx(ctx.state);
+    }
     return ctx;
   }
 
@@ -177,7 +217,7 @@ export function createMusicEngine(opts = {}) {
       g.delay = ctx.createDelay(2);
       g.delay.delayTime.value = 0.35;
       g.fbLp = biquad('lowpass', 2600);
-      g.fbHp = biquad('highpass', 220);
+      g.fbHp = biquad('highpass', 120);
       g.fb = gainNode(ECHO_FEEDBACK);
       g.ret = gainNode(0.8);
       g.bus.connect(g.hp);
@@ -214,14 +254,53 @@ export function createMusicEngine(opts = {}) {
 
   // iOS: el contexto pasa a 'interrupted' (llamada, Siri, otra app) o 'suspended'; se reanuda en cuanto se puede
   function onCtxState() {
+    if (ctx) logCtx(ctx.state);
     if (destroyed || state !== 'playing' || !enabled || !ctx) return;
     if (ctx.state === 'suspended' || ctx.state === 'interrupted') defer(0.3, () => resumeCtx(true));
   }
 
-  function onWake() {
-    if (destroyed || state !== 'playing' || !enabled || !ctx || ctx.state === 'running') return;
+  /** Reloj del contexto: si dice 'running' pero no avanza (salida atascada tras un cambio de ruta), no se programa nada. */
+  function clockCheck() {
+    if (offline || !ctx) return;
+    const c = ctx.currentTime;
+    const w = clock();
+    if (c !== lastCtxT) {
+      lastCtxT = c;
+      lastMoveW = w;
+      quietChecks = 0;
+      if (stalled) { stalled = false; logCtx('reloj en marcha'); }
+      return;
+    }
+    quietChecks++;
+    // 3 comprobaciones seguidas y > 1 s: un JS que vuelve de dormir no lo confunde con un atasco
+    if (!stalled && ctx.state === 'running' && quietChecks >= 3 && w - lastMoveW > STALL_SEC) {
+      stalled = true;
+      stalls++;
+      kickArmed = true;
+      logCtx('reloj parado');
+    }
+  }
+
+  /** En un toque: el contexto atascado se suspende y se reanuda (despierta la salida de audio). */
+  function kick() {
+    if (!kickArmed || !ctx || offline) return;
+    kickArmed = false;
+    logCtx('reinicio');
+    try { ctx.suspend?.()?.then?.(() => ctx.resume?.())?.catch?.(() => {}); } catch { /* nada */ }
+  }
+
+  function onWake(e) {
+    if (destroyed) return;
+    if (e?.type === 'visibilitychange' && globalThis.document?.visibilityState === 'visible') store.retryNow();
+    if (state !== 'playing' || !enabled || !ctx) return;
+    if (stalled && e?.type !== 'visibilitychange' && e?.type !== 'pageshow') { kick(); return; }
+    if (ctx.state === 'running') return;
     if (globalThis.document?.visibilityState === 'hidden') return;
     resumeCtx(true);
+  }
+
+  function onOnline() {
+    if (!destroyed) store.retryNow();
   }
 
   function setSession(on) {
@@ -246,6 +325,7 @@ export function createMusicEngine(opts = {}) {
     try {
       doc?.addEventListener?.('visibilitychange', onWake);
       globalThis.addEventListener?.('pageshow', onWake);
+      globalThis.addEventListener?.('online', onOnline);
       doc?.addEventListener?.('touchend', onWake, { capture: true, passive: true });
       doc?.addEventListener?.('pointerdown', onWake, { capture: true, passive: true });
     } catch { /* sin DOM */ }
@@ -257,6 +337,7 @@ export function createMusicEngine(opts = {}) {
     try {
       doc?.removeEventListener?.('visibilitychange', onWake);
       globalThis.removeEventListener?.('pageshow', onWake);
+      globalThis.removeEventListener?.('online', onOnline);
       doc?.removeEventListener?.('touchend', onWake, { capture: true });
       doc?.removeEventListener?.('pointerdown', onWake, { capture: true });
       ctx?.removeEventListener?.('statechange', onCtxState);
@@ -311,14 +392,36 @@ export function createMusicEngine(opts = {}) {
 
   /* ───────────── Voces ───────────── */
 
+  /** Ventana (s de pista) que cubre un buffer: { w0, wEnd } (la pista entera si no se recortó). */
+  function winOf(track, buf) {
+    const w0 = buf ? store.offsetOf(buf) : 0;
+    const dur = trackGrid(track)?.duration || 0;
+    return { w0, wEnd: buf ? Math.min(dur || w0 + buf.duration, w0 + buf.duration) : dur };
+  }
+
+  /** Lleva una posición dentro de la ventana del buffer, a saltos de frase (16 compases): no pierde el compás. */
+  function fitPos(track, win, p) {
+    const g = trackGrid(track);
+    const ph = 16 * g.barSec;
+    const lo = win.w0;
+    const hi = win.wEnd - 8 * g.barSec;
+    if (hi <= lo) return clamp(p, win.w0, Math.max(win.w0, win.wEnd - 2 * g.barSec));
+    let q = p;
+    for (let k = 0; q > hi && k < 64; k++) q -= ph;
+    for (let k = 0; q < lo && k < 64; k++) q += ph;
+    if (q > hi || q < lo) q = Math.max(lo, snapToBar(track, clamp(q, lo, hi), 'prev'));
+    return q;
+  }
+
   /** Nueva voz: `buf` desde `pos` (s de pista) en el instante `startC` del contexto, a `rate` fijo. Entra en silencio. */
   function makeVoice(track, buf, rate, startC, pos) {
     if (!track || !buf || !graph) return null;
     const g = trackGrid(track);
-    const dur = Math.min(g.duration || buf.duration, buf.duration);
-    const p0 = clamp(pos, 0, Math.max(0, dur - 1));
+    const { w0, wEnd: dur } = winOf(track, buf);
+    const p0 = clamp(pos, w0, Math.max(w0, dur - 1));
     const v = {
       track, buf, rate, c0: startC, p0, startC, stopC: Infinity, dead: false, loop: false, ls: 0, le: 0, safeC: Infinity,
+      w0, wEnd: dur, ride: null,
       src: null, trim: null, hp: null, lp: null, shelf: null, gain: null, kill: null, dry: null, send: null,
     };
     try {
@@ -327,10 +430,10 @@ export function createMusicEngine(opts = {}) {
       src.playbackRate.value = rate;
       const le = snapToBar(track, dur - 0.5 * g.barSec, 'prev');
       const ls = le - SAFETY_LOOP_BARS * g.barSec;
-      if (ls >= g.firstBar - 1e-6 && le <= dur && p0 < le - 0.05) {
+      if (ls >= Math.max(g.firstBar, w0) - 1e-6 && le <= dur && p0 < le - 0.05) {
         src.loop = true;
-        src.loopStart = ls;
-        src.loopEnd = le;
+        src.loopStart = ls - w0;
+        src.loopEnd = le - w0;
         v.loop = true;
         v.ls = ls;
         v.le = le;
@@ -360,13 +463,26 @@ export function createMusicEngine(opts = {}) {
       setAt(v.gain.gain, 0, Math.max(0, startC - 0.01));
       v.safeC = startC + (dur - 2 * g.barSec - p0) / rate;
       src.onended = () => dispose(v);
-      src.start(Math.max(0, startC), p0);
+      // Si el instante ya pasó (hilo principal ocupado), arranca ya pero en la posición que le toca: el modelo no cambia
+      const late = Math.max(0, ctx.currentTime - startC);
+      src.start(Math.max(0, startC) + late, p0 - w0 + late * rate);
     } catch {
       dispose(v);
       return null;
     }
     voices.push(v);
+    if (voices.length > MAX_VOICES) capVoices(v);
     return v;
+  }
+
+  /** Nunca más de MAX_VOICES (p. ej. saltos en bucle con el reloj atascado): fuera las más antiguas que no mandan. */
+  function capVoices(keep) {
+    for (let i = 0; voices.length > MAX_VOICES && i < voices.length;) {
+      const v = voices[i];
+      if (v === keep || v === cur || v === mix?.inV || v === mix?.outV) { i++; continue; }
+      try { v.src?.stop(); } catch { /* ya parada */ }
+      dispose(v);
+    }
   }
 
   function stopVoice(v, at) {
@@ -378,8 +494,9 @@ export function createMusicEngine(opts = {}) {
   /** Fundido de salida por el nodo kill (no toca la automatización de mezcla) y parada. */
   function killFade(v, t, dur) {
     if (!v || v.dead || v.stopC < Infinity) return;
-    xfade(v.kill.gain, t, t + Math.max(0.01, dur), false);
-    stopVoice(v, t + Math.max(0.01, dur) + 0.02);
+    const d = Math.max(KILL_MIN, dur);
+    xfade(v.kill.gain, t, t + d, false);
+    stopVoice(v, t + d + 0.02);
   }
 
   /** Lleva una voz a su estado neutro (tras abortar una mezcla a medias): sin filtros, sin envío, a pleno. */
@@ -610,25 +727,130 @@ export function createMusicEngine(opts = {}) {
    * Posición de la entrante en el cambio: la del plan, o donde se dejó de verdad si retoma (memoria de discos).
    * mixLead: en un beatmix que retoma, la entrante arranca donde se dejó y llega al cambio unos compases después.
    */
-  function anchorPos(cue, t, mixLead = false) {
+  function anchorPos(cue, t, mixLead = false, win = null) {
     if (cue.entry === 'resume') {
       const g = trackGrid(t);
       const lead = mixLead ? Math.max(0, num(cue.offsetSec) - num(cue.entryPos, cue.offsetSec)) : 0;
       if (deckMem.has(t.id)) {
         const m = Math.max(g.firstBar, snapToBar(t, deckMem.get(t.id), 'nearest'));
-        if (m < g.outro - 8 * g.barSec) return m + lead;
+        const top = Math.min(g.outro, win ? win.wEnd : g.duration) - 8 * g.barSec;
+        if (m < top && (!win || m >= win.w0)) return m + lead;
       }
       return num(cue.entryPos, cue.offsetSec) + lead;
     }
     return num(cue.offsetSec);
   }
 
-  /** Una posición pasada de su final vuelve frases atrás (rescates y saltos lejanos). */
-  function wrapPos(t, p) {
+  /**
+   * Ventana [desde, hasta] (s de pista) que el plan usa de una pista: lo único que se guarda decodificado. Desde su
+   * primera entrada (−2 compases) hasta su última salida prevista (+6 compases y un 6 % del tiempo que suena, porque
+   * el motor la toca a un rate fijo que no es exactamente el del plan). null = entera.
+   */
+  function windowFor(t) {
+    if (!plan || !t) return null;
     const g = trackGrid(t);
-    const top = g.duration - 8 * g.barSec;
-    for (let guard = 0; p > top && guard < 64; guard++) p -= 16 * g.barSec;
-    return Math.max(0, p);
+    const cues = plan.cues;
+    let lo = Infinity;
+    let hi = -Infinity;
+    let play = 0;
+    for (let k = 0; k < cues.length; k++) {
+      const raw = cues[k];
+      if (raw.change !== 'track' || resolveId(raw.trackId, raw.zone) !== t.id) continue;
+      const s = cueAt(k);
+      const j = nextTrackIdx(k + 1);
+      const end = j >= 0 ? j : cues.length;
+      const exitT = j >= 0 ? num(cues[j].atSec) + num(cues[j].tailSec) : num(plan.totalSec, num(raw.atSec) + 600);
+      lo = Math.min(lo, num(s.entryPos, s.offsetSec), num(s.offsetSec));
+      let pEnd;
+      if (s.substFor) pEnd = num(s.offsetSec) + (exitT - num(s.atSec)) * Math.max(1, num(s.rate, 1));
+      else {
+        // el cue más reciente de la misma pista antes del relevo (rampas de tempo incluidas)
+        let last = s;
+        for (let q = k + 1; q < end; q++) if (cues[q].trackId === raw.trackId) last = cues[q];
+        try { pEnd = cuePosition(last, exitT); } catch { pEnd = g.duration; }
+        if (!Number.isFinite(pEnd)) pEnd = g.duration;
+      }
+      // Sale con un beatmix hacia una intro floja: puede quedarse hasta 16 compases más (ver scheduleBeatmix)
+      if (j >= 0 && cues[j].transition === 'beatmix') {
+        const tin = tracks.get(resolveId(cues[j].trackId, cues[j].zone));
+        const eIn = tin ? energyAt(tin, num(cueAt(j)?.offsetSec), 8) : -1;
+        const eOut = energyAt(t, pEnd - num(cues[j].tailSec) - 8 * g.barSec, 8);
+        if (eIn >= 0 && eOut > 0.2 && eIn < 0.6 * eOut) pEnd += 16 * g.barSec;
+      }
+      hi = Math.max(hi, pEnd);
+      play += Math.max(0, exitT - num(s.entryAt, s.atSec));
+    }
+    if (deckMem.has(t.id)) { lo = Math.min(lo, deckMem.get(t.id)); hi = Math.max(hi, deckMem.get(t.id)); }
+    if (!(hi > lo)) return null;
+    lo = Math.max(0, lo - WIN_PRE_BARS * g.barSec);
+    hi = Math.min(g.duration, hi + WIN_POST_BARS * g.barSec + WIN_DRIFT * play);
+    // sitio para el bucle de seguridad (16 compases) y para volver frases atrás
+    const minLen = (SAFETY_LOOP_BARS + 8) * g.barSec;
+    if (hi - lo < minLen) { hi = Math.min(g.duration, lo + minLen); lo = Math.max(0, hi - minLen); }
+    return [lo, hi];
+  }
+
+  const bodyCache = new WeakMap();
+  /** Energía típica del cuerpo de la pista (mediana entre mixIn y outro). */
+  function bodyEnergy(t) {
+    if (bodyCache.has(t)) return bodyCache.get(t);
+    const g = trackGrid(t);
+    const e = Array.isArray(t.energy) ? t.energy : [];
+    const a = Math.max(0, Math.floor((g.mixIn - g.barOffset) / g.ebSec));
+    const b = Math.min(e.length, Math.ceil((g.outro - g.barOffset) / g.ebSec));
+    const xs = [];
+    for (let k = a; k < b; k++) xs.push(clamp(num(e[k]), 0, 1));
+    xs.sort((x, y) => x - y);
+    const m = xs.length >= 8 ? xs[xs.length >> 1] : 0;
+    bodyCache.set(t, m);
+    return m;
+  }
+
+  /** Energía media (0..1, la del análisis por compás) de `bars` compases desde `pos`; −1 si la pista no la trae. */
+  function energyAt(t, pos, bars = 8) {
+    const e = t?.energy;
+    if (!Array.isArray(e) || e.length < 8) return -1;
+    const g = trackGrid(t);
+    const k0 = Math.max(0, Math.floor((pos - g.barOffset) / g.ebSec));
+    const nb = Math.max(1, Math.round((bars * g.barSec) / g.ebSec));
+    let s = 0;
+    let n = 0;
+    for (let k = k0; k < Math.min(e.length, k0 + nb); k++) { s += clamp(num(e[k]), 0, 1); n++; }
+    return n ? s / n : -1;
+  }
+
+  /**
+   * Intro floja (la entrante cambia por su mixIn): su trim sube lo que le falta para sonar como el cuerpo de la pista
+   * (≤ +6 dB, por la energía de cada compás) y vuelve a 0 dB en los 4 compases antes de su primer drop (con 8, un
+   * drop cercano se comía la subida justo después del cambio).
+   */
+  function rideIntro(v) {
+    try {
+      const t = v.track;
+      const e = t.energy;
+      if (!Array.isArray(e) || e.length < 16) return;
+      const g = trackGrid(t);
+      const body = bodyEnergy(t);
+      if (!(body > 0.2)) return;
+      const k0 = Math.max(0, Math.floor((v.p0 - g.barOffset) / g.ebSec));
+      const eIn = energyAt(t, v.p0, 8);
+      if (!(eIn >= 0)) return;
+      const lift = Math.min(LIFT_MAX_DB, 20 * Math.log10(body / Math.max(0.05, eIn)));
+      if (!(lift >= LIFT_MIN_DB)) return;
+      let target = g.drops.find((d) => d > v.p0 + 2 * g.barSec);
+      if (target == null) {
+        for (let k = k0 + 1; k < e.length; k++) if (num(e[k]) >= 0.9 * body) { target = g.barOffset + k * g.ebSec; break; }
+      }
+      if (target == null || target - v.p0 > 64 * g.barSec) target = v.p0 + 32 * g.barSec;
+      const r0 = Math.max(v.p0, target - 4 * g.barSec);
+      const toC = (p) => v.c0 + (p - v.p0) / v.rate;
+      const g0 = dbToGain(t.gainDb);
+      const up = g0 * dbToGain(lift);
+      setAt(v.trim.gain, up, v.startC);
+      setAt(v.trim.gain, up, Math.max(v.startC, toC(r0)));
+      rampAt(v.trim.gain, g0, Math.max(v.startC + 0.05, toC(target)));
+      v.ride = { db: Math.round(lift * 10) / 10, from: v.startC, to: Math.max(v.startC + 0.05, toC(target)) };
+    } catch { /* sin ajuste */ }
   }
 
   /** Belady: s hasta el próximo uso de una pista ya decodificada (−1 = sonando o en pausa: intocable). */
@@ -667,21 +889,37 @@ export function createMusicEngine(opts = {}) {
     return { kind, idx, inV, outV, first, swap, end, outEnd: outEnd ?? end };
   }
 
-  /** Fundido simple a la posición que toca (arranque, salto, rescate o llegada tarde). */
+  /**
+   * Fundido simple a la posición que toca (arranque, salto, rescate o llegada tarde). Si suena otra pista, el centro
+   * del fundido cae en su siguiente compás y la entrante llega ahí con SU compás (sin dos bombos desfasados).
+   */
   function scheduleFast(i, cue, t, buf, c, dur, filterIn) {
     const O = live(cur);
     const rate = soloRate(cue);
-    const t0 = c + MIN_LEAD;
-    const pos = wrapPos(t, anchorPos(cue, t) + (t0 - base - num(cue.atSec)) * rate);
+    const win = winOf(t, buf);
+    const at = num(cue.atSec);
+    let t0 = Math.max(c + MIN_LEAD, soon());
+    let pos = fitPos(t, win, anchorPos(cue, t, false, win) + (t0 - base - at) * rate);
+    let swap = t0 + dur / 2;
+    if (O && O.track.id !== t.id) {
+      const half = dur / 2;
+      const cO = vDownbeat(O, t0 + half, 'next');
+      const p = fitPos(t, win, snapToBar(t, anchorPos(cue, t, false, win) + (cO - base - at) * rate, 'nearest'));
+      if (cO + half + 0.05 < O.safeC && p - half * rate >= win.w0) {
+        t0 = cO - half;
+        pos = p - half * rate;
+        swap = cO;
+      }
+    }
     const inV = makeVoice(t, buf, rate, t0, pos);
     if (!inV) return false;
     xfade(inV.gain.gain, t0, t0 + dur, true);
-    if (O) killFade(O, t0, dur);
+    if (O) { killFade(O, t0, dur); rideIntro(inV); }
     if (filterIn) {
       holdAt(graph.lp.frequency, t0);
       sweep(graph.lp.frequency, 300, LP_OPEN, t0, t0 + Math.max(dur, (4 * trackGrid(t).barSec) / rate));
     }
-    mix = newMix(filterIn && dur >= START_FADE ? 'start' : 'fast', i, inV, O, t0, t0 + dur / 2, t0 + dur + 0.03);
+    mix = newMix(filterIn && dur >= START_FADE ? 'start' : 'fast', i, inV, O, t0, swap, t0 + dur + 0.03);
     return true;
   }
 
@@ -695,7 +933,9 @@ export function createMusicEngine(opts = {}) {
     const rIn = Math.round(fitRate(want) * 100000) / 100000;
     const mism = Math.abs((g.bpm * rIn) / outEff - 1);
     const barO = go.barSec / O.rate;
-    const anchor = anchorPos(cue, t, true);
+    const win = winOf(t, buf);
+    const anchor = anchorPos(cue, t, true, win);
+    if (anchor < win.w0 || anchor > win.wEnd - 8 * g.barSec) return 'fast';
     const lead0 = Math.max(1, Math.round((num(cue.offsetSec) - num(cue.entryPos, cue.offsetSec)) / g.barSec));
     // Retoma (memoria de discos): arranca justo donde se dejó aunque la mezcla se acorte
     const resumePos = cue.entry === 'resume' ? anchor - lead0 * g.barSec : null;
@@ -710,23 +950,58 @@ export function createMusicEngine(opts = {}) {
     if (swap - lead * barO < c + MIN_LEAD) swap = vDownbeat(O, c + MIN_LEAD + lead * barO, 'next');
     while (tail > 1 && swap + tail * barO > O.safeC) tail--;
     if (swap + tail * barO > O.safeC) return 'loop';
-    while (resumePos == null && lead > 1 && anchor - lead * g.barSec < 0) lead--;
+    while (resumePos == null && lead > 1 && anchor - lead * g.barSec < win.w0) lead--;
     const startPos = resumePos ?? anchor - lead * g.barSec;
-    if (startPos < 0) return 'fast';
+    if (startPos < win.w0 - 1e-6) return 'fast';
     const startC = swap - (lead * g.barSec) / rIn;
-    const end = swap + tail * barO;
+    let end = swap + tail * barO;
+    // Intro floja: en el cambio la entrante aún no "pega" (energía < 0,6 × la de la saliente). Como un DJ, la saliente
+    // sigue a −3 dB con sus graves unos compases más (4–16) hasta que la entrante llega a su cuerpo o a su drop
+    const posSwap = startPos + (swap - startC) * rIn;
+    const eIn = energyAt(t, posSwap, 8);
+    const eOut = energyAt(O.track, vPos(O, swap) - 8 * go.barSec, 8);
+    let hold = 0;
+    if (eIn >= 0 && eOut > 0.2 && eIn < 0.6 * eOut) {
+      let p = g.drops.find((d) => d > posSwap + g.barSec);
+      const e = t.energy;
+      for (let k = Math.max(0, Math.floor((posSwap - g.barOffset) / g.ebSec)); k < e.length; k++) {
+        if (num(e[k]) >= 0.8 * eOut) { const q = g.barOffset + k * g.ebSec; if (p == null || q < p) p = q; break; }
+      }
+      hold = clamp(Math.round(((p ?? posSwap + 16 * g.barSec) - posSwap) / g.barSec), 4, 16);
+      const nx = nextTrackIdx(i + 1);
+      const limit = nx >= 0 ? base + firstActionT(cueAt(nx)) - SCHEDULE_AHEAD - 0.5 : Infinity;
+      const fits = (h) => swap + (tail + h) * barO < Math.min(O.safeC - barO, limit) && (lead + tail + h) * 2 * mism <= MAX_DRIFT_BEATS;
+      while (hold > 0 && !fits(hold)) hold -= 2;
+      if (hold < 2) hold = 0;
+    }
     const inV = makeVoice(t, buf, rIn, startC, startPos);
     if (!inV) return 'fast';
-    xfade(inV.gain.gain, startC, end, true);
-    xfade(O.gain.gain, startC, end, false);
     const beat = g.spb / rIn;
     const s0 = Math.max(startC, swap - beat / 2);
     setAt(inV.shelf.gain, BASS_CUT_DB, startC);
     setAt(inV.shelf.gain, BASS_CUT_DB, s0);
     rampAt(inV.shelf.gain, 0, swap + beat / 2);
-    setAt(O.shelf.gain, 0, s0);
-    rampAt(O.shelf.gain, BASS_CUT_DB, swap + beat / 2);
+    if (hold) {
+      end = swap + (tail + hold) * barO;
+      const fadeFrom = end - tail * barO;
+      xfade(inV.gain.gain, startC, swap, true);
+      setAt(O.gain.gain, 1, startC);
+      setAt(O.gain.gain, 1, s0);
+      rampAt(O.gain.gain, Math.SQRT1_2, swap + beat / 2);
+      setAt(O.gain.gain, Math.SQRT1_2, fadeFrom);
+      xfade(O.gain.gain, fadeFrom, end, false, Math.SQRT1_2);
+      // los graves de la saliente se van en la primera mitad de la espera (dos líneas de bajo, poco rato)
+      setAt(O.shelf.gain, 0, swap);
+      rampAt(O.shelf.gain, BASS_CUT_DB, swap + (hold / 2) * barO);
+    } else {
+      xfade(inV.gain.gain, startC, end, true);
+      xfade(O.gain.gain, startC, end, false);
+      setAt(O.shelf.gain, 0, s0);
+      rampAt(O.shelf.gain, BASS_CUT_DB, swap + beat / 2);
+    }
+    rideIntro(inV);
     mix = newMix('beatmix', i, inV, O, startC, swap, end + 0.03, end);
+    mix.hold = hold;
     return 'done';
   }
 
@@ -740,27 +1015,34 @@ export function createMusicEngine(opts = {}) {
     const tf = Math.max(c + MIN_LEAD, drop - num(cue.leadSec));
     if (drop - tf < 1.5 * beatIn) return 'fast';
     const tcut = fx ? Math.max(tf + 0.05, drop - beatIn) : drop - Math.min(beatIn / 2, (drop - tf) / 2);
-    if (O.safeC < (fx ? tcut + 0.06 : drop + 0.05)) return 'loop';
-    const anchor = anchorPos(cue, t);
-    const buildPos = cue.entry === 'resume' ? anchor : clamp(num(cue.entryPos, anchor), 0, anchor);
+    // la saliente suena (a CUT_LEVEL) hasta el mismo drop
+    if (O.safeC < drop + 0.05) return 'loop';
+    const win = winOf(t, buf);
+    const anchor = anchorPos(cue, t, false, win);
+    if (anchor < win.w0 || anchor > win.wEnd - 4 * g.barSec) return 'fast';
+    const buildPos = cue.entry === 'resume' ? anchor : clamp(num(cue.entryPos, anchor), win.w0, anchor);
     let startC = Math.max(c + MIN_LEAD, drop - (anchor - buildPos) / rIn);
     const build = startC < tcut - 0.1;
     if (!build) startC = fx ? drop - 0.03 : Math.min(tcut, drop - 0.03);
-    const inV = makeVoice(t, buf, rIn, startC, Math.max(0, anchor - (drop - startC) * rIn));
+    const inV = makeVoice(t, buf, rIn, startC, Math.max(win.w0, anchor - (drop - startC) * rIn));
     if (!inV) return 'fast';
-    // Saliente
-    sweep(O.hp.frequency, HP_OPEN, fx ? 1500 : 600, tf, tcut);
+    // Saliente: highpass (sin pasarse de 600 Hz) a pleno volumen; el pre-aviso del coach cae aquí y la música tiene
+    // que seguir oyéndose. En el tiempo de corte queda a CUT_LEVEL bajo el riser: sin agujero antes del drop
+    sweep(O.hp.frequency, HP_OPEN, fx ? RISER_HP : 400, tf, tcut);
     setAt(O.shelf.gain, 0, tf);
-    rampAt(O.shelf.gain, -14, tcut);
+    rampAt(O.shelf.gain, -10, tcut);
     setAt(O.gain.gain, 1, tf);
-    rampAt(O.gain.gain, 0.55, tcut);
-    if (fx) rampAt(O.gain.gain, 0, tcut + 0.03);
-    else xfade(O.gain.gain, tcut, drop + 0.01, false, 0.55);
+    if (fx) {
+      setAt(O.gain.gain, 1, tcut);
+      rampAt(O.gain.gain, CUT_LEVEL, tcut + 0.03);
+      setAt(O.gain.gain, CUT_LEVEL, drop - 0.006);
+      rampAt(O.gain.gain, 0, drop + 0.006);
+    } else xfade(O.gain.gain, tcut, drop + 0.01, false, 1);
     // Entrante: build-up fino por debajo; el drop entra a pleno
     if (build) {
       setAt(inV.hp.frequency, 380, startC);
       setAt(inV.gain.gain, 0, startC);
-      rampAt(inV.gain.gain, 0.45, tcut);
+      rampAt(inV.gain.gain, 0.5, tcut);
       if (fx) {
         rampAt(inV.gain.gain, 0, tcut + 0.03);
         setAt(inV.hp.frequency, HP_OPEN, tcut + 0.05);
@@ -775,7 +1057,7 @@ export function createMusicEngine(opts = {}) {
       rampAt(inV.gain.gain, 1, drop + 0.006);
     } else xfade(inV.gain.gain, startC, drop + 0.006, true);
     if (fx) { riser(tf, drop); impact(drop); }
-    mix = newMix('riser-drop', i, inV, O, Math.min(tf, startC), drop, drop + 0.3, fx ? tcut + 0.03 : drop + 0.01);
+    mix = newMix('riser-drop', i, inV, O, Math.min(tf, startC), drop, drop + 0.3, drop + 0.01);
     return 'done';
   }
 
@@ -790,22 +1072,31 @@ export function createMusicEngine(opts = {}) {
     if (ta < c + MIN_LEAD + 0.1) ta = vDownbeat(O, c + MIN_LEAD + 0.1, 'next');
     if (ta + 0.05 > O.safeC) return 'loop';
     const tf = Math.max(c + MIN_LEAD, ta - Math.max(barO / 2, Math.min(num(cue.leadSec), barO)));
-    const tz = ta + Math.max(num(cue.tailSec), inBar);
-    const inV = makeVoice(t, buf, rIn, ta, anchorPos(cue, t));
+    // el lowpass de la entrante se abre en un compás (cerrado más tiempo, en el altavoz del móvil "no se oye")
+    const tz = ta + inBar;
+    const win = winOf(t, buf);
+    const anchor = anchorPos(cue, t, false, win);
+    if (anchor < win.w0 || anchor > win.wEnd - 4 * g.barSec) return 'fast';
+    // La entrante asoma 1/4 de compás antes del corte (su compás sigue cayendo en ta) y llega a ≥ 0,8 en ta
+    const pre = Math.max(0, Math.min(inBar / 4, (anchor - win.w0) / rIn, ta - c - MIN_LEAD));
+    const inV = makeVoice(t, buf, rIn, ta - pre, anchor - pre * rIn);
     if (!inV) return 'fast';
-    const fadeIn = Math.min(0.4, inBar / 4);
-    xfade(inV.gain.gain, ta, ta + fadeIn, true);
-    setAt(inV.lp.frequency, 350, ta);
+    const fadeIn = inBar / 8;
+    xfade(inV.gain.gain, ta - pre, ta + fadeIn, true);
+    setAt(inV.lp.frequency, ECHO_LP, ta - pre);
     expAt(inV.lp.frequency, LP_OPEN, Math.max(ta + 0.2, tz));
+    rideIntro(inV);
     let outEnd = ta + 0.025;
     if (effects) {
+      const dryOut = Math.max(0.025, barO / 16);
       setAt(graph.delay.delayTime, clamp((0.75 * go.spb) / O.rate, 0.05, 1.9), tf);
       setAt(O.send.gain, 0, tf);
       rampAt(O.send.gain, 0.85, ta);
-      rampAt(O.send.gain, 0, ta + 0.04);
+      setAt(O.send.gain, 0.85, ta + dryOut);
+      rampAt(O.send.gain, 0, ta + dryOut + 0.06);
       setAt(O.dry.gain, 1, ta);
-      rampAt(O.dry.gain, 0, ta + 0.025);
-      outEnd = ta + 0.04;
+      rampAt(O.dry.gain, 0, ta + dryOut);
+      outEnd = ta + dryOut + 0.07;
     } else {
       xfade(O.gain.gain, tf, ta + fadeIn, false);
       outEnd = ta + fadeIn;
@@ -814,7 +1105,11 @@ export function createMusicEngine(opts = {}) {
     return 'done';
   }
 
-  /** Filter-fade: la saliente se cierra (lowpass) y cruza en un compás; graves de uno en uno. */
+  /**
+   * Filter-fade (tempos que no casan): la saliente se cierra (lowpass hasta 1 kHz) y cruzan con potencia constante
+   * centrada en el compás `ta` (las dos a 0,71 ahí, nada de dos filtros a 700 Hz y la entrante a 0,38: "no se oía");
+   * graves de uno en uno; el lowpass de la entrante (desde 1,5 kHz) se abre en un compás.
+   */
   function scheduleFilterFade(i, cue, t, buf, c, O) {
     const g = trackGrid(t);
     const go = trackGrid(O.track);
@@ -822,25 +1117,28 @@ export function createMusicEngine(opts = {}) {
     const barO = go.barSec / O.rate;
     const inBar = g.barSec / rIn;
     let ta = vDownbeat(O, base + num(cue.atSec), 'nearest');
-    if (ta - inBar / 4 < c + MIN_LEAD) ta = vDownbeat(O, c + MIN_LEAD + inBar / 4 + 0.01, 'next');
-    const outEnd = ta + barO / 2;
+    if (ta - inBar / 3 < c + MIN_LEAD) ta = vDownbeat(O, c + MIN_LEAD + inBar / 3 + 0.01, 'next');
+    const outEnd = ta + barO / 3;
     if (outEnd > O.safeC) return 'loop';
     const tf = Math.max(c + MIN_LEAD, ta - Math.max(barO / 2, Math.min(num(cue.leadSec), 4 * barO)));
-    const tz = ta + Math.max(num(cue.tailSec), inBar);
-    const anchor = anchorPos(cue, t);
-    const pre = Math.min(inBar / 4, anchor / rIn);
+    const tz = ta + inBar;
+    const win = winOf(t, buf);
+    const anchor = anchorPos(cue, t, false, win);
+    if (anchor < win.w0 || anchor > win.wEnd - 4 * g.barSec) return 'fast';
+    const pre = Math.min(inBar / 3, (anchor - win.w0) / rIn);
     const startC = ta - pre;
     const inV = makeVoice(t, buf, rIn, startC, anchor - pre * rIn);
     if (!inV) return 'fast';
+    rideIntro(inV);
     const beat = g.spb / rIn;
-    sweep(O.lp.frequency, LP_OPEN, 700, tf, ta);
-    xfade(O.gain.gain, Math.max(tf, ta - barO / 2), outEnd, false);
+    sweep(O.lp.frequency, LP_OPEN, 1000, tf, ta);
+    xfade(O.gain.gain, Math.max(tf, ta - barO / 3), outEnd, false);
     setAt(O.shelf.gain, 0, Math.max(tf, ta - beat / 2));
     rampAt(O.shelf.gain, BASS_CUT_DB, ta + beat / 4);
-    const inEnd = ta + 0.75 * inBar;
+    const inEnd = ta + inBar / 3;
     xfade(inV.gain.gain, startC, inEnd, true);
-    setAt(inV.lp.frequency, 700, startC);
-    expAt(inV.lp.frequency, LP_OPEN, Math.max(ta + 0.2, tz));
+    setAt(inV.lp.frequency, ECHO_LP, startC);
+    expAt(inV.lp.frequency, LP_OPEN, tz);
     setAt(inV.shelf.gain, BASS_CUT_DB, startC);
     setAt(inV.shelf.gain, BASS_CUT_DB, Math.max(startC, ta - beat / 4));
     rampAt(inV.shelf.gain, 0, ta + beat / 2);
@@ -858,9 +1156,10 @@ export function createMusicEngine(opts = {}) {
     if (pC - bar / 2 < c + MIN_LEAD) pC = vDownbeat(O, c + MIN_LEAD + bar / 2, 'next');
     const pAt = O.p0 + (pC - O.c0) * O.rate;
     let J = LOOP_JUMP_BARS;
-    while (J > 2 && pAt - (J + 1) * g.barSec < g.firstBar) J -= J > 8 ? 4 : 2;
+    const floor = Math.max(g.firstBar, O.w0);
+    while (J > 2 && pAt - (J + 1) * g.barSec < floor) J -= J > 8 ? 4 : 2;
     const startPos = pAt - J * g.barSec - g.barSec / 2;
-    if (startPos < 0) return false;
+    if (startPos < O.w0 - 1e-6) return false;
     const startC = pC - bar / 2;
     const inV = makeVoice(O.track, O.buf, O.rate, startC, startPos);
     if (!inV) return false;
@@ -912,7 +1211,7 @@ export function createMusicEngine(opts = {}) {
       }
       if (!fastDur && O && c < base + firstActionT(cue) - SCHEDULE_AHEAD) return;
       const r = planCue(cursor, cue, t, c);
-      if (r === 'done') { cursor++; fastDur = 0; fastFilter = false; return; }
+      if (r === 'done') { cursor++; fastDur = 0; fastFilter = false; if (speaking) applyDuck(); return; }
       if (r === 'loop') { scheduleLoop(c); return; }
       if (r !== 'failed') return;
     }
@@ -934,18 +1233,20 @@ export function createMusicEngine(opts = {}) {
     const m = mix;
     if (!m) return;
     mix = null;
-    stopFx(c);
+    const a = Math.max(c, soon());
+    stopFx(a);
     const after = c >= m.swap;
     const keep = live(after ? m.inV : m.outV);
     const drop = live(after ? m.outV : m.inV);
     if (m.idx >= 0 && !after) cursor = Math.min(cursor, m.idx);
     if (drop && drop !== keep) {
       if (after && m.kind !== 'loop') deckMem.set(drop.track.id, vPos(drop, c));
-      killFade(drop, c + 0.005, smooth ? 0.25 : 0.05);
+      killFade(drop, a, smooth ? 0.25 : KILL_MIN);
     }
     cur = keep;
-    if (keep && smooth) restoreVoice(keep, c + 0.005);
-    if (smooth && !endFading) openMaster(c, 0.1);
+    if (keep && smooth) restoreVoice(keep, a);
+    if (smooth && !endFading) openMaster(a, 0.1);
+    if (speaking) applyDuck();
   }
 
   /** La voz principal se acaba antes de que llegue su relevo: bucle de frase a tiempo. */
@@ -967,17 +1268,19 @@ export function createMusicEngine(opts = {}) {
     const fadeSec = plan.endFadeSec || END_FADE_SEC;
     if (left > fadeSec || left < -2) return;
     endFading = true;
-    const t1 = c + Math.max(0.5, left);
-    holdAt(graph.fade.gain, c);
-    for (let k = 1; k <= XF_STEPS; k++) rampAt(graph.fade.gain, Math.cos((k / XF_STEPS) * HALF_PI), c + (t1 - c) * (k / XF_STEPS));
-    holdAt(graph.lp.frequency, c);
+    const a = Math.max(c, soon());
+    const t1 = a + Math.max(0.5, left);
+    holdAt(graph.fade.gain, a);
+    for (let k = 1; k <= XF_STEPS; k++) rampAt(graph.fade.gain, Math.cos((k / XF_STEPS) * HALF_PI), a + (t1 - a) * (k / XF_STEPS));
+    holdAt(graph.lp.frequency, a);
     expAt(graph.lp.frequency, 450, t1);
   }
 
   function finishSession(c) {
     stopLoop();
     abortMix(c, false);
-    for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], c, 0.05);
+    const a = Math.max(c, soon());
+    for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, KILL_MIN);
     cur = null;
     state = 'stopped';
     setSession(false);
@@ -986,6 +1289,7 @@ export function createMusicEngine(opts = {}) {
   function pump() {
     if (destroyed) return;
     runTimers();
+    clockCheck();
     if (state !== 'playing' || !plan || !enabled || !graph) return;
     if (!ctxRunning()) { resumeCtx(); return; }
     const c = ctx.currentTime;
@@ -1026,14 +1330,20 @@ export function createMusicEngine(opts = {}) {
     applyDuck();
   }
 
+  /** −9 dB mientras habla el coach; −6 dB si coincide con una transición filtrada (la música ya va más baja). */
   function applyDuck() {
-    if (!graph) return;
+    if (!graph || !ctx) return;
     const on = ducking && speaking;
     try {
       const p = graph.duck.gain;
-      const t = ctx.currentTime;
+      const t = soon();
       holdAt(p, t);
-      p.setTargetAtTime(on ? DUCK_GAIN : 1, t, (on ? DUCK_ATTACK : DUCK_RELEASE) / 3);
+      if (!on) { p.setTargetAtTime(1, t, DUCK_RELEASE / 3); return; }
+      const m = mix && FILTER_MIXES.has(mix.kind) && mix.end > t ? mix : null;
+      const inMix = !!m && t >= m.first;
+      p.setTargetAtTime(inMix ? DUCK_MIX : DUCK_GAIN, t, DUCK_ATTACK / 3);
+      if (m && !inMix) p.setTargetAtTime(DUCK_MIX, m.first, DUCK_ATTACK / 3);
+      if (m) p.setTargetAtTime(DUCK_GAIN, m.end, DUCK_RELEASE / 3);
     } catch { /* nada */ }
   }
 
@@ -1064,7 +1374,10 @@ export function createMusicEngine(opts = {}) {
   function load(p, tracksById) {
     try {
       if (destroyed) return Promise.resolve(false);
+      const prev = plan;
       plan = p && Array.isArray(p.cues) && p.cues.length ? p : null;
+      // las ventanas decodificadas dependen del plan: con otro plan se decodifica de nuevo
+      if (prev && plan && prev !== plan) store.clear();
       if (tracksById instanceof Map) tracks = tracksById;
       else if (Array.isArray(tracksById)) tracks = new Map(tracksById.map((t) => [t.id, t]));
       else tracks = new Map(Object.entries(tracksById || {}));
@@ -1103,8 +1416,9 @@ export function createMusicEngine(opts = {}) {
       resumeCtx(true);
       const T = Math.max(0, Number(atSec) || 0);
       const c = ctx.currentTime;
+      const a = soon();
       abortMix(c, false);
-      for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], c, 0.05);
+      for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, KILL_MIN);
       cur = null;
       held = null;
       state = 'playing';
@@ -1113,8 +1427,8 @@ export function createMusicEngine(opts = {}) {
       pendingSync = false;
       if (!enabled) { startLoop(); return true; }
       setSession(true);
-      fadeMaster(c, 1, 0.05);
-      openMaster(c, 0.02);
+      fadeMaster(a, 1, 0.05);
+      openMaster(a, 0.02);
       const idx = trackIdxAt(T);
       cursor = idx;
       fastDur = T < 0.75 && plan.cues[idx].transition === 'start' ? START_FADE : LATE_FADE;
@@ -1133,13 +1447,14 @@ export function createMusicEngine(opts = {}) {
       stopLoop();
       if (!graph) return;
       const c = ctx.currentTime;
+      const a = soon();
       abortMix(c, false);
       const v = live(cur);
       // Lo que manda queda apuntado para retomarlo justo ahí (la memoria de la pausa)
-      held = v ? { track: v.track, buf: v.buf, rate: v.rate, pos: vPos(v, c) } : null;
-      stopFx(c);
-      for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], c, PAUSE_FADE);
-      fadeMaster(c, 0, PAUSE_FADE);
+      held = v ? { track: v.track, buf: v.buf, rate: v.rate, pos: vPos(v, a), ride: !!v.ride && a < v.ride.to } : null;
+      stopFx(a);
+      for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, PAUSE_FADE);
+      fadeMaster(a, 0, PAUSE_FADE);
       cur = null;
     } catch { /* nada */ }
   }
@@ -1151,6 +1466,7 @@ export function createMusicEngine(opts = {}) {
       resumeCtx(true);
       if (!graph) { startLoop(); return; }
       const c = ctx.currentTime;
+      const a = soon();
       base = c - frozenT;
       if (!enabled) { held = null; startLoop(); return; }
       setSession(true);
@@ -1159,17 +1475,17 @@ export function createMusicEngine(opts = {}) {
       held = null;
       if (pendingSync || !h) {
         pendingSync = false;
-        fadeMaster(c, 1, 0.05);
-        openMaster(c, 0.05);
+        fadeMaster(a, 1, 0.05);
+        openMaster(a, 0.05);
         seek(frozenT);
       } else {
-        const t0 = c + MIN_LEAD;
+        const t0 = Math.max(c + MIN_LEAD, a);
         const v = makeVoice(h.track, h.buf, h.rate, t0, h.pos);
-        if (v) { setAt(v.gain.gain, 1, t0); cur = v; }
-        holdAt(graph.fade.gain, c);
+        if (v) { setAt(v.gain.gain, 1, t0); cur = v; if (h.ride) rideIntro(v); }
+        holdAt(graph.fade.gain, a);
         rampAt(graph.fade.gain, 0, t0);
         rampAt(graph.fade.gain, 1, t0 + RESUME_FADE);
-        openMaster(c, 0.05);
+        openMaster(a, 0.05);
       }
       startLoop();
       pump();
@@ -1185,10 +1501,11 @@ export function createMusicEngine(opts = {}) {
       if (!graph) return;
       const c = ctx.currentTime;
       base = c - T;
+      seeks++;
       if (endFading && T < plan.totalSec - (plan.endFadeSec || END_FADE_SEC)) {
         endFading = false;
-        fadeMaster(c, 1, 0.3);
-        openMaster(c, 0.3);
+        fadeMaster(soon(), 1, 0.3);
+        openMaster(soon(), 0.3);
       }
       abortMix(c, true);
       if (!enabled) { pendingSync = true; return; }
@@ -1213,6 +1530,7 @@ export function createMusicEngine(opts = {}) {
     try {
       if (destroyed) return;
       runTimers();
+      clockCheck();
       if (!plan) return;
       const st = engineState?.status;
       if (st === 'paused' && state === 'playing') pause();
@@ -1238,7 +1556,7 @@ export function createMusicEngine(opts = {}) {
   function setVolume(v) {
     volume = clamp(Number(v) || 0, 0, 1);
     try {
-      if (graph) { holdAt(graph.music.gain, ctx.currentTime); graph.music.gain.setTargetAtTime(volGain(volume), ctx.currentTime, 0.05); }
+      if (graph) { const a = soon(); holdAt(graph.music.gain, a); graph.music.gain.setTargetAtTime(volGain(volume), a, 0.05); }
     } catch { /* nada */ }
   }
 
@@ -1249,19 +1567,22 @@ export function createMusicEngine(opts = {}) {
       enabled = v;
       if (!graph) return;
       const c = ctx.currentTime;
+      const a = soon();
       if (!v) {
         abortMix(c, false);
-        stopFx(c);
-        for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], c, 0.6);
-        fadeMaster(c, 0, 0.6);
+        stopFx(a);
+        for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, 0.6);
+        fadeMaster(a, 0, 0.6);
         cur = null;
         held = null;
+        // sin música no se guarda nada decodificado (las voces que se apagan conservan su buffer hasta el final)
+        store.releaseAll();
         if (state === 'paused') pendingSync = true;
         setSession(false);
       } else if (state === 'playing') {
         setSession(true);
-        fadeMaster(c, 1, 0.05);
-        openMaster(c, 0.05);
+        fadeMaster(a, 1, 0.05);
+        openMaster(a, 0.05);
         seek(nowT());
       } else if (state === 'paused') pendingSync = true;
     } catch { /* nada */ }
@@ -1269,7 +1590,7 @@ export function createMusicEngine(opts = {}) {
 
   function setEffects(on) {
     effects = !!on;
-    if (!effects && graph) stopFx(ctx.currentTime);
+    if (!effects && graph) stopFx(soon());
   }
 
   function setDucking(on) {
@@ -1286,15 +1607,17 @@ export function createMusicEngine(opts = {}) {
       const sec = wasPlaying && graph ? Math.max(0, Number(fadeSec) || 0) : 0;
       if (graph) {
         const c = ctx.currentTime;
+        const a = soon();
         abortMix(c, false);
-        stopFx(c + sec);
-        for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], c, Math.max(0.02, sec));
-        fadeMaster(c, 0, Math.max(0.02, sec));
+        stopFx(a + sec);
+        for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, Math.max(KILL_MIN, sec));
+        fadeMaster(a, 0, Math.max(KILL_MIN, sec));
       }
       cur = null;
       held = null;
+      const wait = sec > 0 ? sec + 0.06 : 0.06;
       return new Promise((resolve) => {
-        defer(sec + 0.06, () => { setSession(false); resolve(); });
+        defer(wait, () => { setSession(false); resolve(); });
       });
     } catch { return Promise.resolve(); }
   }
@@ -1336,12 +1659,38 @@ export function createMusicEngine(opts = {}) {
   }
 
   /** Fase dentro del tiempo actual (0..1) de la pista que suena, para animaciones a ritmo. Sin asignaciones. */
+  /**
+   * s entre lo que el contexto renderiza y lo que se oye (con AirPods ≈ 0,15–0,25 s). getOutputTimestamp si lo hay
+   * (Safari no siempre da outputLatency); si no, outputLatency + baseLatency. Se recalcula cada 0,5 s (sin asignar
+   * un objeto por fotograma).
+   */
+  function outLatency() {
+    const w = clock();
+    if (w - latAt < 0.5) return latVal;
+    latAt = w;
+    let L = (Number(ctx.outputLatency) || 0) + (Number(ctx.baseLatency) || 0);
+    let src = 'latency';
+    try {
+      if (!offline && typeof ctx.getOutputTimestamp === 'function') {
+        const ts = ctx.getOutputTimestamp();
+        const pn = globalThis.performance?.now?.();
+        if (ts && ts.contextTime > 0 && ts.performanceTime > 0 && pn > 0) {
+          const l2 = ctx.currentTime - (ts.contextTime + (pn - ts.performanceTime) / 1000);
+          if (l2 > -0.01 && l2 < 0.6) { L = Math.max(0, l2); src = 'timestamp'; }
+        }
+      }
+    } catch { /* sin marca de tiempo */ }
+    latVal = clamp(L, 0, 0.6);
+    latSrc = src;
+    return latVal;
+  }
+
   function beatPhase() {
     try {
       if (state !== 'playing' || !enabled || !ctx) return 0;
       const v = audible();
       if (!v) return 0;
-      const c = ctx.currentTime - (Number(ctx.outputLatency) || Number(ctx.baseLatency) || 0);
+      const c = ctx.currentTime - outLatency();
       if (c < v.startC) return 0;
       return beatPhaseAt(v.track, vPos(v, c) - AUDIBLE_LEAD);
     } catch { return 0; }
@@ -1353,11 +1702,17 @@ export function createMusicEngine(opts = {}) {
     return {
       state, enabled, effects, graph: !!graph, cursor, cues: plan?.cues?.length || 0, t: nowT(),
       ctxState: ctx?.state || null,
-      job: mix ? { kind: mix.kind, idx: mix.idx, first: mix.first, swap: mix.swap, end: mix.end } : null,
+      ctx: ctx ? {
+        sampleRate: ctx.sampleRate, baseLatency: Number(ctx.baseLatency) || 0, outputLatency: Number(ctx.outputLatency) || 0,
+        latency: ctx && !offline ? outLatency() : 0, latencySource: latSrc, time: c,
+      } : null,
+      stalled, stalls, seeks, ctxLog: ctxLog.slice(),
+      job: mix ? { kind: mix.kind, idx: mix.idx, first: mix.first, swap: mix.swap, end: mix.end, hold: mix.hold || 0 } : null,
       trackId: v?.track?.id || null, rate: v?.rate || 1, pos: v ? vPos(v, c) : 0,
       voices: voices.map((x) => ({
         trackId: x.track.id, rate: x.rate, pos: vPos(x, c), startC: x.startC, stopC: x.stopC, c0: x.c0, p0: x.p0,
-        loop: x.loop, safeC: x.safeC, main: x === cur,
+        loop: x.loop, ls: x.ls, le: x.le, safeC: x.safeC, main: x === cur, w0: x.w0, wEnd: x.wEnd,
+        sr: x.buf?.sampleRate || 0, ride: x.ride ? { ...x.ride } : null,
       })),
       buffers: store.stats(), deckMem: Object.fromEntries(deckMem), subst: Object.fromEntries(subst),
     };

@@ -2,9 +2,13 @@
 // BestRunning · servidor estático de desarrollo (sin dependencias) con soporte de rangos (206).
 // `python3 -m http.server` no admite Range: el <audio> no puede saltar dentro de una pista (seekable vacío) y el
 // motor DJ no puede colocar los drops ni retomar discos. Este servidor sí, igual que GitHub Pages.
-//   node tools/serve.mjs [puerto=8095] [--host 0.0.0.0]
+//   node tools/serve.mjs [puerto=8095] [--host 0.0.0.0] [--https cert.pem key.pem]
+// Con --https (p. ej. un certificado de mkcert para la IP del Mac) el iPhone abre la app en un contexto SEGURO:
+// wake lock, service worker y Cache API solo existen así (por http en la red local la pantalla se apaga y el audio
+// se congela).   mkcert -install && mkcert 192.168.1.20 localhost  →  --https 192.168.1.20+1.pem 192.168.1.20+1-key.pem
 import { createServer } from 'node:http';
-import { createReadStream, statSync } from 'node:fs';
+import { createServer as createTlsServer } from 'node:https';
+import { createReadStream, statSync, readFileSync } from 'node:fs';
 import { join, normalize, extname, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +17,8 @@ const args = process.argv.slice(2);
 const port = Number(args.find((a) => /^\d+$/.test(a))) || Number(process.env.PORT) || 8095;
 const hostIdx = args.indexOf('--host');
 const host = hostIdx >= 0 ? args[hostIdx + 1] : '127.0.0.1';
+const tlsIdx = args.indexOf('--https');
+const tls = tlsIdx >= 0 ? { cert: readFileSync(args[tlsIdx + 1]), key: readFileSync(args[tlsIdx + 2]) } : null;
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -26,7 +32,7 @@ function send(res, status, body = '', headers = {}) {
   res.end(body);
 }
 
-createServer((req, res) => {
+const handler = (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') { send(res, 405, 'Método no permitido'); return; }
   let path;
   try {
@@ -62,6 +68,8 @@ createServer((req, res) => {
   res.writeHead(200, { ...base, 'Content-Length': size });
   if (req.method === 'HEAD') { res.end(); return; }
   createReadStream(file).on('error', () => res.destroy()).pipe(res);
-}).listen(port, host, () => {
-  process.stdout.write(`BestRunning · http://${host === '0.0.0.0' ? 'localhost' : host}:${port}/ (con rangos 206)\n`);
+};
+
+(tls ? createTlsServer(tls, handler) : createServer(handler)).listen(port, host, () => {
+  process.stdout.write(`BestRunning · ${tls ? 'https' : 'http'}://${host === '0.0.0.0' ? 'localhost' : host}:${port}/ (con rangos 206)\n`);
 });

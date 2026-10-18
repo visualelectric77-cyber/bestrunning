@@ -339,11 +339,15 @@ export async function renderShareCard(session, { workout = null, name = '' } = {
 function traceToSegments(trace) {
   if (!Array.isArray(trace) || trace.length < 2) return [];
   const out = [];
+  let started = false;
   for (let i = 0; i < trace.length - 1; i++) {
     const [t0, v] = trace[i];
     const t1 = trace[i + 1][0];
     if (t1 - t0 < 1) continue;
-    const zone = v >= 12.5 ? 'sprint' : v >= 11 ? 'fast' : v >= 9.5 ? 'run' : v >= 7.5 ? 'jog' : 'warmup';
+    let zone = v >= 12.5 ? 'sprint' : v >= 11 ? 'fast' : v >= 9.5 ? 'run' : v >= 7.5 ? 'jog' : 'warmup';
+    // Lo lento después de haber corrido es vuelta a la calma (morado), no calentamiento (azul)
+    if (zone === 'warmup' && started) zone = 'cooldown';
+    if (zone !== 'warmup') started = true;
     out.push({ zone, speed: v, sec: t1 - t0 });
   }
   return out;
