@@ -163,6 +163,12 @@ export function watchHrUrl(session, shortcutName = SHORTCUT_NAME) {
 export function requestWatchHr(session, shortcutName = SHORTCUT_NAME) {
   const url = watchHrUrl(session, shortcutName);
   if (!url || typeof window === 'undefined' || !window.location) return false;
+  // Respaldo (Atajo v2.1+): si iOS no le pasa el texto de la URL, el Atajo lee la petición del portapapeles.
+  // Tiene que ir dentro del mismo toque; si falla no pasa nada (el Atajo sigue leyendo la URL).
+  try {
+    const p = navigator.clipboard?.writeText?.(JSON.stringify(watchHrPayload(session)));
+    p?.catch?.(() => {});
+  } catch { /* sin portapapeles */ }
   try {
     window.location.href = url;
     return true;
