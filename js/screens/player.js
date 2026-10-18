@@ -1404,6 +1404,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /* ───────── Rectángulos del HUD para la escena (composición, §15.3) ───────── */
   function hudKind(n) {
+    if (n.matches('.hud-bug, .hud-note, .mo-deck, .mo-cap')) return 'transient'; // aparecen y se van: no mueven la escena
     if (n.matches('.hud-speed__core')) return 'speed';
     if (n.matches('.hud-lt')) return 'segment';
     if (n.matches('.hud-ctl, .hud-tools, .hud-lockbar')) return 'controls';
@@ -1412,7 +1413,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   /** Rectángulos (px CSS, relativos al lienzo) de cada bloque visible del HUD: { x, y, w, h, r (radio), kind }
-   *  (+ alias left/top/width/height/right/bottom). kind: 'top' | 'speed' | 'segment' | 'controls' | 'panel'. */
+   *  (+ alias left/top/width/height/right/bottom). kind: 'top' | 'speed' | 'segment' | 'controls' | 'transient' | 'panel'. */
   function collectHudRects() {
     if (!root) return [];
     const base = (sceneCanvas || root).getBoundingClientRect();

@@ -553,7 +553,8 @@ export function createTheme(ctx) {
     const ahead = G.active && G.deltaM < -0.5;
     const dT = ahead ? 6 + 105 * (1 - Math.exp(G.deltaM / 45)) : -30;
     st.ghostD += (dT - st.ghostD) * k(1.6);
-    st.ghostA += ((G.active && !f.finale ? 1 : 0) - st.ghostA) * k(1.5);
+    // con las luces de tu récord (ctx.ghostLights) se funden el brillo del hilo y su rótulo; uGhost.x (carril) sigue
+    st.ghostA += ((G.active && !f.finale && !ctx.ghostLights ? 1 : 0) - st.ghostA) * k(1.5);
     shared.uGhost.value.set(ghostLat, st.ghostD * flowK, st.ghostA, 0);
     want = 0;
     if (st.ghostA > 0.05 && st.ghostD > 9 && st.ghostD < 125) {

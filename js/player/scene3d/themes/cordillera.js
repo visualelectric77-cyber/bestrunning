@@ -372,9 +372,11 @@ export function createTheme(ctx) {
     const ahead = g.active ? -g.deltaM * uPerM : -30;
     const gTarget = ahead > 0 ? 900 * (1 - Math.exp(-ahead / 900)) : ahead;
     st.ghostD = damp(st.ghostD, gTarget, 3, dt);
-    const ghostOn = g.active && st.ghostD > 3 && !st.fin;
+    // con las luces de tu récord (ctx.ghostLights) se apagan la luz, su rótulo y el charco del terreno
+    const ghostOn = g.active && st.ghostD > 3 && !st.fin && !ctx.ghostLights;
     const GH = U.uGhost.value;
     GH.x = S + st.ghostD - anchor;
+    GH.z = st.sOff; // desfase de la rampa de «No puedo más» (lo leen las luces; el shader no usa .z)
     GH.y = damp(GH.y, ghostOn ? 0.85 : 0, 2.5, dt);
 
     // Cielo: aurora sobria (cuerpo neutro, borde con el color de la zona), estrellas y Vía Láctea

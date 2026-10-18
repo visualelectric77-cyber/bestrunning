@@ -22,7 +22,8 @@
 //   scene.event(type, data)               // 'segment' {index, reason} · 'countdown' {n} · 'km' {km} · 'halfway' · 'drop'
 //                                         //   · 'finish' {durationMs} · 'pause' · 'resume' · 'testStage' {stage}
 //                                         //   · 'testEnd' · 'adjust' {speed, delta}
-//   scene.setGhost({ trace: [[tSec, kmh], ...], label } | null)   // §14.1-1 (deltaM lo calcula el núcleo)
+//   scene.setGhost({ trace: [[tSec, kmh], ...], label } | null)   // §14.1-1 (deltaM lo calcula el núcleo; las luces de
+//                                         //   tu récord, scene3d/pacelights, se cargan aquí la primera vez) → Promise
 //   scene.setHudRects([{ x, y, w, h, kind }...])  // §15.3: SOLO composición (dónde no poner rótulos 3D); nunca máscara
 //   scene.setTheme(id) → Promise<bool> · scene.getTheme() → id · scene.setQuality(q) · scene.setTvMode(bool)
 //   scene.setStrideBob(bool) (alias setStride) · scene.resize() · scene.getInfo() · scene.destroy({ releaseContext })
@@ -65,7 +66,7 @@
 //     textTexture(text, opts) → CanvasTexture (versalitas/tracking de retransmisión), textPlane(text, opts) → Mesh,
 //     util { clamp, clamp01, lerp, damp, smoothstep, springTo, easeInOutCubic, easeOutCubic, easeInOutSine,
 //            easeOutQuart }, rng(seed) → () ⇒ [0,1), shaders { NOISE, FOG, OUTPUT }, fmtSpeed(v) '11,5', fmtClock(s) '1:30',
-//     fonts { ui, rounded } }
+//     fonts { ui, rounded }, ghostLights (vivo: true ⇒ las luces de tu récord sustituyen tu marca del fantasma) }
 //   frame (un único objeto reutilizado; no guardes referencias a sus hijos entre fotogramas) = {
 //     t (s de clase, suavizado, continuo), dt (s, ≤ 0,1), time (s de animación, monótono, sigue en pausa),
 //     totalElapsed (último del motor), segIndex, segElapsed, segRemaining, segDuration, segProgress (0..1),
@@ -348,6 +349,11 @@ export async function createScene3D(canvas, {
   let theme = null;        // { id, inst, ctx }
   let themeErr = 0;
   let themeReq = 0;
+  // Luces de tu récord (scene3d/pacelights): se cargan solo si hay fantasma; sus fallos nunca tocan errCount/themeFault
+  let pace = null;
+  let paceOn = false;
+  let paceErr = 0;
+  let paceLoad = null;
 
   function makeCtx() {
     const root = new THREE.Group();
@@ -393,6 +399,8 @@ export async function createScene3D(canvas, {
       fmtSpeed,
       fmtClock,
       fonts: { ui: FONT_UI, rounded: FONT_ROUNDED },
+      /** true mientras las luces de tu récord sustituyen la marca propia del fantasma de ESTE escenario. */
+      get ghostLights() { return paceOn && theme?.ctx === ctxRef; },
       _postSettings: postS,
     };
     return ctxRef;
@@ -425,6 +433,13 @@ export async function createScene3D(canvas, {
       disposeTree(old.ctx.root, keepTex);
       disposeTree(old.ctx.cameraRoot, keepTex);
     } catch { /* idem */ }
+  }
+
+  /** Engancha las luces de tu récord al escenario activo (false si no lo admite: legacy conserva su fantasma). */
+  function bindPace() {
+    paceOn = false;
+    paceErr = 0;
+    if (pace && theme) { try { paceOn = !!pace.bind(theme); } catch { paceOn = false; } }
   }
 
   /** Carga y activa un escenario; si falla, el de respaldo. Devuelve el id activo. */
@@ -466,11 +481,22 @@ export async function createScene3D(canvas, {
       return theme?.id ?? null;
     }
     // Compilación anticipada fuera del escenario (sin tirón al aparecer); en capturas se compila al pintar
-    // (el árbol aún no está en la escena: no se pinta junto al escenario anterior)
+    // (el árbol aún no está en la escena: no se pinta junto al escenario anterior). Contra el destino HDR del
+    // composer: el programa de three depende del destino (tone mapping, espacio de color) y fuera del fotograma el
+    // destino es la pantalla, una variante que la escena nunca pinta. compileAsync fija los parámetros al llamarse
     if (!snap && renderer.compileAsync) {
+      const compileFor = (root) => {
+        const prev = renderer.getRenderTarget();
+        let pr = null;
+        try {
+          renderer.setRenderTarget(post.target || null);
+          pr = renderer.compileAsync(root, camera, scene);
+        } finally { renderer.setRenderTarget(prev); }
+        return pr;
+      };
       try {
-        await renderer.compileAsync(ctx.root, camera, scene);
-        if (ctx.cameraRoot.children.length) await renderer.compileAsync(ctx.cameraRoot, camera, scene);
+        await compileFor(ctx.root);
+        if (ctx.cameraRoot.children.length) await compileFor(ctx.cameraRoot);
       } catch { /* opcional */ }
       if (destroyed || req !== themeReq) {
         try { inst.dispose?.(); disposeTree(ctx.root, keepTex); disposeTree(ctx.cameraRoot, keepTex); } catch { /* nada */ }
@@ -479,6 +505,9 @@ export async function createScene3D(canvas, {
     }
     const old = theme;
     theme = null;
+    // las luces leen los uniformes del escenario saliente: se sueltan SIEMPRE antes de liberarlo
+    try { pace?.unbind(); } catch { /* nada */ }
+    paceOn = false;
     retireTheme(old);
     for (const v of [scene.background, scene.environment]) {
       if (v?.isTexture && v !== chosen.bg && v !== chosen.env && !keepTex.has(v)) { try { v.dispose(); } catch { /* nada */ } }
@@ -494,6 +523,7 @@ export async function createScene3D(canvas, {
     camera.add(ctx.cameraRoot);
     theme = { id: entry.id, inst, ctx, meta: mod.meta || { id: entry.id, name: entry.name, description: entry.description } };
     themeErr = 0;
+    bindPace();
     try { director.setTheme(entry.id, inst); } catch { /* el director es opcional */ }
     callTheme('resize', { width, height, aspect, dpr: dprNow });
     ctx.rig.snap();
@@ -559,6 +589,7 @@ export async function createScene3D(canvas, {
     rig.snap();
     director.snap();
     scrollLag = 0;
+    try { pace?.event('seek'); } catch { /* nada */ }
     callTheme('event', 'seek', { from, to: target });
   }
 
@@ -790,6 +821,13 @@ export async function createScene3D(canvas, {
       try { director.apply(F, rig.target, tl, dt, now); } catch { director.snap(); }
     }
     rig.update(dt, aspect, bobX, bobY);
+    // luces de tu récord: con la cámara final (desplazamiento de lente incluido). Tres fallos seguidos ⇒ se apagan y
+    // cada escenario recupera su propia marca del fantasma (ctx.ghostLights); la escena sigue en 3D
+    if (paceOn) {
+      try { pace.update(F); paceErr = 0; } catch {
+        if (++paceErr >= 3) { paceOn = false; try { pace.unbind(); } catch { /* nada */ } }
+      }
+    }
   }
 
   function adaptQuality(now, frameDt, cost) {
@@ -1045,10 +1083,24 @@ export async function createScene3D(canvas, {
       try { layout.setRects(rects); } catch { /* idem */ }
     },
 
-    /** §14.1-1: { trace:[[t, km/h]...], label } o null. */
+    /** §14.1-1: { trace:[[t, km/h]...], label } o null. Devuelve una promesa (las luces se cargan la primera vez). */
     setGhost(g) {
-      if (destroyed) return;
+      if (destroyed) return Promise.resolve();
       try { ghost.set(g || null); } catch { /* idem */ }
+      // luces de tu récord: módulo perezoso (la primera sesión de una clase no tiene fantasma y no lo carga)
+      if (g?.trace && !pace && !paceLoad) {
+        paceLoad = import('./scene3d/pacelights/index.js')
+          .then((m) => {
+            if (destroyed) return;
+            pace = m.createPaceLights({
+              THREE, scene, camera, renderer, hud: layout.out, pulse: (a, d) => post.pulse(a, d), snap: !!snap, target: () => post.target,
+            });
+            bindPace();
+          })
+          .catch(() => { pace = null; paceOn = false; });
+      }
+      try { pace?.event('ghost'); } catch { /* nada */ }
+      return paceLoad || Promise.resolve();
     },
 
     /** §14.1-2: AnalyserNode del motor DJ o null (simulación suave a partir del beat). */
@@ -1103,7 +1155,7 @@ export async function createScene3D(canvas, {
     },
 
     /** Solo laboratorio: acceso a internos. */
-    get _debug() { return { renderer, scene, camera, post, rig, tl, layout: layout.out, frame: F, theme }; },
+    get _debug() { return { renderer, scene, camera, post, rig, tl, layout: layout.out, frame: F, theme, pace, paceOn }; },
 
     destroy({ releaseContext = true } = {}) {
       if (destroyed) return;
@@ -1112,6 +1164,9 @@ export async function createScene3D(canvas, {
       clearTimeout(hiddenTimer);
       teardownListeners();
       try {
+        try { pace?.dispose(); } catch { /* nada */ }
+        pace = null;
+        paceOn = false;
         retireTheme(theme);
         theme = null;
         post.dispose();

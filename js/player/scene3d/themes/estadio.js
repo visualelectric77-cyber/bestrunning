@@ -209,6 +209,7 @@ export function createTheme(ctx) {
   let dropU = 0;
   let countAt = -1e9;
   let testSign = null;       // { at, vam }
+  let recAt = -1e9;          // reloj del último 'record' {on: true} (con las luces de tu récord, el rótulo no lo pisa)
   let testRamp = null;       // «No puedo más»: la cinta baja desde TU escalón, no desde el último del test
   let lastKmh = 0;
   let lastRecord = false;
@@ -366,12 +367,15 @@ export function createTheme(ctx) {
     const seg = rectOf('segment');
     const sp = rectOf('speed');
     bugPos.ok = false;
+    // con las luces de tu récord (ctx.ghostLights) el rótulo va al borde DERECHO del bloque: la hilera de la calle 1
+    // entra por la izquierda justo donde se apoyaba y el adelantamiento ocurría debajo del rótulo
+    const right = !!ctx.ghostLights;
     if (portrait) {
-      const x0 = seg ? seg.x : 16;
+      const x0 = seg ? (right ? seg.x + seg.w - w : seg.x) : 16;
       if (seg && tryBug(x0, seg.y - 12 - h, w, h)) return bugPos;
       if (sp) tryBug(x0, sp.y + sp.h + 12, w, h);
     } else {
-      const x0 = seg ? seg.x : W * 0.55;
+      const x0 = seg ? (right ? seg.x + seg.w - w : seg.x) : W * 0.55;
       if (seg && tryBug(x0, seg.y - 12 - h, w, h)) return bugPos;
       if (sp) tryBug((sp.x + sp.w + (seg ? seg.x : W * 0.55)) / 2 - w / 2, sp.y + sp.h + 14, w, h);
     }
@@ -500,7 +504,8 @@ export function createTheme(ctx) {
         const w = -g.deltaM;
         gHead = Math.sign(w) * 22 * (1 - Math.exp(-Math.abs(w) / 20)) + 1.2; // comprimido: a la vista si te saca ventaja
       }
-      ghostA = damp(ghostA, g.active && !f.finale ? 1 : 0, 2, dt);
+      // con las luces de tu récord (ctx.ghostLights) la fila blanca, su charco y la línea virtual se funden; uGhost.x sigue
+      ghostA = damp(ghostA, g.active && !f.finale && !ctx.ghostLights ? 1 : 0, 2, dt);
       G.uGhost.value.set(gHead, 5, ghostA, ghostA * smoothstep(3, 8, gHead) * 0.55);
       G.uGoldK.value = f.record.amount * 0.85;
 
@@ -606,7 +611,10 @@ export function createTheme(ctx) {
             bug.set('Test terminado · tu VAM', ctx.fmtSpeed(testSign.vam), 'KM/H', GOLD, true);
           }
           want = 1;
-        } else if (f.segIndex + 1 < tl.segCount && f.timeToNext > 10.8 && f.timeToNext < 18 && f.running) {
+        } else if (f.segIndex + 1 < tl.segCount && f.timeToNext > 10.8 && f.timeToNext < 18 && f.running
+          && !(ctx.ghostLights && f.record.on && f.time - recAt < 6)) {
+          // (con las luces de tu récord, los 6 s de la celebración del adelantamiento son suyos; el cambio lo siguen
+          // anunciando el coach y la tira «Siguiente» del HUD)
           // 18→11 s: el rótulo 3D «En N m»; de 10 s a 0 lo releva la tira «Siguiente» del HUD (motion.js), sin solaparse
           const nI = f.segIndex + 1;
           const dm = Math.max(0, sigAt(tl.segStart(nI)) - S);
@@ -682,6 +690,7 @@ export function createTheme(ctx) {
           if (testRamp && testRamp.t0 < 0 && now - testRamp.armedAt < 4) testRamp.t0 = now;
           break;
         case 'countdown': countAt = now; break;
+        case 'record': if (data?.on) recAt = now; break;
         case 'km': post.pulse(0.03, 1.4); break;
         case 'halfway': post.pulse(0.04, 1.6); break;
         case 'drop': dropAt = now; dropU = wallU(lastSig); post.pulse(0.05, 1.8); break;

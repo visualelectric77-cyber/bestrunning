@@ -30,7 +30,7 @@ el iPhone 18 Pro Max (Safari / iOS 26), en vertical y en horizontal, y también 
 - **Música DJ BestRunning**: electrónica elegida por BPM para cada tramo y mezclada a compás en cada cambio.
   También puedes usar tu Spotify o Apple Music («Mi música»).
 - **Modo TV** para AirPlay: aún más mínimo (velocidad, zona, cuenta atrás y siguiente).
-- **Fantasma de tu mejor marca**: si ya hiciste esa clase, verás si vas por delante («+35 m») o por detrás.
+- **Luces de tu récord**: si ya hiciste esa clase, una hilera de luces en el suelo corre a ritmo de tu mejor sesión; al superarla se vuelve dorada, y el chip te dice si vas por delante («+35 m») o por detrás.
 
 **Después**
 - **Resumen**: anillo de cumplimiento, plan frente a real (los tramos saltados aparecen atenuados), tiempo por

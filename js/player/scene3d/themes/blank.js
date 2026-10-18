@@ -251,7 +251,8 @@ export function createTheme(ctx) {
       const zT = ahead ? -(5 + 110 * (1 - Math.exp(g.deltaM / 45))) : -5;
       ghostZ += (zT - ghostZ) * (1 - Math.exp(-f.dt * 2));
       floorU.uGhostZ.value = ghostZ;
-      floorU.uGhostA.value += ((ahead && !f.finale ? 0.8 : 0) - floorU.uGhostA.value) * (1 - Math.exp(-f.dt * 2));
+      // con las luces de tu récord (ctx.ghostLights) se funden el punto del suelo y su estela
+      floorU.uGhostA.value += ((ahead && !f.finale && !ctx.ghostLights ? 0.8 : 0) - floorU.uGhostA.value) * (1 - Math.exp(-f.dt * 2));
 
       // marca del próximo kilómetro
       const km = f.kmNext;

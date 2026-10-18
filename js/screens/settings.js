@@ -650,7 +650,7 @@ function displayHtml(s) {
   return `${scenes}
     ${group('Animaciones 3D', `
       ${segRow('Calidad', `<span data-vq-note>${qualityNote(v.quality)}</span>`, 'st-vq', QUALITY_OPTS, v.quality)}
-      ${toggleRow('st-ghost', 'Fantasma de tu mejor marca', 'Corres contra tu mejor sesión de la misma clase: una luz marca dónde ibas y el rótulo «Récord +35 m»', v.ghost)}
+      ${toggleRow('st-ghost', 'Luces de tu récord', 'Corres contra tu mejor sesión de esta clase: una hilera de luces marca su ritmo y se vuelve dorada cuando la superas. Los metros, en el chip «vs récord».', v.ghost)}
       ${toggleRow('st-bob', 'Balanceo de cámara', 'La cámara sigue tu zancada, muy sutil. Nunca se mueve con «Reducir movimiento»', v.strideBob)}
       ${toggleRow('st-tvmode', 'Modo TV por defecto', 'Cifras gigantes para verlas en la tele por AirPlay. Un toque muestra todos los datos', v.tvMode)}
       ${toggleRow('st-captions', 'Subtítulos del coach', 'Lo que dice tu coach, en una línea pequeña sobre el rótulo inferior (también con la voz silenciada)', v.captions !== false)}
