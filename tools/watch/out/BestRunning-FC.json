@@ -1,0 +1,1499 @@
+{
+  "WFQuickActionSurfaces": [],
+  "WFWorkflowActions": [
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.comment",
+      "WFWorkflowActionParameters": {
+        "WFCommentActionText": "BestRunning FC v2.2 · generado por tools/watch/build-shortcut.py (no lo edites a mano: vuelve a generarlo).\nBestRunning lo abre con el texto {\"v\":1,\"id\",\"start\",\"end\"}; lee el pulso del Apple Watch en Salud y copia {\"v\":1,\"id\",\"avg\",\"max\",\"min\",\"n\",\"t\",\"bpm\",\"t2\",\"mode\"} al portapapeles (t = fechas ISO 8601 y bpm = valores, una por línea y en el mismo orden; sin Repetir: tarda segundos).\n1) entre start y end · 2) si no hay nada, últimos 3 días · 3) si tampoco, dice si es el permiso de Salud.\nEjecútalo sin entrada (desde Atajos) para ver un autodiagnóstico."
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "9080CFD5-C3F0-5767-85A1-E434340338F6",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "Type": "ExtensionInput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "Type": "ExtensionInput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "entrada"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "9080CFD5-C3F0-5767-85A1-E434340338F6",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "329081EF-03B9-52B1-BE0F-FD61016ACF91",
+        "WFTextActionText": {
+          "Value": {
+            "string": ""
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "329081EF-03B9-52B1-BE0F-FD61016ACF91",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "entrada"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getclipboard",
+      "WFWorkflowActionParameters": {
+        "UUID": "D86C1990-4AA7-57EC-BEE7-5DC60E1352CD"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "6ABE6A6D-2DD1-551B-AD44-16F7760A568A",
+        "WFCondition": 99,
+        "WFConditionalActionString": "\"start\"",
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputName": "Clipboard",
+              "OutputUUID": "D86C1990-4AA7-57EC-BEE7-5DC60E1352CD",
+              "Type": "ActionOutput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Clipboard",
+            "OutputUUID": "D86C1990-4AA7-57EC-BEE7-5DC60E1352CD",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "entrada"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "6ABE6A6D-2DD1-551B-AD44-16F7760A568A",
+        "UUID": "46CF4B41-629D-5E0A-96D5-2E5E41D1345C",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "9080CFD5-C3F0-5767-85A1-E434340338F6",
+        "UUID": "5477B45F-9B3B-591E-9F0E-8611EEFE6277",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "D322A213-961E-50D6-BF70-E7F3EE83172D",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "Type": "Variable",
+              "VariableName": "entrada"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.detect.dictionary",
+      "WFWorkflowActionParameters": {
+        "UUID": "6F3D66AC-6186-55F6-B90F-FD44583C7E7A",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "entrada"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "9EFBB93D-2A9E-5078-AE30-EED0E3019504",
+        "WFDictionaryKey": "start",
+        "WFGetDictionaryValueType": "Value",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary",
+            "OutputUUID": "6F3D66AC-6186-55F6-B90F-FD44583C7E7A",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.detect.date",
+      "WFWorkflowActionParameters": {
+        "UUID": "30EDD4F7-0863-54B8-9B5C-95A3E6062528",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary Value",
+            "OutputUUID": "9EFBB93D-2A9E-5078-AE30-EED0E3019504",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "6A73F00B-F54D-5A68-8C72-8787B6B88189",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dates",
+            "OutputUUID": "30EDD4F7-0863-54B8-9B5C-95A3E6062528",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Item from List",
+            "OutputUUID": "6A73F00B-F54D-5A68-8C72-8787B6B88189",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "start"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "906F65DC-84B0-5C4F-B9BA-6789A2D59712",
+        "WFDictionaryKey": "end",
+        "WFGetDictionaryValueType": "Value",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary",
+            "OutputUUID": "6F3D66AC-6186-55F6-B90F-FD44583C7E7A",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.detect.date",
+      "WFWorkflowActionParameters": {
+        "UUID": "A5377423-A10B-517B-8C3B-13E2124C814D",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary Value",
+            "OutputUUID": "906F65DC-84B0-5C4F-B9BA-6789A2D59712",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getitemfromlist",
+      "WFWorkflowActionParameters": {
+        "UUID": "16E1F838-78F5-5966-AAC2-06D08B1C7076",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dates",
+            "OutputUUID": "A5377423-A10B-517B-8C3B-13E2124C814D",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFItemSpecifier": "First Item"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Item from List",
+            "OutputUUID": "16E1F838-78F5-5966-AAC2-06D08B1C7076",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "end"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "UUID": "01298385-4D42-51BA-82DA-35237DBEDFD5",
+        "WFDictionaryKey": "id",
+        "WFGetDictionaryValueType": "Value",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary",
+            "OutputUUID": "6F3D66AC-6186-55F6-B90F-FD44583C7E7A",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Dictionary Value",
+            "OutputUUID": "01298385-4D42-51BA-82DA-35237DBEDFD5",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "id"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "734F6382-7CF0-5272-A946-41FDA0F14940",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              },
+              {
+                "Bounded": true,
+                "Operator": 1003,
+                "Property": "Start Date",
+                "Removable": true,
+                "Values": {
+                  "AnotherDate": {
+                    "Value": {
+                      "Type": "Variable",
+                      "VariableName": "end"
+                    },
+                    "WFSerializationType": "WFTextTokenAttachment"
+                  },
+                  "Date": {
+                    "Value": {
+                      "Type": "Variable",
+                      "VariableName": "start"
+                    },
+                    "WFSerializationType": "WFTextTokenAttachment"
+                  }
+                },
+                "VariableOverrides": {
+                  "anotherDateValue": {
+                    "Value": {
+                      "Type": "Variable",
+                      "VariableName": "end"
+                    },
+                    "WFSerializationType": "WFTextTokenAttachment"
+                  },
+                  "dateValue": {
+                    "Value": {
+                      "Type": "Variable",
+                      "VariableName": "start"
+                    },
+                    "WFSerializationType": "WFTextTokenAttachment"
+                  }
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": true,
+        "WFContentItemLimitNumber": 4000,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Health Samples",
+            "OutputUUID": "734F6382-7CF0-5272-A946-41FDA0F14940",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "muestras"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "63120D5C-A241-5A05-B63B-41D10CD2C7C4",
+        "WFTextActionText": {
+          "Value": {
+            "string": "window"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "63120D5C-A241-5A05-B63B-41D10CD2C7C4",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "modo"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "23F107DA-36ED-51D3-A6C5-84C65AB3120C",
+        "WFTextActionText": {
+          "Value": {
+            "string": "Vuelve a BestRunning y pulsa Pegar"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "23F107DA-36ED-51D3-A6C5-84C65AB3120C",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "aviso"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "2D74EA94-D95F-5256-B00E-EC8D18D598B5",
+        "WFCondition": 101,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputName": "Health Samples",
+              "OutputUUID": "734F6382-7CF0-5272-A946-41FDA0F14940",
+              "Type": "ActionOutput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "C75B5C0C-0BA9-5FDD-A0B6-A6EB735053E2",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              },
+              {
+                "Bounded": true,
+                "Operator": 1001,
+                "Property": "Start Date",
+                "Removable": true,
+                "Values": {
+                  "Number": 3,
+                  "Unit": 16
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": true,
+        "WFContentItemLimitNumber": 2000,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Health Samples",
+            "OutputUUID": "C75B5C0C-0BA9-5FDD-A0B6-A6EB735053E2",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "muestras"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "9CBF18EF-DA46-5409-9908-E2D547B9CF4A",
+        "WFTextActionText": {
+          "Value": {
+            "string": "wide"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "9CBF18EF-DA46-5409-9908-E2D547B9CF4A",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "modo"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "6FB8F07B-E6BC-521D-BE9A-D08F7C02ACC9",
+        "WFTextActionText": {
+          "Value": {
+            "string": "Copiado (búsqueda amplia). Vuelve a BestRunning y pulsa Pegar"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "6FB8F07B-E6BC-521D-BE9A-D08F7C02ACC9",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "aviso"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "2D74EA94-D95F-5256-B00E-EC8D18D598B5",
+        "UUID": "B2B2DD58-9642-5B2D-BFEE-4C0E4899068C",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A5B8ECE0-76E0-557E-92B9-2366509AE1C0",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "Type": "Variable",
+              "VariableName": "muestras"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.statistics",
+      "WFWorkflowActionParameters": {
+        "UUID": "C57EBEDC-5C1A-5B22-98CC-AA871B0DDC84",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFStatisticsOperation": "Average"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.statistics",
+      "WFWorkflowActionParameters": {
+        "UUID": "F1B43BE0-CC13-57EC-9274-43F2FE422783",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFStatisticsOperation": "Maximum"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.statistics",
+      "WFWorkflowActionParameters": {
+        "UUID": "E810BD59-3B03-5A72-8EC5-5EB7900769A7",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFStatisticsOperation": "Minimum"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.count",
+      "WFWorkflowActionParameters": {
+        "Input": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "UUID": "307B840A-409A-5B2D-99A5-F48DDAE580FC",
+        "WFCountType": "Items"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.properties.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "842BB1C6-D5D6-5DBF-97C5-0362CA13BC60",
+        "WFContentItemPropertyName": "Start Date",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.format.date",
+      "WFWorkflowActionParameters": {
+        "UUID": "4869EB7C-FD94-5CA8-8EC1-8587C101A2D8",
+        "WFDate": {
+          "Value": {
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputName": "Start Date",
+                "OutputUUID": "842BB1C6-D5D6-5DBF-97C5-0362CA13BC60",
+                "Type": "ActionOutput"
+              }
+            },
+            "string": "￼"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFDateFormatStyle": "ISO 8601",
+        "WFISO8601IncludeTime": true
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.combine",
+      "WFWorkflowActionParameters": {
+        "UUID": "1B210A58-5A10-52D9-A8FE-285B384C0141",
+        "WFTextSeparator": "New Lines",
+        "text": {
+          "Value": {
+            "OutputName": "Formatted Date",
+            "OutputUUID": "4869EB7C-FD94-5CA8-8EC1-8587C101A2D8",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.properties.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "0DC38452-3634-5590-A287-030288390116",
+        "WFContentItemPropertyName": "Value",
+        "WFInput": {
+          "Value": {
+            "Type": "Variable",
+            "VariableName": "muestras"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.text.combine",
+      "WFWorkflowActionParameters": {
+        "UUID": "922B2DDF-4909-56E9-AEC4-D45B3F9E3605",
+        "WFTextSeparator": "New Lines",
+        "text": {
+          "Value": {
+            "OutputName": "Value",
+            "OutputUUID": "0DC38452-3634-5590-A287-030288390116",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "B7E30FE4-B18D-5687-88DA-40C85508E55E",
+        "WFTextActionText": {
+          "Value": {
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Aggrandizements": [
+                  {
+                    "CoercionItemClass": "WFHKSampleContentItem",
+                    "Type": "WFCoercionVariableAggrandizement"
+                  },
+                  {
+                    "PropertyName": "Start Date",
+                    "Type": "WFPropertyVariableAggrandizement"
+                  },
+                  {
+                    "Type": "WFDateFormatVariableAggrandizement",
+                    "WFDateFormatStyle": "ISO 8601",
+                    "WFISO8601IncludeTime": true
+                  }
+                ],
+                "Type": "Variable",
+                "VariableName": "muestras"
+              }
+            },
+            "string": "￼"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.dictionary",
+      "WFWorkflowActionParameters": {
+        "UUID": "CEFC850B-B0CE-5BFB-8010-901BFC176C1F",
+        "WFItems": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFItemType": 3,
+                "WFKey": {
+                  "Value": {
+                    "string": "v"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "string": "1"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "id"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "Type": "Variable",
+                        "VariableName": "id"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 3,
+                "WFKey": {
+                  "Value": {
+                    "string": "avg"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Statistics",
+                        "OutputUUID": "C57EBEDC-5C1A-5B22-98CC-AA871B0DDC84",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 3,
+                "WFKey": {
+                  "Value": {
+                    "string": "max"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Statistics",
+                        "OutputUUID": "F1B43BE0-CC13-57EC-9274-43F2FE422783",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 3,
+                "WFKey": {
+                  "Value": {
+                    "string": "min"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Statistics",
+                        "OutputUUID": "E810BD59-3B03-5A72-8EC5-5EB7900769A7",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 3,
+                "WFKey": {
+                  "Value": {
+                    "string": "n"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Count",
+                        "OutputUUID": "307B840A-409A-5B2D-99A5-F48DDAE580FC",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "t"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Combined Text",
+                        "OutputUUID": "1B210A58-5A10-52D9-A8FE-285B384C0141",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "bpm"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Combined Text",
+                        "OutputUUID": "922B2DDF-4909-56E9-AEC4-D45B3F9E3605",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "t2"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "OutputName": "Text",
+                        "OutputUUID": "B7E30FE4-B18D-5687-88DA-40C85508E55E",
+                        "Type": "ActionOutput"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              },
+              {
+                "WFItemType": 0,
+                "WFKey": {
+                  "Value": {
+                    "string": "mode"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                },
+                "WFValue": {
+                  "Value": {
+                    "attachmentsByRange": {
+                      "{0, 1}": {
+                        "Type": "Variable",
+                        "VariableName": "modo"
+                      }
+                    },
+                    "string": "￼"
+                  },
+                  "WFSerializationType": "WFTextTokenString"
+                }
+              }
+            ]
+          },
+          "WFSerializationType": "WFDictionaryFieldValue"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "FCC5045E-D4EC-5579-AF58-CAEF89A70C29",
+        "WFTextActionText": {
+          "Value": {
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "OutputName": "Dictionary",
+                "OutputUUID": "CEFC850B-B0CE-5BFB-8010-901BFC176C1F",
+                "Type": "ActionOutput"
+              }
+            },
+            "string": "￼"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setclipboard",
+      "WFWorkflowActionParameters": {
+        "UUID": "C4939197-2D04-571A-94DF-C73F60284138",
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "FCC5045E-D4EC-5579-AF58-CAEF89A70C29",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFLocalOnly": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "UUID": "27F1B32C-1CCB-5093-95DD-F733531D1243",
+        "WFNotificationActionBody": {
+          "Value": {
+            "attachmentsByRange": {
+              "{0, 1}": {
+                "Type": "Variable",
+                "VariableName": "aviso"
+              }
+            },
+            "string": "￼"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true,
+        "WFNotificationActionTitle": {
+          "Value": {
+            "string": "BestRunning FC"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A5B8ECE0-76E0-557E-92B9-2366509AE1C0",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "1D7D9A08-078C-5884-9DAA-6C2F6EB731B9",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": true,
+        "WFContentItemLimitNumber": 1,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "B7330393-F741-5706-84FC-1262CC2F7916",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputName": "Health Samples",
+              "OutputUUID": "1D7D9A08-078C-5884-9DAA-6C2F6EB731B9",
+              "Type": "ActionOutput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "UUID": "B4B1B895-13E4-5FA3-B1BC-6B544892D64D",
+        "WFNotificationActionBody": {
+          "Value": {
+            "attachmentsByRange": {
+              "{133, 1}": {
+                "Aggrandizements": [
+                  {
+                    "CoercionItemClass": "WFHKSampleContentItem",
+                    "Type": "WFCoercionVariableAggrandizement"
+                  },
+                  {
+                    "PropertyName": "Start Date",
+                    "Type": "WFPropertyVariableAggrandizement"
+                  }
+                ],
+                "OutputName": "Health Samples",
+                "OutputUUID": "1D7D9A08-078C-5884-9DAA-6C2F6EB731B9",
+                "Type": "ActionOutput"
+              }
+            },
+            "string": "No hay pulso del Apple Watch de este entreno ni de los últimos 3 días. El permiso de Salud está bien: la lectura más reciente es del ￼. ¿Llevabas el entreno iniciado en el reloj?"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true,
+        "WFNotificationActionTitle": {
+          "Value": {
+            "string": "BestRunning FC"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "B7330393-F741-5706-84FC-1262CC2F7916",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "UUID": "95AE7472-10F5-558C-8740-9624CE8F154D",
+        "WFNotificationActionBody": {
+          "Value": {
+            "string": "Salud no deja leer tu pulso a Atajos. Abre la app Salud › Resumen › tu foto (arriba a la derecha) › Privacidad: Apps › Atajos y activa Frecuencia cardiaca. Luego vuelve a BestRunning e importa otra vez."
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFNotificationActionSound": true,
+        "WFNotificationActionTitle": {
+          "Value": {
+            "string": "BestRunning FC"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "B7330393-F741-5706-84FC-1262CC2F7916",
+        "UUID": "B470622A-375F-5FBA-AF37-3C7024888E5B",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A5B8ECE0-76E0-557E-92B9-2366509AE1C0",
+        "UUID": "47BDC36B-1B70-55D6-9365-93F632442936",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "D322A213-961E-50D6-BF70-E7F3EE83172D",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "AF92295D-9298-55F0-A34A-EB2D9AEA43D5",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              },
+              {
+                "Bounded": true,
+                "Operator": 1002,
+                "Property": "Start Date",
+                "Removable": true,
+                "Values": {
+                  "Number": 7,
+                  "Unit": 16
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": false,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.count",
+      "WFWorkflowActionParameters": {
+        "Input": {
+          "Value": {
+            "OutputName": "Health Samples",
+            "OutputUUID": "AF92295D-9298-55F0-A34A-EB2D9AEA43D5",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "UUID": "B7938A99-1476-5293-8067-F3D863B41F61",
+        "WFCountType": "Items"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "08446A6D-640C-50BE-8C7E-B3F76BCD8A05",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              },
+              {
+                "Bounded": true,
+                "Operator": 1001,
+                "Property": "Start Date",
+                "Removable": true,
+                "Values": {
+                  "Number": 3,
+                  "Unit": 16
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": false,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.count",
+      "WFWorkflowActionParameters": {
+        "Input": {
+          "Value": {
+            "OutputName": "Health Samples",
+            "OutputUUID": "08446A6D-640C-50BE-8C7E-B3F76BCD8A05",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "UUID": "149F8F1E-44B6-5EEA-BC1A-29E5B2731E57",
+        "WFCountType": "Items"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.filter.health.quantity",
+      "WFWorkflowActionParameters": {
+        "UUID": "D8D09758-3909-55A8-BB03-BAA4152E205E",
+        "WFContentItemFilter": {
+          "Value": {
+            "WFActionParameterFilterPrefix": 1,
+            "WFActionParameterFilterTemplates": [
+              {
+                "Bounded": true,
+                "Operator": 4,
+                "Property": "Type",
+                "Removable": false,
+                "Values": {
+                  "Enumeration": {
+                    "Value": "Heart Rate",
+                    "WFSerializationType": "WFStringSubstitutableState"
+                  }
+                }
+              }
+            ],
+            "WFContentPredicateBoundedDate": false
+          },
+          "WFSerializationType": "WFContentPredicateTableTemplate"
+        },
+        "WFContentItemLimitEnabled": true,
+        "WFContentItemLimitNumber": 1,
+        "WFContentItemSortOrder": "Latest First",
+        "WFContentItemSortProperty": "Start Date",
+        "WFHKSampleFilteringFillMissing": false
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A3B6A52C-08A9-5817-B12C-D8511F2A2E64",
+        "WFCondition": 100,
+        "WFControlFlowMode": 0,
+        "WFInput": {
+          "Type": "Variable",
+          "Variable": {
+            "Value": {
+              "OutputName": "Health Samples",
+              "OutputUUID": "D8D09758-3909-55A8-BB03-BAA4152E205E",
+              "Type": "ActionOutput"
+            },
+            "WFSerializationType": "WFTextTokenAttachment"
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "7A3CFBCE-A0AB-53DA-B977-87C4C1000814",
+        "WFTextActionText": {
+          "Value": {
+            "attachmentsByRange": {
+              "{46, 1}": {
+                "Aggrandizements": [
+                  {
+                    "CoercionItemClass": "WFHKSampleContentItem",
+                    "Type": "WFCoercionVariableAggrandizement"
+                  },
+                  {
+                    "PropertyName": "Start Date",
+                    "Type": "WFPropertyVariableAggrandizement"
+                  }
+                ],
+                "OutputName": "Health Samples",
+                "OutputUUID": "D8D09758-3909-55A8-BB03-BAA4152E205E",
+                "Type": "ActionOutput"
+              }
+            },
+            "string": "Permiso de Salud: bien. Lectura más reciente: ￼."
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "7A3CFBCE-A0AB-53DA-B977-87C4C1000814",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "diagnostico"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A3B6A52C-08A9-5817-B12C-D8511F2A2E64",
+        "WFControlFlowMode": 1
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "UUID": "DA8E93A7-2FC4-528B-89E3-D299DCEF3F5D",
+        "WFTextActionText": {
+          "Value": {
+            "string": "No se ve NINGUNA lectura de pulso. Salud no deja leer tu pulso a Atajos. Abre la app Salud › Resumen › tu foto (arriba a la derecha) › Privacidad: Apps › Atajos y activa Frecuencia cardiaca. Luego vuelve a BestRunning e importa otra vez."
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFInput": {
+          "Value": {
+            "OutputName": "Text",
+            "OutputUUID": "DA8E93A7-2FC4-528B-89E3-D299DCEF3F5D",
+            "Type": "ActionOutput"
+          },
+          "WFSerializationType": "WFTextTokenAttachment"
+        },
+        "WFVariableName": "diagnostico"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "A3B6A52C-08A9-5817-B12C-D8511F2A2E64",
+        "UUID": "EE2E7ECB-8B73-560E-B70A-FA546A63FA79",
+        "WFControlFlowMode": 2
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "UUID": "5A9665F9-E95D-5227-9127-62E818050F39",
+        "WFAlertActionCancelButtonShown": false,
+        "WFAlertActionMessage": {
+          "Value": {
+            "attachmentsByRange": {
+              "{49, 1}": {
+                "OutputName": "Count",
+                "OutputUUID": "B7938A99-1476-5293-8067-F3D863B41F61",
+                "Type": "ActionOutput"
+              },
+              "{69, 1}": {
+                "OutputName": "Count",
+                "OutputUUID": "149F8F1E-44B6-5EEA-BC1A-29E5B2731E57",
+                "Type": "ActionOutput"
+              },
+              "{72, 1}": {
+                "Type": "Variable",
+                "VariableName": "diagnostico"
+              }
+            },
+            "string": "Lecturas de Frecuencia cardiaca en Salud:\n· hoy: ￼\n· últimos 3 días: ￼\n\n￼\n\nEsto es solo una prueba: no se ha copiado nada. Para importar un entreno, ábrelo desde BestRunning."
+          },
+          "WFSerializationType": "WFTextTokenString"
+        },
+        "WFAlertActionTitle": {
+          "Value": {
+            "string": "BestRunning FC · autodiagnóstico"
+          },
+          "WFSerializationType": "WFTextTokenString"
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "GroupingIdentifier": "D322A213-961E-50D6-BF70-E7F3EE83172D",
+        "UUID": "3E12D696-D014-5E5E-A27D-EA7E65982679",
+        "WFControlFlowMode": 2
+      }
+    }
+  ],
+  "WFWorkflowClientVersion": "4033.0.4.3",
+  "WFWorkflowHasOutputFallback": false,
+  "WFWorkflowHasShortcutInputVariables": true,
+  "WFWorkflowIcon": {
+    "WFWorkflowIconGlyphNumber": 59754,
+    "WFWorkflowIconStartColor": 4282601983
+  },
+  "WFWorkflowImportQuestions": [],
+  "WFWorkflowInputContentItemClasses": [
+    "WFStringContentItem"
+  ],
+  "WFWorkflowMinimumClientVersion": 900,
+  "WFWorkflowMinimumClientVersionString": "900",
+  "WFWorkflowName": "BestRunning FC",
+  "WFWorkflowOutputContentItemClasses": [],
+  "WFWorkflowTypes": [
+    "ActionExtension"
+  ]
+}

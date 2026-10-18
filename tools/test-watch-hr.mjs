@@ -178,6 +178,20 @@ checkOk('Espacios duros y CRLF', parseWatchHr(lines(esMedium).replace(/ /g, NBSP
   checkOk('12 h «de la tarde»', r2);
 }
 
+// Atajo v2.2: listas paralelas t / bpm / n (sin csv), en todas las zonas horarias de la batería
+{
+  const R = [...S].reverse();
+  const L = (dateF, valF = (b) => String(b), list = R) => ({ n: list.length, t: list.map((p) => dateF(p.ms)).join('\n'), bpm: list.map((p) => valF(p.bpm)).join('\n') });
+  const J = (o) => JSON.stringify({ v: 1, id: SES.id, avg: '129,4', max: String(expMax), min: String(expMin), ...o, mode: 'window' });
+  checkOk('v2.2 listas ISO con zona', parseWatchHr(J(L(isoLocal)), SES), { avg: expAvg, n: inWin.length });
+  checkOk('v2.2 listas ISO Z con coma decimal', parseWatchHr(J(L(isoZ, (b) => `${b},0`)), SES), { avg: expAvg, n: inWin.length });
+  checkOk('v2.2 listas ISO sin zona (hora local) con CRLF y salto final', parseWatchHr(J(L(isoNoTz)).replace(/\\n/g, '\\r\\n').replace(/","bpm"/, '\\n","bpm"'), SES), { avg: expAvg, n: inWin.length });
+  checkOk('v2.2 listas con t2 de reserva', parseWatchHr(J({ ...L(isoLocal), t: isoLocal(R[0].ms), t2: L(isoLocal).t }), SES), { avg: expAvg, n: inWin.length });
+  const r = parseWatchHr(J({ ...L(isoLocal), n: S.length + 1 }), SES);
+  ok(r.ok && r.warnings.some((w) => /no cuadran/.test(w)), 'v2.2 n distinto: avisa y sigue');
+  checkOk('v2.2 listas con fechas de iOS en español (no ISO)', parseWatchHr(J(L(esMedium, (b) => `${b} lpm`)), SES), { avg: expAvg, n: inWin.length });
+}
+
 // Valores imposibles: se descartan y se avisa
 {
   const bad = S.map((p, i) => ({ ...p, bpm: i === 10 ? 250 : i === 11 ? 30 : i === 12 ? 0 : p.bpm }));

@@ -1,6 +1,7 @@
 // BestRunning · pulso del Apple Watch después del entreno, vía un Atajo de iOS (SPEC §12).
 // Una web no puede leer HealthKit: el Atajo «BestRunning FC» recibe { v, id, start, end }, busca en Salud las
-// muestras de frecuencia cardiaca de esa ventana y devuelve { v, id, avg, max, min, csv } por el portapapeles.
+// muestras de frecuencia cardiaca de esa ventana y devuelve { v, id, avg, max, min, csv } por el portapapeles
+// (el Atajo generado v2.2 manda, en vez de csv, las listas paralelas t / bpm / n: ver zipLists).
 // La parte de datos (parseo, zonas, pulso por nivel) no toca el DOM y se puede importar desde Node.
 // Las funciones de interfaz (hoja, superposición, estilos) solo usan el DOM al llamarlas y cargan los
 // componentes de forma perezosa, para que progression.js pueda importar este módulo sin arrastrar la UI.
@@ -467,6 +468,69 @@ function csvToText(csv) {
   return String(csv);
 }
 
+/* Atajo v2.2: listas paralelas sin Repetir. t = fechas ISO 8601 (una por línea), bpm = valores (una por línea, mismo
+   orden), n = número de lecturas (Contar) y t2 = las mismas fechas por otro camino (reserva). */
+
+/** Lista o texto de líneas → entradas; conserva las líneas vacías del medio (para no desalinear) y quita las del final. */
+function listEntries(v) {
+  if (v == null) return [];
+  let arr;
+  if (Array.isArray(v)) arr = v.map((x) => (x == null ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x)));
+  else arr = normalizeText(String(v)).split('\n');
+  arr = arr.map((x) => normalizeText(x).trim());
+  while (arr.length && !arr[arr.length - 1]) arr.pop();
+  while (arr.length && !arr[0]) arr.shift();
+  return arr;
+}
+
+/** Fechas de t: una por línea; si vienen varias ISO en una misma línea (otro separador), una por fecha ISO. */
+function dateEntries(v, want) {
+  const lines = listEntries(v);
+  if (lines.length >= want) return lines;
+  const iso = lines.flatMap((l) => [...l.matchAll(ISO_RE)].map((m) => m[0]));
+  return iso.length > lines.length && (iso.length === want || !want) ? iso : lines;
+}
+
+function entryDate(s, refMs) {
+  ISO_RE.lastIndex = 0;
+  const m = ISO_RE.exec(s);
+  ISO_RE.lastIndex = 0;
+  if (m) return isoMatchMs(m);
+  return s ? parseLooseDate(s, refMs) : null;
+}
+
+/** Junta la línea i de t con la línea i de bpm. → { samples, skipped, warnings } | null si no hay listas. */
+function zipLists(json, refMs) {
+  const bpmRaw = pickKey(json, ['bpm', 'valores', 'values', 'pulso']);
+  const tRaws = [pickKey(json, ['t', 'fechas', 'dates', 'times']), pickKey(json, ['t2'])].filter((x) => x != null && x !== '');
+  if (bpmRaw == null || bpmRaw === '' || !tRaws.length) return null;
+  const vals = listEntries(bpmRaw);
+  const nDecl = parseNum(pickKey(json, ['n', 'count', 'cuenta']));
+  const want = vals.length;
+  const cands = tRaws.map((t) => dateEntries(t, want));
+  // La lista de fechas que cuadre con bpm (y con n); si ninguna, la que más se acerque
+  const score = (c) => (c.length === want ? 2 : 0) + (Number.isFinite(nDecl) && c.length === nDecl ? 1 : 0);
+  let dates = cands[0];
+  for (const c of cands.slice(1)) {
+    if (score(c) > score(dates) || (score(c) === score(dates) && Math.abs(c.length - want) < Math.abs(dates.length - want))) dates = c;
+  }
+  const warnings = [];
+  const m = Math.min(dates.length, vals.length);
+  const counts = [dates.length, vals.length, ...(Number.isFinite(nDecl) ? [nDecl] : [])];
+  if (counts.some((c) => c !== counts[0])) {
+    warnings.push(`Las listas del Atajo no cuadran (${dates.length} fechas, ${vals.length} pulsos${Number.isFinite(nDecl) ? `, n = ${nDecl}` : ''}): se usan las ${m} primeras parejas.`);
+  }
+  const samples = [];
+  let skipped = 0;
+  for (let i = 0; i < m; i++) {
+    const d = entryDate(dates[i], refMs);
+    const bpm = parseNum(vals[i]);
+    if (!d || !Number.isFinite(bpm)) { skipped++; continue; }
+    samples.push({ ms: d.ms, bpm, hasSec: d.hasSec, hasTz: d.hasTz });
+  }
+  return { samples, skipped, warnings };
+}
+
 const timeLabel = (ms) => {
   const d = new Date(ms);
   return `${d.getHours()}:${pad2(d.getMinutes())}`;
@@ -478,7 +542,8 @@ function fail(error) {
 
 /**
  * Lee lo que copió el Atajo y lo asocia a la sesión.
- * Acepta el JSON { v, id, avg, max, min, csv } o solo líneas 'fecha,valor' (ISO o fechas de iOS en español/inglés).
+ * Acepta el JSON { v, id, avg, max, min, csv }, el del Atajo v2.2 { v, id, avg, max, min, n, t, bpm, t2 } (líneas
+ * paralelas de fechas y valores) o solo líneas 'fecha,valor' (ISO o fechas de iOS en español/inglés).
  * → { ok:true, hrAvg, hrMax, hrMin, hrSeries:[[tSec,bpm]]|null, samples, source, warnings } | { ok:false, error }
  */
 export function parseWatchHr(text, session) {
@@ -492,6 +557,7 @@ export function parseWatchHr(text, session) {
   let meta = {};
   let body = raw;
   let source = 'csv';
+  let zipped = null;
   if (json) {
     source = 'json';
     meta = {
@@ -501,8 +567,11 @@ export function parseWatchHr(text, session) {
       min: parseNum(pickKey(json, ['min', 'minimo', 'minimum'])),
     };
     body = normalizeText(csvToText(pickKey(json, ['csv', 'datos', 'muestras', 'samples', 'data', 'series', 'hr'])));
+    // Atajo v2.2: listas paralelas t / bpm (y n). Si no dan ninguna lectura, se prueba el csv (formato antiguo).
+    zipped = zipLists(json, refMs);
+    if (zipped && !zipped.samples.length && body.trim()) zipped = null;
     const hasStats = [meta.avg, meta.max, meta.min].some(Number.isFinite);
-    if (!body.trim() && !hasStats) {
+    if (!body.trim() && !hasStats && !zipped) {
       if (pickKey(json, ['start']) != null && pickKey(json, ['end']) != null) {
         return fail('Esto es lo que BestRunning envía al Atajo, no su respuesta. Revisa que el Atajo termine con «Copiar al portapapeles» del Diccionario con avg, max, min y csv.');
       }
@@ -511,8 +580,10 @@ export function parseWatchHr(text, session) {
   }
 
   // Muestras
-  let scan = scanIso(body);
-  if (!scan || !scan.samples.length) {
+  let scan = zipped;
+  if (zipped) warnings.push(...zipped.warnings);
+  else scan = scanIso(body);
+  if (!zipped && (!scan || !scan.samples.length)) {
     const lines = scanLines(body, refMs);
     if (!scan || lines.samples.length) scan = lines;
   }
