@@ -29,6 +29,20 @@ function lines(music) {
   out.push(`motor ${st.state}${st.enabled ? '' : ' (apagado)'} · t ${r1(st.t)} s · cue ${st.cursor}/${st.cues} · voces ${v.length} · saltos ${st.seeks}`
     + ` · reloj ${st.stalled ? 'ATASCADO' : 'ok'}${st.stalls ? ` (${st.stalls})` : ''}`);
   if (st.trackId) out.push(`suena ${st.trackId} · pos ${r1(st.pos)} s · ×${Number(st.rate).toFixed(3)}`);
+  // Volumen de la música y nivel real que sale tras su ganancia (¿hay muestras o es silencio?)
+  let lvl = '—';
+  try {
+    const an = music?.getAnalyser?.();
+    if (an) {
+      const buf = new Float32Array(an.fftSize);
+      an.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      const rms = Math.sqrt(s / buf.length);
+      lvl = rms > 1e-6 ? `${(20 * Math.log10(rms)).toFixed(1)} dBFS` : 'SILENCIO';
+    }
+  } catch { lvl = 'error'; }
+  out.push(`volumen ${st.volume ?? '—'} (${st.volumeDb ?? '—'} dB) · duck ${st.duckDb ?? '—'} dB · nivel música ${lvl}`);
   if (st.job) out.push(`mezcla ${st.job.kind} #${st.job.idx} · cambio en ${r1(st.job.swap - (cx?.time || 0))} s`);
   for (const x of v) {
     out.push(`  ${x.main ? '▶' : '·'} ${x.trackId} ${r1(x.pos)} s · ${Math.round((x.sr || 0) / 1000)} kHz · ventana ${r1(x.w0)}–${r1(x.wEnd)}${x.ride ? ` · +${x.ride.db} dB` : ''}`);
