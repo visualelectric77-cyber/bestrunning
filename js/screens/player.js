@@ -169,10 +169,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
       import('../audio/music-library.js').catch(() => null),
     ]).then(([engineMod, planMod, libMod]) => { musicMods = { engineMod, planMod, libMod }; return musicMods; })
     : Promise.resolve(null);
-  // Con ?debug=music, o dentro de la app nativa mientras se diagnostica la música del iPhone (1.4.1; se apaga con
-  // localStorage 'br.debug.music' = '0'): panel con el estado del motor DJ y del audio de iOS (para capturas en el móvil)
+  // Con ?debug=music (o localStorage 'br.debug.music' = '1' dentro de la app nativa, donde no hay barra de direcciones):
+  // panel con el estado del motor DJ y del audio de iOS (para capturas en el móvil). Apagado por defecto.
   const nativeMusicDebug = (() => {
-    try { return !!globalThis.webkit?.messageHandlers?.bestrunning && globalThis.localStorage?.getItem('br.debug.music') !== '0'; } catch { return false; }
+    try { return globalThis.localStorage?.getItem('br.debug.music') === '1'; } catch { return false; }
   })();
   if (/[?&]debug=music(?:&|$)/.test(globalThis.location?.search || '') || nativeMusicDebug) {
     import('../player/music-debug.js')
