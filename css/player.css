@@ -1218,6 +1218,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   /* Con controles: bugs y avisos se apartan a la IZQUIERDA de ✕-TV-lista (misma fila), no hacia abajo — en
      horizontal la fila ⏮ ⏯ ⏭ de la columna derecha queda justo debajo */
   .pl.is-ctl .hud-bugs { transform: translateX(calc(-2 * 44px - 20px)); }
+  /* a 393 px de alto la fila ⏮ ⏯ ⏭ sube: ✕-TV-lista 4 px más arriba para que no rocen ♪ */
+  .hud-tools, .hud-bugs { top: calc(var(--top-y) + var(--top-h) + 6px); }
   .hud-note { max-width: min(380px, 40vw); }
   /* en la columna derecha (libre arriba), nunca sobre la zona ni la cifra de la izquierda */
   .hud-tvhint { left: auto; right: var(--gxr); top: calc(var(--top-y) + 52px); max-width: 44%; transform: translateY(-6px); }

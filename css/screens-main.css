@@ -940,6 +940,13 @@
   inset: 0;
   z-index: -2;
 }
+/* El bucle es vertical (9:16): encuadre de la cabeza a la cintura de la corredora, que queda a la izquierda */
+.td-hero__media > .bg-video {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  object-position: 50% 40%;
+}
 .td-hero__media::after {
   content: '';
   position: absolute;

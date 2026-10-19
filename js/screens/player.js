@@ -682,7 +682,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     return `<section class="pl-ready__group pl-scn" data-slot="scene" style="--i:3">
         <h2 class="list-header">Escenario</h2>
         <div class="pl-scn__row" role="radiogroup" aria-label="Escenario de esta clase">
-          ${opt(AUTO_THEME, 'Automático', `${thumb(auto.id)}<span class="pl-scn__auto" aria-hidden="true">Auto</span>`, pick.auto)}
+          ${opt(AUTO_THEME, 'Auto', `${thumb(auto.id)}<span class="pl-scn__auto" aria-hidden="true">Auto</span>`, pick.auto)}
           ${SCENE_IDS.map((id) => opt(id, name(id), thumb(id), !pick.auto && pick.id === id)).join('')}
         </div>
         <p class="pl-scn__note" aria-live="polite">${note}</p>
@@ -2912,7 +2912,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
       b.classList.add('is-hint');
       later(() => b.classList.remove('is-hint'), ms);
     }
-    sndHintOff = notify('Mantén pulsado ♪ para subir la música', { icon: 'music', duration: ms });
+    // En horizontal el aviso caería sobre la fila ⏮ ⏯ ⏭: basta con el ♪ que late
+    const land = typeof matchMedia === 'function' && matchMedia('(orientation: landscape) and (max-height: 620px)').matches;
+    if (!land) sndHintOff = notify('Mantén pulsado ♪ para subir la música', { icon: 'music', duration: ms });
   }
 
   /* ───────── Bloqueo de pantalla: el candado ocupa el sitio de los controles; el resto del HUD sigue visible ───────── */

@@ -4,7 +4,7 @@ import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
   icon, navBar, enableCollapsingHeader, intensityDots, profileChart, ring, openSheet, sectionHeader, emptyState, stat,
-  photo, categoryPhotoName,
+  photo, categoryPhotoName, bgVideo,
 } from '../ui/components.js';
 import { planWeek, planDay, cycleInfo, nextTestDate, CYCLE_WEEKS } from '../training/planner.js';
 import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js';
@@ -164,10 +164,11 @@ function trainHero(day, state, today, animate) {
     w.estKcal ? metaNum(fmt.int(w.estKcal), 'kcal') : '',
   ].filter(Boolean).join('<span class="td-meta__sep" aria-hidden="true">·</span>');
   const goLabel = missed ? 'Hacerla ahora' : 'Empezar';
-  // Cabecera fotográfica de su categoría (velo inferior: el título blanco siempre legible); el perfil, debajo
+  // Cabecera en vídeo (el bucle de campaña, mudo; con «Reducir movimiento» queda el póster) y velo inferior: el título
+  // blanco siempre legible; el perfil, debajo
   return `<article class="card td-hero td-hero--photo${animate ? ' td-hero--in' : ''}">
     <div class="td-hero__media">
-      ${photo(categoryPhotoName(w.category), { cls: 'td-hero__img', eager: true })}
+      ${bgVideo('hero-loop', { cls: 'td-hero__img td-hero__video' })}
       <div class="td-hero__top">
         <span class="eyebrow">${esc(rel)} · ${esc(catName(w.category))}</span>
         ${status}
@@ -392,8 +393,12 @@ function sessionsBlock(state, day, dateKey, today) {
   const min = Math.round(list.reduce((a, s) => a + (Number(s.elapsedSec) || 0), 0) / 60);
   const km = list.reduce((a, s) => a + (Number(s.distanceKm) || 0), 0);
   const title = dateKey === today ? 'Hoy has hecho' : `Hecho el ${fmt.weekdayName(weekdayOf(dateKey))}`;
+  // Las clases que no cuentan como sesión (stats.sessionCounts) se rotulan «empezada», igual que la semana
+  const n = list.filter((s) => safe(() => stats.sessionCounts(s), true)).length;
+  const part = list.length - n;
+  const count = [n ? `${n} ${n === 1 ? 'sesión' : 'sesiones'}` : '', part ? `${part} ${part === 1 ? 'empezada' : 'empezadas'}` : ''].filter(Boolean).join(' · ');
   return `<section class="td-section br-sessions" aria-label="${esc(title)}">
-    ${sectionHeader(title, `<span class="td-aside">${list.length} ${list.length === 1 ? 'sesión' : 'sesiones'} · ${min} min · ${fmt.dec1(km)} km</span>`)}
+    ${sectionHeader(title, `<span class="td-aside">${count} · ${min} min · ${fmt.dec1(km)} km</span>`)}
     <div class="list br-seslist">${list.map((s) => sessionRow(s, { planned: !!s.planDate })).join('')}</div>
   </section>`;
 }

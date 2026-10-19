@@ -534,11 +534,11 @@
 .st-hero__name { margin: var(--s-4) 0 0; font-size: var(--fs-title1); line-height: var(--lh-title1); font-weight: 700; letter-spacing: -0.012em; }
 .st-hero__meta { margin-top: 4px; font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--text-2); }
 .st-hero__stats {
-  display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; margin-top: var(--s-6); padding: var(--s-4) 0;
+  display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; margin-top: var(--s-6); padding: var(--s-4);
 }
 /* Misma receta que .stat-grid: rótulo arriba, cifra debajo, alineado a la izquierda y separadores finos */
 .st-hero__stats div { display: flex; flex-direction: column-reverse; align-items: flex-start; justify-content: flex-end; gap: 4px; min-width: 0; padding: 0 var(--s-3); text-align: left; }
-.st-hero__stats div:first-child { padding-left: var(--s-1); }
+.st-hero__stats div:first-child { padding-left: 0; }
 .st-hero__stats div + div { border-left: var(--hairline) solid var(--sep); }
 .st-hero__stats b { font-size: 26px; line-height: 1; letter-spacing: -0.02em; }
 .st-hero__stats span { font-size: var(--fs-footnote); color: var(--text-2); white-space: nowrap; }

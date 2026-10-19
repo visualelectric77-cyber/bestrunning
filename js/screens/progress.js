@@ -213,9 +213,13 @@ function weekCard(s, today) {
   const pct = planned ? clamp(done / planned, 0, 1) : pMin ? clamp(min / pMin, 0, 1) : 0;
   const complete = planned > 0 && done >= planned;
   const left = Math.max(0, Math.min(planned - done, Number.isFinite(wp.remainingSessions) ? wp.remainingSessions : planned - done));
-  const title = complete ? '¡Semana completada!' : done ? `${done} de ${planned || '–'} sesiones` : left ? 'Semana por estrenar' : 'Semana sin sesiones';
+  // Clases empezadas que aún no cuentan como sesión (regla de planner.countsAsSession): suman minutos, no sesiones
+  const started = !done && min > 0;
+  const title = complete ? '¡Semana completada!' : done ? `${done} de ${planned || '–'} sesiones` : started ? 'Semana en marcha' : left ? 'Semana por estrenar' : 'Semana sin sesiones';
   const sub = complete
     ? 'Has cumplido todo el plan. Eso es constancia de campeón.'
+    : started
+      ? `Llevas ${min} min. Completa una clase para sumar tu primera sesión.`
     : left
       ? done
         ? `Te ${left === 1 ? 'queda 1 sesión' : `quedan ${left} sesiones`} para cerrar la semana.`

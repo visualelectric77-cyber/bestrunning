@@ -254,8 +254,8 @@ function rowSummary(key, s) {
   switch (key) {
     case 'profile': return p.name ? esc(p.name) : 'Añade tu nombre';
     case 'speeds': return LEVEL_KEYS.map((k) => fmt.speed(lv[k])).join(' · ');
-    case 'week': return `${sc.weekdayMinutes ?? 20}′ · J ${sc.thursdayMinutes ?? 50}′ · ${sc.weekendDay === 7 ? 'D' : 'S'} ${sc.weekendMinutes ?? 50}′`;
-    case 'treadmill': return `${tm.hasIncline ? 'Con inclinación · ' : ''}hasta ${fmt.speed(tm.maxSpeed ?? 18)} km/h`;
+    case 'week': return `L–V ${sc.weekdayMinutes ?? 20}′ · J ${sc.thursdayMinutes ?? 50}′ · ${sc.weekendDay === 7 ? 'D' : 'S'} ${sc.weekendMinutes ?? 50}′`;
+    case 'treadmill': return `${tm.hasIncline ? 'Inclinación · ' : ''}${fmt.speed(tm.maxSpeed ?? 18)} km/h`;
     case 'display': {
       const v = visualsOf(s);
       if (v.quality === 'off') return 'Fondo clásico';

@@ -169,7 +169,7 @@ export function defineExtraTemplates({ T, frame, W, numberReps, choose, r5, roun
   });
 
   T({
-    id: 'cut-down', title: 'Cut-down', subtitle: '4′ · 3′ · 2′ · 1′ sin parar, cada tramo más rápido', category: 'tempo',
+    id: 'cut-down', title: 'Cut-down', subtitle: 'Cuatro tramos sin parar, cada uno más corto y más rápido', category: 'tempo',
     family: 'progresivo', themes: [TH.ritmo, TH.escaleras], intensity: 'hard', durations: ALL, focus: 'Acelerar con fatiga',
     description: 'Un bloque continuo en el que cada tramo dura menos y va más rápido, sin trote entre medias. Terminas el bloque más rápido de lo que lo empezaste: la esencia de correr bien.',
     coachNotes: ['El tramo largo es el más lento: tranquilo, no te adelantes.', 'Cada cambio es pequeño: déjate llevar por la cinta.', 'El último minuto se corre con la cabeza alta.'],
