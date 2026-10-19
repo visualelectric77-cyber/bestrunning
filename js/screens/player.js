@@ -169,8 +169,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
       import('../audio/music-library.js').catch(() => null),
     ]).then(([engineMod, planMod, libMod]) => { musicMods = { engineMod, planMod, libMod }; return musicMods; })
     : Promise.resolve(null);
-  // Solo con ?debug=music: panel con el estado del motor DJ y del audio de iOS (para capturas en el móvil)
-  if (/[?&]debug=music(?:&|$)/.test(globalThis.location?.search || '')) {
+  // Con ?debug=music, o dentro de la app nativa mientras se diagnostica la música del iPhone (1.4.1; se apaga con
+  // localStorage 'br.debug.music' = '0'): panel con el estado del motor DJ y del audio de iOS (para capturas en el móvil)
+  const nativeMusicDebug = (() => {
+    try { return !!globalThis.webkit?.messageHandlers?.bestrunning && globalThis.localStorage?.getItem('br.debug.music') !== '0'; } catch { return false; }
+  })();
+  if (/[?&]debug=music(?:&|$)/.test(globalThis.location?.search || '') || nativeMusicDebug) {
     import('../player/music-debug.js')
       .then((m) => { if (!disposed) disposers.push(m.mountMusicDebug(globalThis.document?.body, { getMusic: () => music })); })
       .catch(() => {});
