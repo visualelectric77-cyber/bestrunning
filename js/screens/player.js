@@ -242,6 +242,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let adjustTimer = null;
   let snapTimer = null;
   let unbindMedia = () => {};
+  /** Diagnóstico: quién pausa o reanuda la clase (lo enseña el panel de la música). */
+  const notePause = (src, st) => {
+    try {
+      const log = (globalThis.__brPauses = globalThis.__brPauses || []);
+      log.push(`${src} ${st?.status || '-'} ${Math.round(Number(st?.totalElapsed) || 0)} s`);
+      if (log.length > 6) log.shift();
+    } catch { /* nada */ }
+  };
   let wakeWarned = false;
   let artwork = null;
   let leaving = false;
@@ -374,7 +382,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }),
     commands: {
       start: () => onStartTap(),
-      toggle: () => onToggle(),
+      toggle: () => { notePause('reloj', engine?.getState()); onToggle(); },
       skip: (dir) => doSkip(dir, true),
       endTest: () => doEndTest(),
       finish: () => { engine?.finish(); },
@@ -761,7 +769,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     unbindMedia = bindMediaControls({
       // Tras retomar (#/play/resume) el coach aún no existe si se reanuda desde los auriculares o el Centro de control
       onPlay: () => { if (engine?.getState().status === 'paused' && !countingDown) { ensureCoach(); engine.resume(); } },
-      onPause: () => { if (engine?.getState().status === 'running') engine.pause(); },
+      // Al arrancar, iOS puede mandar un «pausa» de sistema (interrupción del audio, el reloj tomando el
+      // «Ahora suena»…) que dejaba la clase pausada nada más empezar en la app nativa: los 10 primeros
+      // segundos se ignora. Queda anotado para el diagnóstico (globalThis.__brPauses).
+      onPause: () => {
+        const st = engine?.getState();
+        if (st?.status !== 'running') return;
+        const early = Number(st.totalElapsed) < 10;
+        notePause(early ? 'sistema (ignorada)' : 'sistema', st);
+        if (!early) engine.pause();
+      },
       onNext: () => doSkip(1),
       onPrev: () => doSkip(-1),
     });

@@ -58,6 +58,8 @@ function lines(music) {
   }
   const errs = Object.entries(b.errors || {});
   if (errs.length) out.push(`fallos: ${errs.map(([id, e]) => `${id} (${e.tries}× ${e.reason}${e.permanent ? ', fuera' : ''})`).join(' · ')}`);
+  const pz = globalThis.__brPauses || [];
+  if (pz.length) out.push(`pausas: ${pz.join(' · ')}`);
   const log = st.ctxLog || [];
   if (log.length) out.push(`eventos: ${log.map((e) => `${r1(e.at)} ${e.state}`).join(' · ')}`);
   return out;
