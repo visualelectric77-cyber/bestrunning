@@ -382,7 +382,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
       voice: () => toggleMute(null),
       nextSong: () => mcall('skipTrack'),
       adjust: (dir) => doAdjust(dir),
-      volume: (v) => { applySound('music', v * 100); scheduleSoundSave(); },
+      // Corona del reloj: solo para esta clase (no se guarda) y nunca por debajo del 15 % (un roce de la muñeca
+      // dejaba la música muda para siempre; para quitarla está «Música» en el iPhone).
+      volume: (v) => { mcall('setVolume', Math.max(0.15, clamp(Number(v) || 0, 0, 1))); },
     },
     onHr: () => { if (liveMounted()) renderHr(); },
   });
@@ -876,7 +878,18 @@ export function mount(el, { params = {}, query = {} } = {}) {
       }
       if (!music) { musicFailed = true; return; }
       const m = getState().music || {};
-      mcall('setVolume', clamp(Number(m.volume ?? 0.8), 0, 1));
+      let vol = clamp(Number(m.volume ?? 0.8), 0, 1);
+      // Música a 0 % guardada (un giro sin querer de la Corona del reloj la dejaba muda en todas las clases):
+      // se recupera el 80 % y se avisa. Para no oír música está el interruptor «Música», no el volumen.
+      if (!(vol >= 0.1)) {
+        vol = 0.8;
+        storageOk(() => setState((d) => {
+          if (!d.music || typeof d.music !== 'object') d.music = {};
+          d.music.volume = vol;
+        }));
+        later(() => toast('La música estaba a 0 %: la he subido al 80 %', { icon: 'music', duration: 4500 }), 1200);
+      }
+      mcall('setVolume', vol);
       mcall('setEffects', m.effects !== false);
       mcall('setEnabled', true);
     }
