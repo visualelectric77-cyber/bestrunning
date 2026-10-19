@@ -1790,6 +1790,8 @@ export function createMusicEngine(opts = {}) {
       })),
       buffers: store.stats(), deckMem: Object.fromEntries(deckMem), subst: Object.fromEntries(subst),
       dyn: graph ? { glue: grOf(graph.glue), limiter: grOf(graph.limiter) } : null,
+      // ganancias en este instante (diagnóstico: ¿se queda el fundido o el agache en 0?)
+      live: graph ? { fade: graph.fade.gain.value, duck: graph.duck.gain.value, music: graph.music.gain.value, speaking: !!speaking } : null,
       levels: {
         volume, volumeDb: Math.round(gainDb(volGain(volume)) * 100) / 100, duckDb: Math.round((M.duckDb - volBoostDb()) * 10) / 10,
         duckMixDb: Math.round((M.duckMixDb - volBoostDb()) * 10) / 10,

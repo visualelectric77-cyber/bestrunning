@@ -42,7 +42,11 @@ function lines(music) {
       lvl = rms > 1e-6 ? `${(20 * Math.log10(rms)).toFixed(1)} dBFS` : 'SILENCIO';
     }
   } catch { lvl = 'error'; }
-  out.push(`volumen ${st.volume ?? '—'} (${st.volumeDb ?? '—'} dB) · duck ${st.duckDb ?? '—'} dB · nivel música ${lvl}`);
+  const lv = st.levels || {};
+  const g = st.live;
+  const f2 = (x) => (Number.isFinite(Number(x)) ? Number(x).toFixed(2) : '—');
+  out.push(`volumen ${lv.volume ?? '—'} (${lv.volumeDb ?? '—'} dB) · nivel música ${lvl}`
+    + (g ? ` · fundido ${f2(g.fade)} · agache ${f2(g.duck)}${g.speaking ? ' (habla)' : ''} · gan ${f2(g.music)}` : ' · sin grafo'));
   if (st.job) out.push(`mezcla ${st.job.kind} #${st.job.idx} · cambio en ${r1(st.job.swap - (cx?.time || 0))} s`);
   for (const x of v) {
     out.push(`  ${x.main ? '▶' : '·'} ${x.trackId} ${r1(x.pos)} s · ${Math.round((x.sr || 0) / 1000)} kHz · ventana ${r1(x.w0)}–${r1(x.wEnd)}${x.ride ? ` · +${x.ride.db} dB` : ''}`);
