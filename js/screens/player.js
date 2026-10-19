@@ -379,6 +379,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       muted, musicOn, appMusic, countingDown, finale, finished: finishedHandled,
       np: musicStarted ? mcall('nowPlaying') : null, vol: sndPend?.music, sub: refs.sub?.textContent || '',
       ghost, ghostSide, canSkip: typeof music?.skipTrack === 'function',
+      // ¿Sonó ya el audio en esta página? Con el iPhone bloqueado solo se reanuda así (tras una recarga, no arrancaría)
+      audioLive: !!audioMod?.isUnlocked?.(),
     }),
     commands: {
       start: () => onStartTap(),
@@ -430,7 +432,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (query?.autostart === '1' && isNative() && !autoStarted) {
       autoStarted = true;
       dropAutostart();
-      later(onToggle, 600);
+      later(() => { if (canAutostart()) onToggle(); }, 600);
     }
   } else {
     renderReady();
@@ -584,8 +586,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (query?.autostart === '1' && isNative() && !autoStarted) {
       autoStarted = true;
       dropAutostart();
-      later(onStartTap, 600);
+      later(() => { if (canAutostart()) onStartTap(); }, 600);
     }
+  }
+
+  /**
+   * El autoarranque del reloj solo con la página a la vista: con el iPhone bloqueado (o BestRunning detrás) iOS no deja
+   * arrancar el audio y la clase saldría muda. El puente ya rechaza «Empezar» así; esto cubre bloquearlo justo después.
+   */
+  function canAutostart() {
+    return !disposed && document.visibilityState !== 'hidden';
   }
 
   /** Quita ?autostart=1 de la URL (una recarga no debe volver a arrancar la clase). */
@@ -2533,7 +2543,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function toggleMute(b) {
     muted = !muted;
     coachCall('setMuted', muted);
-    if (muted) { try { window.speechSynthesis?.cancel?.(); } catch { /* nada */ } }
+    // En la app nativa la clase nunca usa la voz del sistema (coach.js): ni se toca, que suena en el proceso de la app
+    if (muted && !isNative()) { try { window.speechSynthesis?.cancel?.(); } catch { /* nada */ } }
     root?.classList.toggle('is-muted', muted);
     const btn = b || root?.querySelector('[data-act="mute"]');
     btn?.setAttribute('aria-pressed', String(muted));

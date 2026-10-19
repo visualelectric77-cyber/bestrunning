@@ -307,7 +307,7 @@ function installWindow(handler) {
 }
 
 /** Entorno completo: puente de fábrica con su manejador, estado, reloj y temporizadores falsos. */
-function newEnv({ state = baseState(), init = true } = {}) {
+function newEnv({ state = baseState(), init = true, visible = undefined } = {}) {
   const posted = [];
   const handler = makeHandler(posted);
   installWindow(handler);
@@ -320,6 +320,7 @@ function newEnv({ state = baseState(), init = true } = {}) {
     navigate: (h) => navs.push(h),
     dispatch: (name, detail) => events.push({ name, detail }),
     app: '1.4.0-test',
+    ...(visible ? { visible } : {}),
   });
   if (init) B.init({ app: '1.4.0-test' });
   const all = () => posted.map((s) => JSON.parse(s));
@@ -336,7 +337,7 @@ function harness(env, workout, { ghost = null, treadmill = { minSpeed: 1, maxSpe
   const P = {
     engine: null, muted: false, musicOn: true, appMusic, countingDown: false, finale: false, finished: false,
     np: appMusic ? { trackId: 't1', title: 'Better Machine', artist: 'Conathor', bpm: 128 } : null, vol: undefined,
-    ghost, ghostSide: 0, canSkip: true, calls: [], session: null, discarded: null,
+    ghost, ghostSide: 0, canSkip: true, calls: [], session: null, discarded: null, audioLive: undefined,
   };
   const cb = {
     onTick: (s) => P.nb.tick(s),
@@ -381,7 +382,7 @@ function harness(env, workout, { ghost = null, treadmill = { minSpeed: 1, maxSpe
     extras: () => ({
       muted: P.muted, musicOn: P.musicOn, appMusic: P.appMusic, countingDown: P.countingDown, finale: P.finale, finished: P.finished,
       np: P.np, vol: P.vol, sub: P.engine ? `Tramo ${P.engine.getState().segIndex + 1}/${P.engine.getState().segCount}` : '',
-      ghost: P.ghost, ghostSide: P.ghostSide, canSkip: P.canSkip,
+      ghost: P.ghost, ghostSide: P.ghostSide, canSkip: P.canSkip, audioLive: P.audioLive,
     }),
     commands: {
       start: () => { P.calls.push('start'); P.start(); },
@@ -861,6 +862,90 @@ await section('Órdenes', async () => {
   }
   ok(!threw, 'mensajes mal formados: receive nunca lanza');
   ok(results.slice(0, 6).every((r) => r === false), 'JSON roto o versión distinta: se descarta');
+});
+
+/* ═════════════════ 7b · iPhone bloqueado (o BestRunning detrás) ═════════════════ */
+
+await section('iPhone bloqueado', async () => {
+  const vis = { v: false };
+  const env = newEnv({ visible: () => vis.v });
+  await env.B.ready();
+  const ackOf = (id) => env.ofType('ack').filter((m) => m.data.ref === 'cmd' && m.data.id === id).pop()?.data;
+  const send = async (data, extra = {}) => {
+    const e = { ...cmdEnv(data), ...extra };
+    env.B.receive(JSON.stringify(e));
+    await new Promise((r) => setTimeout(r, 5));
+    return ackOf(e.id);
+  };
+  // Hoy (sin reproductor) con el iPhone bloqueado: «Empezar» del reloj no navega ni arranca la clase muda en segundo plano
+  let a = await send({ name: 'start', from: 'watch' });
+  ok(a?.ok === false && a.reason === 'phone-locked' && env.navs.length === 0, `bloqueado, sin reproductor: start → phone-locked sin navegar (${JSON.stringify(a)})`);
+  a = await send({ name: 'start', from: 'action' });
+  ok(a?.ok === false && a.reason === 'phone-locked', 'bloqueado: botón Acción → phone-locked');
+  a = await send({ name: 'pause' });
+  ok(a?.ok === false && a.reason === 'no-class', 'bloqueado sin clase: pause → no-class (como siempre)');
+  vis.v = true;
+  a = await send({ name: 'start', from: 'watch' });
+  ok(a?.ok === true && env.navs.length === 1 && /autostart=1/.test(env.navs[0]), 'a la vista: start → navega a la clase con autostart');
+  // Orden vieja: la página dormida (iPhone bloqueado) la ejecutaría al desbloquearlo, cuando el reloj ya la dio por perdida
+  a = await send({ name: 'start' }, { at: now() - 30000 });
+  ok(a?.ok === false && a.reason === 'timeout' && env.navs.length === 1, 'start con 30 s de retraso → timeout, sin navegar');
+  a = await send({ name: 'start' }, { at: now() - 4000 });
+  ok(a?.ok === true && env.navs.length === 2, 'start con 4 s de retraso (enlace lento) → se hace');
+  // Preparación (reproductor sin motor) bloqueada: ni start ni toggle (Doble toque) arrancan la cuenta 3-2-1
+  vis.v = false;
+  const P = harness(env, W1);
+  P.nb.ready();
+  a = await send({ name: 'start' });
+  ok(a?.ok === false && a.reason === 'phone-locked' && !P.calls.includes('start') && !P.engine, 'Preparación bloqueada: start → phone-locked, sin cuenta atrás');
+  a = await send({ name: 'toggle', from: 'doubletap' });
+  ok(a?.ok === false && a.reason === 'phone-locked' && !P.engine, 'Preparación bloqueada: toggle → phone-locked');
+  ok(env.ofType('state').pop()?.data.status === 'ready', 'tras el rechazo, state fresco: ready');
+  vis.v = true;
+  a = await send({ name: 'start', from: 'doubletap' });
+  ok(a?.ok === true && P.engine?.getState().status === 'running', 'desbloqueado: start → empieza');
+  P.run(3000);
+  // Clase en marcha con el iPhone bloqueado: el reloj sigue mandando (pausa, reanudar, saltar, voz, volumen, intensidad)
+  vis.v = false;
+  a = await send({ name: 'pause', from: 'intent' });
+  ok(a?.ok === true && P.engine.getState().status === 'paused', 'bloqueado en clase: pause → en pausa');
+  a = await send({ name: 'resume', from: 'intent' });
+  ok(a?.ok === true && P.engine.getState().status === 'running', 'bloqueado en clase: resume → corriendo (el audio sigue vivo)');
+  a = await send({ name: 'toggle', from: 'doubletap' });
+  ok(a?.ok === true && P.engine.getState().status === 'paused', 'bloqueado en clase: toggle → pausa');
+  a = await send({ name: 'start', from: 'action' });
+  ok(a?.ok === true && P.engine.getState().status === 'running', 'bloqueado en clase: start en pausa → reanuda');
+  a = await send({ name: 'skip', dir: 1, from: 'action' });
+  ok(a?.ok === true && P.calls.includes('skip:1'), 'bloqueado en clase: skip → ok');
+  a = await send({ name: 'voice', on: false });
+  ok(a?.ok === true && P.muted === true, 'bloqueado en clase: voice → ok');
+  a = await send({ name: 'volume', value: 0.5, from: 'crown' });
+  ok(a?.ok === true && P.vol === 0.5, 'bloqueado en clase: volume → ok');
+  a = await send({ name: 'intensity', delta: 0.1 });
+  ok(a?.ok === true, `bloqueado en clase: intensity → ok (${JSON.stringify(a)})`);
+  a = await send({ name: 'pause' }, { at: now() - 30000 });
+  ok(a?.ok === true && P.engine.getState().status === 'paused', 'pause con retraso: se hace igual (nunca empieza nada)');
+  // Clase recuperada tras recargar la página (su audio aún no ha sonado): con el iPhone bloqueado no se reanuda
+  P.audioLive = false;
+  a = await send({ name: 'resume', from: 'intent' });
+  ok(a?.ok === false && a.reason === 'phone-locked' && P.engine.getState().status === 'paused', 'audio sin arrancar y bloqueado: resume → phone-locked');
+  a = await send({ name: 'start', from: 'watch' });
+  ok(a?.ok === false && a.reason === 'phone-locked' && P.engine.getState().status === 'paused', 'audio sin arrancar y bloqueado: start → phone-locked');
+  a = await send({ name: 'skip', dir: 1 });
+  ok(a?.ok === true, 'audio sin arrancar y bloqueado: skip sigue funcionando');
+  vis.v = true;
+  a = await send({ name: 'resume' }, { at: now() - 30000 });
+  ok(a?.ok === false && a.reason === 'timeout' && P.engine.getState().status === 'paused', 'resume con 30 s de retraso → timeout');
+  a = await send({ name: 'resume' });
+  ok(a?.ok === true && P.engine.getState().status === 'running', 'a la vista: resume → corriendo');
+  // La visibilidad que falla al leerse no bloquea nada
+  P.nb.detach();
+  const env2 = newEnv({ visible: () => { throw new Error('sin documento'); } });
+  await env2.B.ready();
+  const e2 = cmdEnv({ name: 'start' });
+  env2.B.receive(e2);
+  await new Promise((r) => setTimeout(r, 5));
+  ok(env2.ofType('ack').some((m) => m.data.id === e2.id && m.data.ok === true), 'visible() que lanza: se trata como a la vista');
 });
 
 /* ═════════════════ 8 · Pulso en directo ═════════════════ */

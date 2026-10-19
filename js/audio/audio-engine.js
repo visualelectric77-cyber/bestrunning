@@ -158,7 +158,7 @@ export function audioContextInfo() {
   return {
     state: ctx.state, sampleRate: ctx.sampleRate, baseLatency: Number(ctx.baseLatency) || 0,
     outputLatency: Number(ctx.outputLatency) || 0, latencyHint: latencyHint(), session: effectiveType(), clips, clipBytes,
-    restarts, lastRestart,
+    restarts, lastRestart, deferredRestart,
   };
 }
 
@@ -186,6 +186,8 @@ function listen() {
   const doc = globalThis.document;
   const revive = () => {
     if (doc?.visibilityState === 'hidden' || !ctx || !unlocked) return;
+    // Un reinicio que hizo falta con la pantalla bloqueada se hace ahora, ya a la vista
+    if (deferredRestart && runDeferredRestart()) return;
     if (ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
   };
   try {
@@ -211,6 +213,7 @@ let kicks = 0;              // reinicios seguidos sin que el reloj del audio vue
 let stuckNotified = false;
 let restarts = 0;           // para el panel de depuración
 let lastRestart = '';
+let deferredRestart = null; // motivo de un reinicio pedido con la página oculta: se hace al volver a verse
 
 const later = (fn, ms) => { try { const t = setTimeout(fn, ms); t?.unref?.(); } catch { /* sin temporizadores */ } };
 
@@ -219,11 +222,29 @@ function audioWanted() {
   return !!ctx && unlocked && ctx.state !== 'closed' && (shared || sessionOverride === 'playback' || isBusy());
 }
 
-/** suspend() + resume(): despierta una salida atascada (el reloj del contexto no avanza o suena mudo). */
+const pageHidden = () => {
+  try { return globalThis.document?.visibilityState === 'hidden'; } catch { return false; }
+};
+
+/**
+ * suspend() + resume(): despierta una salida atascada (el reloj del contexto no avanza o suena mudo).
+ * Con la página oculta (iPhone bloqueado, BestRunning detrás) NUNCA se suspende: en un iPhone de verdad iOS puede no
+ * dejar volver a arrancar el audio desde segundo plano y la clase seguiría muda con la pantalla bloqueada. Entonces
+ * solo se reanuda si no está en marcha, y el reinicio completo queda pendiente hasta que la página vuelva a verse.
+ */
 function restart(reason) {
   const c = ctx;
   if (!c || c.state === 'closed') return;
   kickAt = nowMs();
+  if (pageHidden()) {
+    deferredRestart = String(reason || 'hidden');
+    if (c.state !== 'running') {
+      lastResumeAt = nowMs();
+      try { c.resume().catch(() => {}); } catch { /* nada */ }
+    }
+    return;
+  }
+  deferredRestart = null;
   kicks++;
   restarts++;
   lastRestart = String(reason || '');
@@ -231,6 +252,16 @@ function restart(reason) {
     c.suspend().then(() => c.resume()).catch(() => { try { c.resume().catch(() => {}); } catch { /* nada */ } });
   } catch { /* nada */ }
   if (kicks >= 3 && !stuckNotified) notifyStuck();
+}
+
+/** La página vuelve a verse con un reinicio pendiente: se hace ya si el audio debe sonar. true si se hizo. */
+function runDeferredRestart() {
+  const reason = deferredRestart;
+  if (!reason || pageHidden()) return false;
+  deferredRestart = null;
+  if (!audioWanted()) return false;
+  restart(`${reason}+visible`);
+  return true;
 }
 
 /** Tras 3 reinicios sin éxito: aviso (el reproductor lo enseña) y, al primer toque, otro intento dentro del gesto. */
@@ -285,6 +316,8 @@ function ensureWatchdog() {
  */
 export function kickAudio(reason = '') {
   if (!ctx || ctx.state === 'closed' || !unlocked || !audioWanted()) return false;
+  // Vuelta a la app con un reinicio pendiente de cuando estaba bloqueada: ahora sí, completo
+  if (deferredRestart && !pageHidden() && runDeferredRestart()) return true;
   if (ctx.state !== 'running') {
     lastResumeAt = nowMs();
     try { ctx.resume().catch(() => {}); } catch { /* nada */ }

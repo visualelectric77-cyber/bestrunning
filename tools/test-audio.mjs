@@ -774,6 +774,55 @@ section('Pack grabado: coach en tiempo real');
   await c3.say('countdown', { n: 1 });
   ok(Date.now() - t0 >= 900, 'countdown sin voz dura n segundos');
   c3.destroy();
+
+  // App nativa de iPhone: la clase NUNCA usa la voz del sistema (speechSynthesis suena en el proceso de la app y su
+  // sesión de audio podía interrumpir el audio de la página: clase en pausa o muda). Solo clips; si faltan, se calla.
+  const spoken = [];
+  globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+  globalThis.speechSynthesis = {
+    getVoices: () => [], speak: (u) => { spoken.push(u.text); setTimeout(() => u.onend?.(), 1); },
+    cancel() { spoken.push('·cancel'); }, resume() {}, paused: false, addEventListener() {}, removeEventListener() {},
+  };
+  const run = async (c, to) => { for (let t = 0; t <= to; t += 0.25) { c.update(t); if (t % 1 === 0) await tick(); } await tick(); await tick(); };
+  // con el pack, aunque fallen los clips (en Node no hay WebAudio): ni se da por roto ni cae a la voz del sistema
+  const nat = [];
+  const c4 = createCoach(w, { chattiness: 'coach', seed: 3, systemVoice: false, pack: { available: ALL_IDS }, onCue: (c) => nat.push(c) });
+  await run(c4, 200);
+  eq(c4.voice, 'pack', 'app nativa: aunque fallen los clips, el pack no se da por roto');
+  ok(nat.some((c) => c.kind === 'change'), 'app nativa: los cambios siguen en los subtítulos');
+  await c4.say('pause', {});
+  await c4.say('km', { km: 2 });
+  await c4.say('countdown', { n: 1 });
+  c4.destroy();
+  eq(spoken.join(' | '), '', 'app nativa con pack: nunca speechSynthesis (ni speak ni cancel)');
+  // sin pack (en Safari sería la voz del sistema): avisos, cuenta atrás y pausa se callan; los subtítulos siguen
+  const nat2 = [];
+  const c5 = createCoach(w, { chattiness: 'normal', seed: 3, systemVoice: false, onCue: (c) => nat2.push(c) });
+  eq(c5.voice, 'tts', 'app nativa sin pack: programa de la voz del sistema…');
+  await run(c5, 200);
+  await c5.say('km', { km: 3 });
+  await c5.say('pause', {});
+  await c5.say('countdown', { n: 1 });
+  c5.setMuted(true);
+  c5.destroy();
+  ok(nat2.length > 3, '…con sus subtítulos');
+  eq(spoken.join(' | '), '', '…pero sin hablar con ella');
+  // detección automática: con window.webkit.messageHandlers.bestrunning (la app nativa) no hay voz del sistema
+  globalThis.webkit = { messageHandlers: { bestrunning: { postMessage() {} } } };
+  const c6 = createCoach(w, { chattiness: 'normal', seed: 3 });
+  await run(c6, 120);
+  await c6.say('km', { km: 1 });
+  c6.destroy();
+  delete globalThis.webkit;
+  eq(spoken.join(' | '), '', 'app nativa detectada sola: sin voz del sistema');
+  // Safari: igual que siempre (sin pack, habla la voz del sistema)
+  const c7 = createCoach(w, { chattiness: 'normal', seed: 3 });
+  await run(c7, 120);
+  await c7.say('km', { km: 1 });
+  c7.destroy();
+  ok(spoken.some((x) => x !== '·cancel'), `Safari: la voz del sistema sigue hablando sin pack (${spoken.length})`);
+  delete globalThis.speechSynthesis;
+  delete globalThis.SpeechSynthesisUtterance;
 }
 
 /* ───────────── 10 · Motor de audio sobre WebAudio simulado ───────────── */

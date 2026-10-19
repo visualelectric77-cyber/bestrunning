@@ -87,6 +87,12 @@ const OVERTAKE_GAP_MS = 45000;    // mismo límite que el bug RÉCORD del HUD
 const BACKUP_GET_MS = 15000;
 const FRESH_SNAPSHOT_MS = 3 * 3600 * 1000;
 const COMMANDS = ['start', 'toggle', 'pause', 'resume', 'skip', 'endTest', 'end', 'voice', 'nextSong', 'intensity', 'volume'];
+// Empezar o reanudar la clase con la página oculta (iPhone bloqueado o BestRunning detrás) no se hace: iOS no deja arrancar
+// el audio desde segundo plano y la clase saldría muda (y congelada). El reloj lo explica con este motivo.
+const LOCKED = 'phone-locked';
+// Una orden de empezar/reanudar que llega tan tarde (la página estaba dormida con el iPhone bloqueado y la ejecuta al
+// desbloquearlo) ya la dio por perdida el reloj (5 s): no se ejecuta por sorpresa.
+const STALE_CMD_MS = 10000;
 
 const r2 = (v) => Math.round(v * 100) / 100;
 const r3 = (v) => Math.round(v * 1000) / 1000;
@@ -209,6 +215,9 @@ const defaultDispatch = (name, detail) => {
     w.dispatchEvent(new globalThis.CustomEvent(name, { detail }));
   } catch { /* sin DOM */ }
 };
+const defaultVisible = () => {
+  try { return globalThis.document?.visibilityState !== 'hidden'; } catch { return true; }
+};
 const defaultTimers = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: (t) => clearTimeout(t),
@@ -222,7 +231,7 @@ const defaultLibs = () => Promise.all([import('../training/planner.js'), import(
  * Puente (fábrica pura para los tests; la app usa la instancia por defecto).
  * opts: { handler: () => messageHandler | messageHandler, now, store: { getState, setState, subscribe, importState,
  *   exportState, loadActiveSession?, activeSessionSavedAt? }, navigate, dispatch(name, detail), timers, libs, app,
- *   expose (window.BRNative al iniciar; por defecto true) }
+ *   expose (window.BRNative al iniciar; por defecto true), visible (() => ¿página a la vista?; por defecto document) }
  */
 export function createNativeBridge(opts = {}) {
   const {
@@ -232,6 +241,7 @@ export function createNativeBridge(opts = {}) {
     timers = defaultTimers,
     libs: loadLibsFn = defaultLibs,
     expose = true,
+    visible = defaultVisible,
   } = opts;
   let store = opts.store || null;
   let navigate = typeof opts.navigate === 'function' ? opts.navigate : null;
@@ -451,9 +461,18 @@ export function createNativeBridge(opts = {}) {
       fresh(startedHere(ack));
       return;
     }
+    // Empezar o reanudar: solo con la página a la vista (o, al reanudar, con el audio aún vivo) y si la orden es reciente
+    const age = num(now()) - num(env.at, num(now()));
+    const gate = (kind, audioLive = true) => {
+      if (age > STALE_CMD_MS) return 'timeout';
+      let shown = true;
+      try { shown = visible() !== false; } catch { shown = true; }
+      if (!shown && (kind === 'begin' || !audioLive)) return LOCKED;
+      return null;
+    };
     let res;
     try {
-      res = target ? target.command(data) : commandWithoutPlayer(data);
+      res = target ? target.command(data, gate) : commandWithoutPlayer(data, gate);
     } catch {
       res = { ok: false, reason: 'busy' };
     }
@@ -469,9 +488,11 @@ export function createNativeBridge(opts = {}) {
   }
 
   /** Orden sin el reproductor abierto: solo «Empezar» tiene sentido (las demás: no-class / unknown). */
-  function commandWithoutPlayer(d) {
+  function commandWithoutPlayer(d, gate = () => null) {
     const name = String(d?.name || '');
     if (name !== 'start') return { ok: false, reason: COMMANDS.includes(name) ? 'no-class' : 'unknown' };
+    const no = gate('begin');
+    if (no) return { ok: false, reason: no };
     return startWithoutPlayer();
   }
 
@@ -963,7 +984,11 @@ export function createNativeBridge(opts = {}) {
       return f(...args);
     };
 
-    function command(d) {
+    /**
+     * gate(kind, audioLive) → motivo para no empezar ('begin': la cuenta 3-2-1 de salida) ni reanudar ('resume') o null.
+     * Pausar, saltar, voz, volumen… nunca pasan por aquí: con el iPhone bloqueado y la clase en marcha siguen funcionando.
+     */
+    function command(d, gate = () => null) {
       const name = String(d?.name || '');
       const s = es();
       const x = xs();
@@ -973,29 +998,37 @@ export function createNativeBridge(opts = {}) {
       const done = finished || !!x.finished || stt === 'finished';
       const NO = (reason) => ({ ok: false, reason });
       const OK = { ok: true };
+      // Reanudar con la página oculta solo vale si el audio sigue vivo (pausa normal: el AudioContext sigue en marcha);
+      // tras recuperar la clase con la página recargada, no: no podría arrancar hasta desbloquear el iPhone.
+      const audioLive = x.audioLive !== false;
+      const kindOf = () => (!s || stt === 'ready' ? 'begin' : 'resume');
       switch (name) {
-        case 'start':
+        case 'start': {
           if (busy) return NO('busy');
           if (done) return NO('busy');
-          if (!s) { call('start'); return OK; }
-          if (stt === 'paused') { call('toggle'); return OK; }
           if (stt === 'running') return OK;
+          const no = gate(kindOf(), audioLive);
+          if (no) return NO(no);
+          if (!s) { call('start'); return OK; }
           call('toggle');
           return OK;
+        }
         case 'toggle':
         case 'pause':
-        case 'resume':
+        case 'resume': {
           if (busy) return NO('busy');
           if (done) return NO('no-class');
-          if (!s) {
-            if (name !== 'toggle') return NO('no-class');
-            call('start');
-            return OK;
-          }
+          if (!s && name !== 'toggle') return NO('no-class');
           if (name === 'pause' && stt !== 'running') return OK;
           if (name === 'resume' && stt === 'running') return OK;
+          if (stt !== 'running') {
+            const no = gate(kindOf(), audioLive);
+            if (no) return NO(no);
+          }
+          if (!s) { call('start'); return OK; }
           call('toggle');
           return OK;
+        }
         case 'skip': {
           const dir = Number(d.dir);
           if (dir !== 1 && dir !== -1) return NO('bad-args');

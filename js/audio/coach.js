@@ -2,6 +2,9 @@
 // tiempo real (createCoach). Al importarse no toca window/document: speech y audio solo dentro de funciones.
 // Con el pack grabado (Eva Dorado, voice-pack.js) cargado, cada aviso se compone SOLO con clips; los cambios de
 // tramo que no se pueden componer caen enteros a la voz del sistema y el resto se omite (nunca se mezclan).
+// En la app nativa de iPhone la clase NO usa nunca la voz del sistema: speechSynthesis suena en el proceso de la app
+// (AVSpeechSynthesizer) y activar su sesión de audio podía interrumpir el audio de la página (WebKit) y pausar o
+// enmudecer la clase. Allí solo hablan los clips de Eva; si falta un clip, ese aviso se calla (los pitidos siguen).
 import { clamp, hashStr, makeRng, todayKey } from '../core/utils.js';
 import { ZONES } from '../training/levels.js';
 import { PHRASES, pick, pickShortest, fill, clipIdsFor, toNumber } from './phrases.js';
@@ -27,6 +30,11 @@ const TIP_GROUPS = new Set(['form', 'breath', 'mind', 'hard', 'good', 'recover',
 const TIP_MAX_USES = 2;       // con pocas variantes grabadas, mejor callar que repetir el mismo consejo
 const SEGMENT_KINDS = new Set(['intro', 'pre', 'change', 'testStage']); // si el pack falla, caen a la voz del sistema
 const PACK_FAILS_TO_TTS = 2;  // fallos seguidos del pack antes de pasar toda la sesión a la voz del sistema
+
+/** Dentro de la app nativa de iPhone (WKWebView con el puente «bestrunning»; en Safari no existe). */
+const inNativeApp = () => {
+  try { return !!globalThis.webkit?.messageHandlers?.bestrunning; } catch { return false; }
+};
 
 const r1 = (v) => Math.round(v * 10) / 10;
 const ceil1 = (v) => Math.ceil(v * 10 - 1e-6) / 10;
@@ -922,6 +930,8 @@ function normalizeSettings(s = {}) {
     music: typeof s.music === 'boolean' ? s.music
       : s.music && typeof s.music === 'object' ? s.music.enabled !== false && (s.music.mode || 'app') === 'app' : null,
     onCue: typeof s.onCue === 'function' ? s.onCue : null,
+    // Voz del sistema como respaldo de los clips: sí en Safari, nunca en la app nativa (ver la cabecera)
+    systemVoice: typeof s.systemVoice === 'boolean' ? s.systemVoice : !inNativeApp(),
   };
 }
 
@@ -1013,6 +1023,8 @@ export function createCoach(workout, settings = {}) {
   const segAt = (t) => (segs.length ? segs[Math.max(0, indexAt(starts, segs, t))] : null);
   const segIdxAt = (t) => segAt(t)?.idx ?? -1;
   const ttsOpts = () => ({ rate: cfg.rate, pitch: cfg.pitch, volume: cfg.volume, voiceURI: cfg.voiceURI });
+  // Voz del sistema solo si se permite (no en la app nativa): si no, el aviso se calla y la cola sigue
+  const systemSay = (text) => (cfg.systemVoice ? speak(text, ttsOpts()) : Promise.resolve());
   const later = (fn, ms) => {
     const id = setTimeout(() => { timers.delete(id); if (!destroyed) fn(); }, ms);
     timers.add(id);
@@ -1061,7 +1073,8 @@ export function createCoach(workout, settings = {}) {
 
   function packFailed() {
     packFails++;
-    if (packFails >= PACK_FAILS_TO_TTS && avail && !packBroken) {
+    // Sin voz del sistema (app nativa) el pack nunca se da por roto: mejor reintentar los clips que callar la clase
+    if (packFails >= PACK_FAILS_TO_TTS && avail && !packBroken && cfg.systemVoice) {
       packBroken = true; // el resto de la sesión, con la voz del sistema
       rebuild();
     }
@@ -1080,14 +1093,14 @@ export function createCoach(workout, settings = {}) {
         packFailed();
       }
       // el pack ha fallado: un cambio de tramo se dice entero con la voz del sistema; el resto se omite
-      if (g === gen && SEGMENT_KINDS.has(item.kind) && item.text) await speak(item.text, ttsOpts());
+      if (g === gen && SEGMENT_KINDS.has(item.kind) && item.text) await systemSay(item.text);
       return;
     }
     if (item.voice !== 'tts' && item.clips && item.clips.length && cfg.packId && hasClips(item.clips)) {
       try { await playClips(item.clips); return; } catch { /* sin clips: voz del sistema */ }
       if (g !== gen) return;
     }
-    await speak(item.text, ttsOpts());
+    await systemSay(item.text);
   }
 
   /* ───── cola de voz ───── */
@@ -1098,7 +1111,7 @@ export function createCoach(workout, settings = {}) {
     const c = current;
     current = null;
     try { stopClips(); } catch { /* nada */ }
-    try { cancelSpeech(); } catch { /* nada */ }
+    if (cfg.systemVoice) { try { cancelSpeech(); } catch { /* nada */ } }
     c.resolve?.();
   }
 
