@@ -1,0 +1,71 @@
+/* RITMUP · intro de arranque «Curva» (js/ui/intro.js). Solo transform, opacity (y el desenfoque de entrada de las letras). */
+.ri {
+  --s: min(64vw, 320px);
+  --e-out: cubic-bezier(0.16, 1, 0.3, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  background: #000;
+  box-shadow: 0 0 0 120px #000; /* cubre también el rebote y las zonas seguras */
+  overflow: hidden;
+  contain: strict;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  animation: ri-fade 0.45s cubic-bezier(0.4, 0, 0.6, 1) 2s both;
+}
+.ri-pos {
+  position: absolute;
+  left: 50%;
+  top: 46%; /* ópticamente un poco por encima del centro: la banda de la altura x queda aquí */
+  width: var(--s);
+  transform: translate(-50%, calc(-1 * var(--cy)));
+}
+.ri-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--ar);
+  transform-origin: 50% var(--cy);
+  animation: ri-push 0.45s cubic-bezier(0.4, 0, 0.7, 0.4) 2s both;
+}
+.ri-stage > svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  display: block;
+}
+.ri-ink { fill: #d4d4d4; } /* el reflejo la deja en blanco puro */
+
+/* ── Las letras: suben 10 unidades, de desenfocadas a nítidas, escalonadas ── */
+.ri-l {
+  will-change: transform, opacity, filter;
+  animation: ri-letter 0.38s var(--e-out) calc(1.1s + 0.05s * var(--i)) both;
+}
+
+/* ── Reflejo: un borde de luz fino que cruza la marca y la deja en blanco puro ── */
+.ri-sweep {
+  transform: translateX(var(--x0));
+  animation: ri-sweep 0.42s cubic-bezier(0.45, 0, 0.25, 1) 1.75s both;
+}
+
+@keyframes ri-fade { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ri-push { from { transform: scale(1); } to { transform: scale(1.05); } }
+@keyframes ri-letter {
+  from { opacity: 0; transform: translateY(var(--rise)); filter: blur(3px); }
+  55% { filter: blur(0); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@keyframes ri-sweep {
+  from { transform: translateX(var(--x0)); }
+  to { transform: translateX(var(--x1)); }
+}
+
+/* Movimiento reducido: el lockup quieto que aparece en 0,5 s y se funde con la app */
+.ri--still { animation: ri-fade 0.4s ease 1.25s both; }
+.ri--still .ri-ink { fill: #fff; }
+.ri--still .ri-stage { animation: ri-in 0.5s ease both; }
+.ri--still .ri-l { animation: none; }
+@keyframes ri-in { from { opacity: 0; } to { opacity: 1; } }

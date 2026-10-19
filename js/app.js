@@ -4,6 +4,7 @@ import { loadActiveSession, saveActiveSession, activeSessionSavedAt } from './co
 import { icon, toast, openSheet } from './ui/components.js';
 import { esc, fmt } from './core/utils.js';
 import { APP_VERSION } from './version.js';
+import { playIntro } from './ui/intro.js';
 
 const RESUME_MAX_MS = 3 * 3600 * 1000;
 const STALE_MS = 24 * 3600 * 1000;
@@ -314,6 +315,7 @@ function redirectReloadedPlay() {
 
 function boot() {
   redirectReloadedPlay();
+  playIntro(); // intro de marca, una vez por lanzamiento (nunca sobre una clase en curso)
   nativeTweaks();
   // App nativa: puente con el iPhone y el Apple Watch (en Safari ni se descarga)
   if (inNativeApp()) {
