@@ -19,7 +19,7 @@ import {
   withHrOverlay, hrLegendHtml, hrZonesHtml, hrLevelsHtml, hrStatsHtml, hrMaxHintHtml, ensureWatchHrStyles, isWatchShortcutReady,
   HR_ENTRY_MIN, HR_ENTRY_MAX,
 } from '../integrations/watch-hr.js';
-import { isNative, nativeStatus } from '../integrations/native-bridge.js';
+import { isNative, nativeStatus, healthMissingOf } from '../integrations/native-bridge.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -56,10 +56,12 @@ const feelings = () => (Array.isArray(FEELINGS) && FEELINGS.length ? FEELINGS : 
 const zoneName = (z) => ZONES[z]?.name || z;
 const zoneColor = (z) => ZONES[z]?.color || '#ff6a1a';
 const WATCH_WAIT_MS = 10 * 60000;  // app nativa: el pulso del reloj suele llegar en segundos; se espera hasta 10 min
-/** App nativa con BestRunning instalada en un Apple Watch emparejado. */
+/** App nativa con BestRunning instalada en un Apple Watch emparejado (y con permiso de Salud: sin él, el pulso del
+ *  reloj no llega nunca y no tiene sentido esperar 10 min; se ofrece el Atajo enseguida). */
 const watchManaged = () => {
-  const w = nativeStatus()?.watch;
-  return !!(w && w.paired && w.installed);
+  const ns = nativeStatus();
+  const w = ns?.watch;
+  return !!(w && w.paired && w.installed) && healthMissingOf(ns) !== 'denied';
 };
 
 export function mount(el, { params = {} } = {}) {

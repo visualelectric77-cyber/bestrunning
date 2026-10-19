@@ -33,6 +33,10 @@ const liveBeeps = new Set();    // { oscs, env, end }
 
 const AC = () => globalThis.AudioContext || globalThis.webkitAudioContext || null;
 const nowMs = () => (globalThis.performance?.now ? performance.now() : Date.now());
+/** Dentro de la app nativa de iPhone (WKWebView con el puente «bestrunning»; en Safari no existe). */
+const inNativeApp = () => {
+  try { return !!globalThis.webkit?.messageHandlers?.bestrunning; } catch { return false; }
+};
 
 /* ───────────── Sesión de audio (navigator.audioSession, Safari 17+) ───────────── */
 
@@ -50,10 +54,21 @@ function setSessionType(type) {
   }
 }
 
-const autoType = () => (cfg.duckMusic ? 'transient' : 'ambient');
+// En la app nativa lo que suena lo pone BestRunning, como en cualquier app de verdad: 'playback' (WebKit → categoría
+// Playback), que NO calla el modo silencio ni la pantalla bloqueada. 'transient'/'ambient' acaban en Ambient, que el
+// modo silencio silencia: en la app eso dejaba mudas la voz de Eva y las demos. En Safari se mantiene lo de siempre
+// ('transient' baja la música ajena mientras habla el coach; 'ambient' solo mezcla). El reproductor sigue pidiendo
+// 'transient'/'ambient' a propósito con «Mi música» (hay que mezclarse con Spotify), y la Preparación lo avisa.
+const autoType = () => (inNativeApp() ? 'playback' : cfg.duckMusic ? 'transient' : 'ambient');
 const effectiveType = () => sessionOverride || autoType();
-// Con el contexto compartido (música de la app) nunca se suspende salvo que se pida 'transient' expresamente
-const idleAllowed = () => effectiveType() === 'transient' && (!shared || sessionOverride === 'transient');
+// Reposo (suspender a los 2,5 s sin sonido): en 'transient', para no dejar la música ajena bajada, y en el 'playback'
+// automático de la app nativa (fuera de clase), para no dejar Spotify en pausa ni el iPhone procesando silencio.
+// Con el contexto compartido (música de la app) nunca se suspende salvo que se pida 'transient' expresamente.
+const idleAllowed = () => {
+  if (shared && sessionOverride !== 'transient') return false;
+  const t = effectiveType();
+  return t === 'transient' || (t === 'playback' && !sessionOverride && inNativeApp());
+};
 
 /**
  * Tipo de sesión de audio de iOS: 'playback' (la app es la fuente de música; Spotify se pausa),
@@ -110,13 +125,20 @@ function createContext() {
   }
   if (ctx) {
     buildGraph();
+    prevState = ctx.state;
     // Si el contexto llega a sonar (aunque el primer resume() tardara más de lo esperado), queda desbloqueado:
     // así funcionan el «revive» al volver a la app y la reanudación en modo 'playback'.
     try {
       ctx.addEventListener?.('statechange', () => {
-        if (ctx?.state === 'running' && !unlocked) { unlocked = true; scheduleIdle(); }
+        const st = ctx?.state;
+        if (st === 'running' && !unlocked) { unlocked = true; scheduleIdle(); }
+        // Fin de una interrupción (llamada, Siri, alarma, otra app): en WKWebView el contexto puede volver a 'running'
+        // sin sonar; un suspend/resume despierta la salida (cuesta ~0,1 s de silencio).
+        if (st === 'running' && prevState === 'interrupted' && audioWanted()) later(() => restart('interruption'), 250);
+        prevState = st;
       });
     } catch { /* sin eventos */ }
+    ensureWatchdog();
   }
   return ctx;
 }
@@ -136,6 +158,7 @@ export function audioContextInfo() {
   return {
     state: ctx.state, sampleRate: ctx.sampleRate, baseLatency: Number(ctx.baseLatency) || 0,
     outputLatency: Number(ctx.outputLatency) || 0, latencyHint: latencyHint(), session: effectiveType(), clips, clipBytes,
+    restarts, lastRestart,
   };
 }
 
@@ -168,10 +191,113 @@ function listen() {
   try {
     doc?.addEventListener?.('visibilitychange', revive);
     globalThis.addEventListener?.('pageshow', revive);
+    // App nativa (native-bridge.js → br:audio-kick)
+    globalThis.addEventListener?.('br:audio-kick', (e) => kickAudio(e?.detail?.reason || ''));
   } catch { /* sin DOM */ }
 }
 
 const isBusy = () => !!playback || [...liveBeeps].some((b) => b.end > (ctx?.currentTime ?? 0));
+
+/* ───────────── Vigilancia: que el audio no se quede mudo (interrupciones, salida atascada, app nativa) ───────────── */
+
+const WATCH_MS = 1000;
+let watchT = null;
+let prevState = null;
+let wdLastT = -1;
+let wdQuiet = 0;
+let lastResumeAt = -Infinity;
+let kickAt = -Infinity;
+let kicks = 0;              // reinicios seguidos sin que el reloj del audio vuelva a avanzar
+let stuckNotified = false;
+let restarts = 0;           // para el panel de depuración
+let lastRestart = '';
+
+const later = (fn, ms) => { try { const t = setTimeout(fn, ms); t?.unref?.(); } catch { /* sin temporizadores */ } };
+
+/** ¿Debe estar sonando el contexto? (música de la app enganchada, clase en 'playback' o una voz/pitido en curso) */
+function audioWanted() {
+  return !!ctx && unlocked && ctx.state !== 'closed' && (shared || sessionOverride === 'playback' || isBusy());
+}
+
+/** suspend() + resume(): despierta una salida atascada (el reloj del contexto no avanza o suena mudo). */
+function restart(reason) {
+  const c = ctx;
+  if (!c || c.state === 'closed') return;
+  kickAt = nowMs();
+  kicks++;
+  restarts++;
+  lastRestart = String(reason || '');
+  try {
+    c.suspend().then(() => c.resume()).catch(() => { try { c.resume().catch(() => {}); } catch { /* nada */ } });
+  } catch { /* nada */ }
+  if (kicks >= 3 && !stuckNotified) notifyStuck();
+}
+
+/** Tras 3 reinicios sin éxito: aviso (el reproductor lo enseña) y, al primer toque, otro intento dentro del gesto. */
+function notifyStuck() {
+  stuckNotified = true;
+  try { globalThis.dispatchEvent?.(new globalThis.CustomEvent('br:audio-stuck')); } catch { /* sin DOM */ }
+  const doc = globalThis.document;
+  const onTap = () => {
+    try { doc?.removeEventListener?.('pointerdown', onTap, true); } catch { /* nada */ }
+    if (!ctx || ctx.state === 'closed') return;
+    try { if (ctx.state !== 'running') ctx.resume().catch(() => {}); else restart('tap'); } catch { /* nada */ }
+  };
+  try { doc?.addEventListener?.('pointerdown', onTap, true); } catch { /* sin DOM */ }
+}
+
+/** Cada segundo, mientras el audio debe sonar: reanuda lo suspendido/interrumpido y despierta un reloj parado. */
+function watchTick() {
+  if (!audioWanted()) { wdQuiet = 0; wdLastT = -1; return; }
+  // En Ambient (Safari, «Mi música») iOS para el audio en segundo plano: eso es normal, no un atasco
+  if (globalThis.document?.visibilityState === 'hidden' && effectiveType() !== 'playback') return;
+  if (ctx.state !== 'running') {
+    // 'suspended' o 'interrupted' (llamada, Siri, otra app): WebKit lo reanuda al acabar la interrupción si se le pide
+    if (nowMs() - lastResumeAt > 900) { lastResumeAt = nowMs(); try { ctx.resume().catch(() => {}); } catch { /* nada */ } }
+    wdQuiet = 0;
+    wdLastT = -1;
+    return;
+  }
+  const t = ctx.currentTime;
+  if (t !== wdLastT) {
+    wdLastT = t;
+    wdQuiet = 0;
+    kicks = 0;
+    stuckNotified = false;
+    return;
+  }
+  // 'running' pero el reloj no avanza en 2 s: salida atascada (cambio de ruta, interrupción mal cerrada)
+  wdQuiet++;
+  if (wdQuiet >= 2 && nowMs() - kickAt > 3000) restart('stalled');
+}
+
+function ensureWatchdog() {
+  if (watchT || typeof setInterval !== 'function' || !globalThis.document) return;
+  try {
+    watchT = setInterval(watchTick, WATCH_MS);
+    watchT?.unref?.();
+  } catch { watchT = null; }
+}
+
+/**
+ * Algo del sistema pudo dejar mudo el audio (la app nativa lo avisa con audio.kick: vuelta a la app, cambio de salida,
+ * reinicio de los servicios de audio, fin de una interrupción): si debe sonar, se comprueba y se despierta.
+ */
+export function kickAudio(reason = '') {
+  if (!ctx || ctx.state === 'closed' || !unlocked || !audioWanted()) return false;
+  if (ctx.state !== 'running') {
+    lastResumeAt = nowMs();
+    try { ctx.resume().catch(() => {}); } catch { /* nada */ }
+    return true;
+  }
+  if (reason === 'reset' || reason === 'interruption') { restart(reason); return true; }
+  // vuelta a la app o cambio de salida: solo si el reloj del audio está parado
+  const t0 = ctx.currentTime;
+  later(() => {
+    if (ctx && ctx.state === 'running' && ctx.currentTime === t0 && audioWanted()) restart(reason || 'kick');
+  }, 350);
+  return true;
+}
 
 function scheduleIdle() {
   clearTimeout(idleTimer);
@@ -213,7 +339,11 @@ export async function unlockAudio() {
     // resume() se invoca de forma síncrona dentro del gesto; luego se espera
     if (c.state !== 'running') { try { resuming = c.resume(); } catch { resuming = null; } }
   }
-  primeSpeech();
+  // La voz del sistema se «calienta» dentro del gesto (Safari de iOS la exige ahí). En la app nativa no hace falta (la
+  // WKWebView no pide gesto para el audio) y además estorba: speechSynthesis suena en el proceso de la app con
+  // AVSpeechSynthesizer, y su sesión de audio interrumpía la de la página justo al pulsar Empezar (la clase se
+  // quedaba en 'interrupted' y llegaba a pausarse). La app ya deja esa sesión mezclable (build 4).
+  if (!inNativeApp()) primeSpeech();
   listen();
   if (resuming) { try { await Promise.race([resuming, new Promise((r) => setTimeout(r, 1200))]); } catch { /* nada */ } }
   unlocked = !!ctx && ctx.state === 'running';

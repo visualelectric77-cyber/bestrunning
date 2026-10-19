@@ -104,13 +104,14 @@ const SCHEMA = {
   'native.hello': {
     proto: opt('int'), app: opt('str'),
     watch: { paired: 'bool', installed: 'bool', reachable: 'bool', link: 'str', workout: 'str', run: opt('str') },
-    health: { auth: 'str' }, backup: opt({ savedAt: 'num', sessions: 'int', bytes: 'int' }),
+    health: { auth: 'str', hr: opt('str') }, backup: opt({ savedAt: 'num', sessions: 'int', bytes: 'int' }),
   },
   backup: { savedAt: 'num', sessions: 'int', json: 'str' },
   'backup.get': {},
   'backup.data': { ref: 'str', savedAt: 'num', json: 'str' },
   'health.authorize': {},
   'audio.session': { type: 'str' },
+  'audio.kick': { reason: 'str' },
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',
@@ -1135,6 +1136,18 @@ await section('Hoy', async () => {
   ok(P.nb.watchManaged() === false, 'watchManaged() = false sin la app del reloj');
   env.B.receive({ v: 1, type: 'native.status', seq: 3, boot: 'p4k8m2', at: now(), data: { watch: { paired: true, installed: true, reachable: true, link: 'wc', workout: 'idle' }, health: { auth: 'granted' } } });
   ok(P.nb.watchManaged() === true, 'watchManaged() = true con el reloj emparejado y la app instalada');
+  // Permiso de Salud para el pulso del reloj (health.hr, desde la build 4 del iPhone)
+  ok(P.nb.healthMissing() === null, 'healthMissing() = null con Salud concedida (iPhone sin health.hr)');
+  env.B.receive({ v: 1, type: 'native.status', seq: 4, boot: 'p4k8m2', at: now(), data: { watch: { paired: true, installed: true, reachable: true, link: 'wc', workout: 'idle' }, health: { auth: 'granted', hr: 'denied' } } });
+  ok(P.nb.healthMissing() === 'denied', 'healthMissing() = denied sin permiso de pulso');
+  env.B.receive({ v: 1, type: 'native.status', seq: 5, boot: 'p4k8m2', at: now(), data: { watch: { paired: true, installed: true, reachable: true, link: 'wc', workout: 'idle' }, health: { auth: 'unknown', hr: 'unknown' } } });
+  ok(P.nb.healthMissing() === 'prompt', 'healthMissing() = prompt si aún falta la hoja de Salud');
+  env.B.receive({ v: 1, type: 'native.status', seq: 6, boot: 'p4k8m2', at: now(), data: { watch: { paired: true, installed: true, reachable: true, link: 'wc', workout: 'idle' }, health: { auth: 'granted', hr: 'granted' } } });
+  ok(P.nb.healthMissing() === null, 'healthMissing() = null con entreno y pulso concedidos');
+  ok(NB.healthMissingOf({ health: { auth: 'denied' } }) === 'denied' && NB.healthMissingOf(null) === null, 'healthMissingOf()');
+  // audio.kick (iPhone → página): llega a su manejador y se avisa a audio-engine.js con br:audio-kick
+  ok(env.B.receive({ v: 1, type: 'audio.kick', seq: 7, boot: 'p4k8m2', at: now(), data: { reason: 'route' } }) === 'audio', 'audio.kick llega a su manejador');
+  ok(env.events.some((x) => x.name === 'br:audio-kick' && x.detail?.reason === 'route'), 'audio.kick → evento br:audio-kick { reason }');
   P.nb.detach();
 });
 
@@ -1186,7 +1199,7 @@ await section('Fixtures', async () => {
     }
   }
   // Fixtures de Swift (native/Fixtures): pasan por receive() y llegan a su manejador
-  const HANDLED = { 'native.hello': 'status', 'native.status': 'status', hr: 'hr', cmd: 'cmd', 'workout.summary': 'summary', 'backup.data': 'backup' };
+  const HANDLED = { 'native.hello': 'status', 'native.status': 'status', hr: 'hr', cmd: 'cmd', 'workout.summary': 'summary', 'backup.data': 'backup', 'audio.kick': 'audio' };
   const dirs = [FIX_DIR, ...(existsSync(NATIVE_FIX_DIR) ? [NATIVE_FIX_DIR] : [])];
   const env2 = newEnv();
   await env2.B.ready();

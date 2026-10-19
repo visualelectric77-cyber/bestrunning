@@ -12,7 +12,7 @@ import { APP_VERSION } from '../version.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
 import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
-import { isNative, nativeStatus, post as nativePost } from '../integrations/native-bridge.js';
+import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -1074,6 +1074,8 @@ function nativeWatchHtml() {
   let c;
   if (!ns) {
     c = { ok: false, ic: 'watch', title: 'Comprobando tu Apple Watch…', text: 'El iPhone está mirando si tienes un reloj emparejado con BestRunning.' };
+  } else if (w?.paired && w?.installed && healthMissingOf(ns)) {
+    c = { ok: false, ic: 'heart', title: 'Apple Watch conectado · falta el permiso del pulso', text: 'Sin permiso de Salud, el reloj no puede leer tu pulso en directo ni guardar la clase en Salud.' };
   } else if (w?.paired && w?.installed) {
     c = { ok: true, ic: 'check', title: 'Apple Watch conectado · pulso en directo', text: 'El reloj se abre solo al empezar la clase: vibra antes de cada cambio, te pasa el pulso en directo y guarda el entreno en Salud.' };
   } else if (w?.paired) {
@@ -1081,18 +1083,18 @@ function nativeWatchHtml() {
   } else {
     c = { ok: false, ic: 'watch', title: 'No hay ningún Apple Watch emparejado', text: 'Puedes entrenar igual. Cuando emparejes uno, instala en él BestRunning para tener el pulso en directo.' };
   }
-  const auth = ns?.health?.auth;
-  const askHealth = ns && auth !== 'granted';
+  // 'prompt': aún sale la hoja de Salud (el botón la enseña) · 'denied': ya se dijo que no a algo (el botón abre Ajustes)
+  const miss = ns ? healthMissingOf(ns) : null;
   return `<section class="card st-install${c.ok ? ' is-ok' : ''}">
       <span class="st-install__icon">${icon(c.ic, 28, c.ok ? { stroke: 3 } : undefined)}</span>
       <b class="st-install__title">${esc(c.title)}</b>
       <p>${esc(c.text)}</p>
     </section>
-    ${askHealth ? `<div class="st-group">
-      <button type="button" class="btn btn--primary btn--lg btn--block" data-st="health-auth">${icon('heart', 18)}<span>Permitir acceso a Salud</span></button>
-      <p class="st-note">${auth === 'denied'
-        ? 'Salud no deja a BestRunning guardar tus entrenos. Puedes cambiarlo en Ajustes › Salud › Acceso a datos y dispositivos › BestRunning.'
-        : 'Para guardar cada clase en Salud como carrera en interior, con pulso, distancia y calorías.'}</p>
+    ${miss ? `<div class="st-group">
+      <button type="button" class="btn btn--primary btn--lg btn--block" data-st="health-auth">${icon('heart', 18)}<span>${miss === 'denied' ? 'Abrir Ajustes' : 'Permitir acceso a Salud'}</span></button>
+      <p class="st-note">${miss === 'denied'
+        ? 'Salud no deja a BestRunning leer tu pulso o guardar tus entrenos. En Ajustes: Apps › Salud › Acceso a datos y dispositivos › BestRunning › Activar todo.'
+        : 'Para ver tu pulso en directo en el reloj y guardar cada clase en Salud como carrera en interior, con pulso, distancia y calorías. Toca «Activar todo».'}</p>
     </div>` : ''}`;
 }
 

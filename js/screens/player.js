@@ -18,7 +18,7 @@ import { createEngine, restoreEngine, buildSession } from '../player/engine.js';
 import { requestWakeLock, releaseWakeLock, isWakeLockSupported } from '../player/wakelock.js';
 import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, setPosition } from '../player/media-session.js';
 import { logoDataUrl } from '../integrations/share-card.js';
-import { attachPlayer, isNative } from '../integrations/native-bridge.js';
+import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 
 const CAT_NAMES = {
@@ -397,6 +397,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     onHr: () => { if (liveMounted()) renderHr(); },
   });
   disposers.push(() => nb.detach());
+  let healthListening = false;
+  // audio-engine.js no consigue despertar el audio (3 intentos): que se sepa, y el siguiente toque lo reintenta
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    listen(window, 'br:audio-stuck', () => {
+      if (!disposed && engine) notify('Sin sonido: toca la pantalla para recuperarlo', { icon: 'speaker', duration: 6000 });
+    });
+  }
 
   if (snap) {
     if (Array.isArray(snap.musicTracks)) musicTracks.push(...snap.musicTracks.filter((x) => typeof x === 'string'));
@@ -479,9 +486,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
         ? { ic: 'watch', html: 'El reloj se abre solo al empezar' }
         : st.integrations?.watchReminder !== false
           ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
-      // Con «Mi música» la sesión de audio debe mezclarse (Ambient en iOS): la voz obedece al modo silencio
-      // (en la app nativa no: el iPhone pone la sesión de audio para que el modo silencio no calle la clase)
-      appMusic || isNative()
+      // Con «Mi música» la sesión de audio debe mezclarse con Spotify (Ambient en iOS): la voz obedece al modo
+      // silencio, también en la app nativa (WebKit lleva la sesión de la página; la app no la toca)
+      appMusic
         ? { ic: 'speaker', html: `Sube el volumen: te aviso <b>${lead} s</b> antes de cada cambio` }
         : { ic: 'speaker', html: `Sube el volumen y <b>quita el modo silencio</b>: con tu música, la voz del coach lo respeta` },
       workout.isTest
@@ -528,6 +535,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
                 </button></li>`).join('')}
             </ul>
             ${readyMusicHtml()}
+            ${readyHealthHtml()}
             </div>
           </div>
           <div class="pl-ready__cta">
@@ -549,7 +557,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
         b.setAttribute('aria-pressed', String(on));
         haptic(on ? 'selection' : 'light');
       } else if (act === 'start') onStartTap();
-      else if (act === 'music-ready') {
+      else if (act === 'health') {
+        // La hoja de Salud si aún sale; si ya se dijo que no, el iPhone abre Ajustes (lo decide la app nativa)
+        haptic('medium');
+        if (!nativePost('health.authorize', {})) toast('No se ha podido abrir el permiso de Salud', { kind: 'error' });
+      } else if (act === 'music-ready') {
         // Solo para este entreno (Perfil → Música guarda la preferencia): nunca se apaga «para siempre» sin avisar
         musicOn = !musicOn;
         haptic('selection');
@@ -560,6 +572,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // pesado del hilo principal no cae en la cuenta 3-2-1 ni en los primeros segundos de carrera
     later(initScene, 450);
     nb.ready();
+    if (!healthListening && isNative()) {
+      // El permiso de Salud cambia (hoja respondida, vuelta de Ajustes): se repinta solo ese aviso
+      healthListening = true;
+      listen(window, 'br:native-status', () => {
+        const slot = root?.querySelector?.('[data-slot="health"]');
+        if (slot && !engine && !disposed) slot.outerHTML = readyHealthHtml();
+      });
+    }
     // «Empezar» desde el reloj (app nativa): la clase arranca sola, una vez
     if (query?.autostart === '1' && isNative() && !autoStarted) {
       autoStarted = true;
@@ -575,6 +595,19 @@ export function mount(el, { params = {}, query = {} } = {}) {
       const clean = h.replace(/([?&])autostart=1(&|$)/, (m, a, b) => (b ? a : '')).replace(/[?&]$/, '');
       if (clean !== h) history.replaceState(history.state, '', clean || '#/today');
     } catch { /* sin historial */ }
+  }
+
+  /** App nativa con el reloj: si falta el permiso de Salud, el pulso del reloj no llegará; aquí se dice y se arregla. */
+  function readyHealthHtml() {
+    const miss = nb.healthMissing?.();
+    if (!miss) return '<div data-slot="health" hidden></div>';
+    const small = miss === 'prompt'
+      ? 'Toca para dar permiso: sin él, el reloj no lee tu pulso'
+      : 'Toca para abrir Ajustes y luego: Apps › Salud › Acceso a datos y dispositivos › BestRunning › Activar todo';
+    return `<div data-slot="health"><button type="button" class="mu-ready mu-ready--health" data-act="health" style="--i:7">
+        <span class="mu-ready__ic">${icon('heart', 18)}</span>
+        <span class="mu-ready__txt"><b>Permite el pulso en Salud</b><small>${esc(small)}</small></span>
+      </button></div>`;
   }
 
   function readyMusicHtml() {

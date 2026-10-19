@@ -58,12 +58,14 @@ import { hrFromSamples, hrFieldsFrom, hrAtLevels, hasHrSeries, HR_MIN, HR_MAX } 
  * @typedef {{ page: string, fg: boolean, classActive: boolean }} PhoneStatusData
  * @typedef {{ paired: boolean, installed: boolean, reachable: boolean, link: string, workout: string,
  *   run?: string }} WatchInfo
- * @typedef {{ auth: string }} HealthInfo
+ * @typedef {{ auth: string, hr?: string }} HealthInfo   auth: guardar entrenos · hr: guardar pulso (el pulso en directo del
+ *   reloj lo necesita). unknown (falta la hoja de Salud) | granted | denied. `hr` no viene en las builds 1–3 del iPhone.
  * @typedef {{ savedAt: number, sessions: number, bytes: number }} BackupInfo
  * @typedef {{ proto?: number, app?: string, watch: WatchInfo, health: HealthInfo, backup?: BackupInfo }} NativeStatusData
  * @typedef {{ savedAt: number, sessions: number, json: string }} BackupData
  * @typedef {{ ref: string, savedAt: number, json: string }} BackupPayload
  * @typedef {{ type: string }} AudioSessionData
+ * @typedef {{ reason: string }} AudioKickData   active | route | reset | interruption (iPhone → página)
  */
 
 export const PROTO = 1;
@@ -182,8 +184,21 @@ const noop = () => {};
 const NOOP_ADAPTER = Object.freeze({
   ready: noop, prepare: noop, resumed: noop, started: noop, countdown: noop, tick: noop, segment: noop, event: noop,
   record: noop, hrFields: () => ({}), finish: noop, discard: noop, samples: () => [], restore: noop, liveHr: () => null,
-  watchManaged: () => false, detach: noop,
+  watchManaged: () => false, healthMissing: () => null, detach: noop,
 });
+
+/**
+ * ¿Falta permiso de Salud para el pulso en directo del reloj? (estado de native.status)
+ * → null (todo bien o no se sabe), 'prompt' (aún sale la hoja de Salud) o 'denied' (hay que activarlo en Ajustes).
+ */
+export function healthMissingOf(st) {
+  const h = st?.health;
+  if (!h) return null;
+  const vals = [h.auth, h.hr].filter((v) => v != null);
+  if (vals.includes('unknown')) return 'prompt';
+  if (vals.includes('denied')) return 'denied';
+  return null;
+}
 
 /* ═════════════════ Fábrica ═════════════════ */
 
@@ -358,6 +373,10 @@ export function createNativeBridge(opts = {}) {
       case 'hr':
         onHr(data);
         return 'hr';
+      case 'audio.kick':
+        // El iPhone avisa de algo que pudo dejar mudo el audio (audio-engine.js lo comprueba y lo despierta)
+        dispatch('br:audio-kick', { reason: String(data.reason || '') });
+        return 'audio';
       case 'cmd':
         onCmd(env, data);
         return 'cmd';
@@ -1206,6 +1225,10 @@ export function createNativeBridge(opts = {}) {
       watchManaged() {
         const w = status?.watch;
         return !!(w && w.paired && w.installed);
+      },
+      /** Con el reloj en la app: ¿falta permiso de Salud para su pulso? null | 'prompt' | 'denied' */
+      healthMissing() {
+        return api.watchManaged() ? healthMissingOf(status) : null;
       },
       /** El reproductor se desmonta: state idle y fuera. */
       detach() {
