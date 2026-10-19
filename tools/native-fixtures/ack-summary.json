@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "ack",
+  "seq": 3,
+  "boot": "jz2wv3s",
+  "at": 1792387728823,
+  "data": {
+    "ref": "workout.summary",
+    "id": "sum-2026-10-19T04:28:48.823Z",
+    "ok": true
+  }
+}

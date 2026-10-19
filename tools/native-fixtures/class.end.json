@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "type": "class.end",
+  "seq": 613,
+  "boot": "jqqyzex",
+  "at": 1792387636823,
+  "data": {
+    "run": "2026-10-19T05:25:16.823Z",
+    "classId": "test-tpl~9~1~100",
+    "startedAt": "2026-10-19T05:25:16.823Z",
+    "endedAt": "2026-10-19T05:27:16.823Z",
+    "saved": true,
+    "completed": false,
+    "finishedEarly": true,
+    "elapsedSec": 120,
+    "pausedSec": 0,
+    "km": 0.31,
+    "kcal": 23,
+    "avgKmh": 9.3,
+    "maxKmh": 12,
+    "sessionId": "ses_mvf38sch00",
+    "record": {
+      "beaten": false,
+      "m": -590
+    }
+  }
+}

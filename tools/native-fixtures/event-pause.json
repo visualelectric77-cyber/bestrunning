@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 100,
+  "boot": "j47o5z0",
+  "at": 1792388191923,
+  "data": {
+    "name": "pause"
+  }
+}

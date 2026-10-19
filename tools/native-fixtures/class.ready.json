@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "type": "class.ready",
+  "seq": 3,
+  "boot": "jba6a33",
+  "at": 1792386170123,
+  "data": {
+    "classId": "test-tpl~9~1~100",
+    "title": "Clase de prueba",
+    "category": "endurance",
+    "categoryLabel": "Resistencia",
+    "categoryColor": "#30D158",
+    "minutes": 9,
+    "totalSec": 540,
+    "firstKmh": 6.5,
+    "firstZone": "warmup",
+    "recordKm": 0.9
+  }
+}

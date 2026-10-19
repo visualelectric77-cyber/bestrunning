@@ -340,6 +340,9 @@
   animation-delay: calc(920ms + var(--i, 0) * 110ms);
 }
 .ob-features b { color: var(--text); font-weight: 650; }
+/* App nativa: traer tus datos (la copia exportada desde Safari o la que guarda el iPhone) */
+.ob-native { display: grid; gap: 8px; width: 100%; max-width: 400px; margin-top: 14px; animation: obRise 640ms var(--ease-spring) 1.3s both; }
+.ob-native__btn { position: relative; gap: 8px; }
 .ob-features__icon {
   flex: none;
   display: grid;
@@ -2795,6 +2798,7 @@ body.is-fullscreen .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12p
   .ob-brand,
   .ob-tagline,
   .ob-features li,
+  .ob-native,
   .ob-panel,
   .ob-rise,
   .ob-next,

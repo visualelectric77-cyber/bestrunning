@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 72,
+  "boot": "jznd6st",
+  "at": 1792386427323,
+  "data": {
+    "name": "countdown",
+    "phase": "segment",
+    "n": 3,
+    "seg": 1,
+    "dir": "up",
+    "kmh": 12,
+    "goAt": 1792386430323
+  }
+}

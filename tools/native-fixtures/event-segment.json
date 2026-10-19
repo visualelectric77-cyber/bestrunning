@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 128,
+  "boot": "jfyhn68",
+  "at": 1792386365873,
+  "data": {
+    "name": "segment",
+    "i": 2,
+    "prev": 1,
+    "reason": "skip",
+    "zone": "fast",
+    "kmh": 13,
+    "dir": "up"
+  }
+}

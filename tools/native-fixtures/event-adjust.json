@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 102,
+  "boot": "j47o5z0",
+  "at": 1792388191923,
+  "data": {
+    "name": "adjust",
+    "i": 1,
+    "zone": "run",
+    "kmh": 12.1,
+    "delta": 0.1,
+    "total": 0.1
+  }
+}

@@ -1,5 +1,5 @@
 // BestRunning · bienvenida y configuración inicial en 5 pasos (pantalla completa).
-import { getState, setState } from '../core/store.js';
+import { getState, setState, importState } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import { icon, stepper, segmented, toggle, toast, celebrate } from '../ui/components.js';
@@ -12,6 +12,7 @@ import * as speech from '../audio/speech.js';
 import * as audioEngine from '../audio/audio-engine.js';
 import { PACK_ID, composeCue } from '../audio/voice-pack.js';
 import { todayKey, mondayOf, fmt, esc, clamp, round1 } from '../core/utils.js';
+import { isNative, nativeStatus, requestNativeBackup } from '../integrations/native-bridge.js';
 
 const STEPS = ['welcome', 'about', 'speeds', 'week', 'voice'];
 const EVA_KEY = 'pack:eva'; // fila de la voz grabada en la lista de voces
@@ -139,6 +140,7 @@ export function mount(el) {
   let hrAuto = !p0.hrMax || p0.hrMax === hrMaxFromAge(age0);
   let step = 0;
   let busy = false;
+  let nativeBusy = false;     // app nativa: importando o recuperando una copia
   let finishing = false;
   let unsubVoices = null;
   const timers = new Set();
@@ -188,7 +190,57 @@ export function mount(el) {
         <li style="--i:1"><span class="ob-features__icon">${icon('calendar', 20)}</span><span><b>Plan semanal</b> variado que se adapta a ti</span></li>
         <li style="--i:2"><span class="ob-features__icon">${icon('arrow-up', 20)}</span><span><b>Más rápido y más tiempo</b>, semana a semana</span></li>
       </ul>
+      ${isNative() ? `<div class="ob-native" data-ob-native>${nativeDataHtml()}</div>` : ''}
     </div>`;
+  }
+
+  /* App nativa: traer los datos de la web de Safari (copia exportada) o la copia que guarda el propio iPhone. */
+  function nativeDataHtml() {
+    const st = getState();
+    const empty = !st.onboarded && !(Array.isArray(st.history) && st.history.length);
+    const b = nativeStatus()?.backup;
+    const n = Number(b?.sessions) || 0;
+    const when = Number(b?.savedAt) > 0 ? fmt.dateShort(todayKey(new Date(Number(b.savedAt)))) : '';
+    const restore = empty && n > 0
+      ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span>Recuperar tus datos de este iPhone (${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'sesión' : 'sesiones'})</span></button>`
+      : '';
+    return `${restore}
+      <label class="btn btn--ghost btn--block ob-native__btn" for="ob-import">${icon('download', 18)}<span>Ya usaba BestRunning: importar copia</span>
+        <input id="ob-import" class="st-file" type="file" accept="application/json,.json"></label>`;
+  }
+
+  async function importCopy(input) {
+    if (nativeBusy) return;
+    nativeBusy = true;
+    let ok = false;
+    try {
+      const m = await import('./settings.js');
+      ok = await m.importBackup(input);
+    } catch { ok = false; }
+    nativeBusy = false;
+    if (ok) navigate('#/today', { replace: true });
+  }
+
+  async function restoreNative(btn) {
+    if (nativeBusy) return;
+    nativeBusy = true;
+    btn?.setAttribute('aria-disabled', 'true');
+    haptic('medium');
+    let ok = false;
+    try {
+      const { json } = await requestNativeBackup();
+      ok = !!json && importState(json);
+    } catch { ok = false; }
+    nativeBusy = false;
+    btn?.removeAttribute('aria-disabled');
+    if (ok) {
+      haptic('success');
+      toast('Tus datos están de vuelta. ¡A correr!', { icon: 'check', kind: 'success' });
+      navigate('#/today', { replace: true });
+    } else {
+      haptic('error');
+      toast('No he podido recuperar la copia de este iPhone', { kind: 'error' });
+    }
   }
 
   function hrMaxSlot() {
@@ -412,7 +464,9 @@ export function mount(el) {
         <p class="ob-note" data-chat-desc>${esc(CHAT_DESC[a.chattiness] || CHAT_DESC.normal)}</p>
         <div class="card ob-watch">
           <div class="ob-watch__head"><span class="ob-watch__icon">${icon('watch', 22)}</span><b>Tu Apple Watch también cuenta</b></div>
-          <p>Al empezar cada clase, inicia en el reloj el entrenamiento <b>«Cinta de correr»</b>. Una web no puede leer el pulso en directo, así que al terminar lo importamos del Watch con un Atajo y verás tu pulso sobre el gráfico de la clase.</p>
+          <p>${isNative()
+            ? 'El reloj se abre solo al empezar la clase y te pasa el pulso en directo.'
+            : 'Al empezar cada clase, inicia en el reloj el entrenamiento <b>«Cinta de correr»</b>. Una web no puede leer el pulso en directo, así que al terminar lo importamos del Watch con un Atajo y verás tu pulso sobre el gráfico de la clase.'}</p>
           <div class="ob-watch__row"><span>Recordármelo al empezar</span><span class="spacer"></span>${toggle({ id: 'ob-watch', checked: draft.integrations.watchReminder !== false, attrs: 'aria-label="Recordarme iniciar el entrenamiento en el Apple Watch"' })}</div>
         </div>
       </div>
@@ -696,6 +750,8 @@ export function mount(el) {
   /* ── Eventos ── */
 
   const onClick = (e) => {
+    const rb = e.target.closest('[data-ob-restore]');
+    if (rb) return restoreNative(rb);
     if (e.target.closest('.ob-next')) return next();
     if (e.target.closest('.ob-back')) {
       haptic('light');
@@ -785,6 +841,8 @@ export function mount(el) {
       haptic('selection');
     } else if (t.id === 'ob-time') {
       if (/^\d{2}:\d{2}/.test(t.value)) draft.schedule.reminderTime = t.value.slice(0, 5);
+    } else if (t.id === 'ob-import') {
+      importCopy(t);
     }
   };
 
@@ -806,6 +864,12 @@ export function mount(el) {
 
   ob.addEventListener('click', onClick);
   ob.addEventListener('change', onChange);
+  // App nativa: la copia del iPhone puede anunciarse (native.hello) con la bienvenida ya en pantalla
+  const onNativeStatus = () => {
+    const slot = stage.querySelector('[data-ob-native]');
+    if (slot && !nativeBusy) slot.innerHTML = nativeDataHtml();
+  };
+  if (isNative()) window.addEventListener('br:native-status', onNativeStatus);
   ob.addEventListener('stepper:input', onChange); // valores en vivo mientras se mantiene pulsado
   ob.addEventListener('input', onInput);
   ob.addEventListener('keydown', onKey);
@@ -821,6 +885,7 @@ export function mount(el) {
     unsubVoices?.();
     timers.forEach((t) => clearTimeout(t));
     timers.clear();
+    window.removeEventListener('br:native-status', onNativeStatus);
     ob.removeEventListener('click', onClick);
     ob.removeEventListener('change', onChange);
     ob.removeEventListener('stepper:input', onChange);

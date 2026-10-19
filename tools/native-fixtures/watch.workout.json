@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "watch.workout",
+  "seq": 79,
+  "boot": "w3f9a0",
+  "at": 1760850731000,
+  "data": {
+    "state": "running",
+    "run": "2026-10-19T05:02:11.123Z",
+    "startedAt": 1760850127000,
+    "source": "phone"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "cmd",
+  "seq": 73,
+  "boot": "w3f9a0",
+  "at": 1760850731000,
+  "id": "w3f9a0-20",
+  "data": {
+    "name": "intensity",
+    "delta": 0.1,
+    "from": "watch"
+  }
+}

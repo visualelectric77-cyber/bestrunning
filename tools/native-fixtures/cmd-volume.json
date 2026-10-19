@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "cmd",
+  "seq": 74,
+  "boot": "w3f9a0",
+  "at": 1760850731000,
+  "id": "w3f9a0-21",
+  "data": {
+    "name": "volume",
+    "value": 0.65,
+    "from": "crown"
+  }
+}

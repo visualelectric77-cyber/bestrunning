@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "cmd",
+  "seq": 72,
+  "boot": "w3f9a0",
+  "at": 1760850731000,
+  "id": "w3f9a0-19",
+  "data": {
+    "name": "nextSong",
+    "from": "watch"
+  }
+}

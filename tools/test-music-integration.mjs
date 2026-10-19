@@ -378,7 +378,9 @@ section('pantallas · carga en Node');
   const player = await import(pathToFileURL(join(ROOT, 'js/screens/player.js')).href);
   const settings = await import(pathToFileURL(join(ROOT, 'js/screens/settings.js')).href);
   ok(typeof player.mount === 'function' && Object.keys(player).length === 1, 'player.js exporta solo mount');
-  ok(typeof settings.mount === 'function' && Object.keys(settings).length === 1, 'settings.js exporta solo mount');
+  // importBackup: también lo usa la bienvenida de la app nativa («Ya usaba BestRunning: importar copia»)
+  ok(typeof settings.mount === 'function' && typeof settings.importBackup === 'function'
+    && Object.keys(settings).sort().join(',') === 'importBackup,mount', 'settings.js exporta solo mount (e importBackup)');
   const src = readFileSync(join(ROOT, 'js/screens/settings.js'), 'utf8');
   ok(/music:\s*\{\s*title:\s*'Música',\s*icon:\s*'music'/.test(src), 'sección Música con icono music');
   ok(src.includes("items: ['audio', 'music', 'watch']"), 'Música en la lista principal');

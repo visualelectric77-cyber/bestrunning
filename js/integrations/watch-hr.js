@@ -1,4 +1,5 @@
-// BestRunning · pulso del Apple Watch después del entreno, vía un Atajo de iOS (SPEC §12).
+// BestRunning · pulso del Apple Watch después del entreno, vía un Atajo de iOS (SPEC §12). Con la app nativa el pulso
+// llega en directo (js/integrations/native-bridge.js) y se calcula con el mismo hrFromSamples.
 // Una web no puede leer HealthKit: el Atajo «BestRunning FC» recibe { v, id, start, end }, busca en Salud las
 // muestras de frecuencia cardiaca de esa ventana y devuelve { v, id, avg, max, min, csv } por el portapapeles
 // (el Atajo generado v2.2 manda, en vez de csv, las listas paralelas t / bpm / n: ver zipLists).
@@ -661,6 +662,30 @@ export function parseWatchHr(text, session) {
     return fail(`Solo hay ${inWin.length} ${inWin.length === 1 ? 'lectura' : 'lecturas'} de pulso en esta sesión: demasiado pocas. ¿Llevabas el entreno «Cinta de correr» iniciado en el Watch?`);
   }
 
+  const res = hrFromSamples(inWin, session);
+  if (!res) return fail('No hemos podido leer esos datos.');
+  return { ok: true, ...res, source, warnings };
+}
+
+/**
+ * Pulso de una sesión a partir de lecturas sueltas: [{ ms, bpm }] (o [[ms, bpm]], como las manda el reloj).
+ * Mismo cálculo para el Atajo (parseWatchHr) y para el pulso en directo de la app nativa: ventana de la sesión
+ * (±5 s), remuestreo a 10 s en tiempo de clase (wallToClassMapper; si quedan < 3 puntos, en tiempo de reloj),
+ * media de la serie y máxima/mínima de las lecturas.
+ * → { hrAvg, hrMax, hrMin, hrSeries, samples } | null si quedan menos de 3 lecturas.
+ */
+export function hrFromSamples(samples, session) {
+  const win = watchHrWindow(session);
+  let inWin = (Array.isArray(samples) ? samples : [])
+    .map((p) => (Array.isArray(p) ? { ms: Number(p[0]), bpm: Number(p[1]) } : { ms: Number(p?.ms), bpm: Number(p?.bpm) }))
+    .filter((p) => Number.isFinite(p.ms) && Number.isFinite(p.bpm) && p.bpm >= HR_MIN && p.bpm <= HR_MAX)
+    .sort((a, b) => a.ms - b.ms);
+  if (win) {
+    const lo = win.startMs - 5000;
+    const hi = win.endMs + 5000;
+    inWin = inWin.filter((p) => p.ms >= lo && p.ms <= hi);
+  }
+  if (inWin.length < 3) return null;
   // Remuestreo a intervalos de 10 s en TIEMPO DE CLASE (el mismo eje que el perfil y la traza):
   // las pausas no desplazan la línea y los tramos saltados no reciben pulso ajeno.
   const t0 = win ? win.startMs : inWin[0].ms;
@@ -687,7 +712,7 @@ export function parseWatchHr(text, session) {
   const hrAvg = Math.round(hrSeries.reduce((a, p) => a + p[1], 0) / hrSeries.length);
   const hrMax = Math.round(Math.max(...vals));
   const hrMin = Math.round(Math.min(...vals));
-  return { ok: true, hrAvg, hrMax, hrMin, hrSeries, samples: inWin.length, source, warnings };
+  return { hrAvg, hrMax, hrMin, hrSeries, samples: inWin.length };
 }
 
 /* ═════════════════ Análisis ═════════════════ */
@@ -840,12 +865,16 @@ export function hrFieldsFrom(result, profile) {
     hrMin: result?.hrMin ?? null,
     hrSeries: series,
     hrZones: series ? hrZoneTimes(series, profile) : null,
+    // Importado (Atajo): sin origen del reloj; nº de lecturas para la regla «solo si ≥» de la app nativa.
+    // El pulso del reloj (native-bridge) pisa estos dos con los suyos.
+    hrSource: null,
+    hrSamples: Number.isFinite(result?.samples) ? result.samples : null,
   };
 }
 
-/** Campos a cero para «Quitar pulso». */
+/** Campos a cero para «Quitar pulso» (también el origen y el nº de lecturas). */
 export function hrFieldsCleared() {
-  return { hrAvg: null, hrMax: null, hrMin: null, hrSeries: null, hrZones: null };
+  return { hrAvg: null, hrMax: null, hrMin: null, hrSeries: null, hrZones: null, hrSource: null, hrSamples: null };
 }
 
 /* ═════════════════ Gráficos (cadenas SVG/HTML) ═════════════════ */

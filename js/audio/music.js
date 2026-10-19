@@ -154,6 +154,7 @@ export function createMusicEngine(opts = {}) {
   const deckMem = new Map();  // trackId → posición al dejarla (memoria de discos real, con nuestros rates)
   const subst = new Map();    // trackId que no carga → sustituta del mismo tramo
   const cueCache = new Map();
+  const skipped = new Set();  // pistas saltadas a mano («Siguiente canción» del reloj): cuentan como si no cargaran
   // Reloj del contexto atascado ('running' sin avanzar) y registro para el panel de depuración
   let lastCtxT = -1;
   let lastMoveW = 0;
@@ -709,7 +710,7 @@ export function createMusicEngine(opts = {}) {
     let best = null;
     let bestS = -Infinity;
     for (const x of tracks.values()) {
-      if (!x || x.id === id || store.isFailed(x.id) || !(Number(x.bpm) > 40) || !(Number(x.duration) > 30)) continue;
+      if (!x || x.id === id || isOut(x.id) || !(Number(x.bpm) > 40) || !(Number(x.duration) > 30)) continue;
       let s = -Math.abs(Math.log(trackGrid(x).bpm / bpm)) * 20;
       if (tier && (x.tier === tier || x.curatedTier === tier)) s += 10;
       if (pool.includes(x.tier) || pool.includes(x.curatedTier)) s += 3;
@@ -720,10 +721,15 @@ export function createMusicEngine(opts = {}) {
     return best ? best.id : null;
   }
 
+  /** Pista que no debe sonar: no se pudo descargar/decodificar o el usuario la ha saltado. */
+  function isOut(id) {
+    return store.isFailed(id) || skipped.has(id);
+  }
+
   function resolveId(id, zone) {
-    for (let guard = 0; guard < 8 && store.isFailed(id); guard++) {
+    for (let guard = 0; guard < 8 && isOut(id); guard++) {
       let alt = subst.get(id);
-      if (!alt || store.isFailed(alt)) {
+      if (!alt || isOut(alt)) {
         alt = pickAlt(id, zone);
         if (!alt) return id;
         subst.set(id, alt);
@@ -1690,6 +1696,23 @@ export function createMusicEngine(opts = {}) {
   }
 
   /**
+   * «Siguiente canción»: la pista que suena se trata como si no cargara (en esta clase no vuelve a sonar) y la mezcla
+   * pasa con el fundido rápido de un salto a la sustituta del mismo tramo. Devuelve false si no hay nada sonando.
+   */
+  function skipTrack() {
+    try {
+      if (destroyed || !plan || !enabled || (state !== 'playing' && state !== 'paused')) return false;
+      const v = state === 'paused' ? held : audible();
+      const id = v?.track?.id;
+      if (!id) return false;
+      skipped.add(id);
+      cueCache.clear();
+      seek(nowT());
+      return true;
+    } catch { return false; }
+  }
+
+  /**
    * AnalyserNode del espectro real de la mezcla (escena 3D audio-reactiva, §14.1-2). Se engancha en derivación tras
    * musicGain (no altera el sonido: el analizador no tiene salidas). null si la música está apagada o sin Web Audio.
    */
@@ -1810,6 +1833,6 @@ export function createMusicEngine(opts = {}) {
 
   return {
     unlock, load, start, pause, resume, seek, update, setVolume, setEnabled, setEffects, setDucking, stop,
-    nowPlaying, beatPhase, getAnalyser, status, destroy,
+    nowPlaying, beatPhase, getAnalyser, status, destroy, skipTrack,
   };
 }

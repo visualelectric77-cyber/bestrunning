@@ -8,7 +8,7 @@
 // + siguiente + mini perfil), una línea de métricas y «Sonando», «bugs» de momento arriba a la derecha y controles
 // que se ocultan mientras corres. Sin máscaras, sin desenfoques, sin destellos (§15, §15.3).
 import { fmt, esc, clamp, hashStr, todayKey } from '../core/utils.js';
-import { ZONES, hrTargetForZone, fmtPaceKmh } from '../training/levels.js';
+import { ZONES, hrTargetForZone, fmtPaceKmh, hrZones, hrMaxFromAge } from '../training/levels.js';
 import { getState, setState, saveActiveSession, loadActiveSession } from '../core/store.js';
 import { navigate, back } from '../core/router.js';
 import { icon, profileChart, openSheet, toast, confirmDialog, actionSheet } from '../ui/components.js';
@@ -18,6 +18,8 @@ import { createEngine, restoreEngine, buildSession } from '../player/engine.js';
 import { requestWakeLock, releaseWakeLock, isWakeLockSupported } from '../player/wakelock.js';
 import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, setPosition } from '../player/media-session.js';
 import { logoDataUrl } from '../integrations/share-card.js';
+import { attachPlayer, isNative } from '../integrations/native-bridge.js';
+import { hrZoneOf } from '../integrations/watch-hr.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -264,6 +266,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
   const timeline = [];
   let ghostSide = 0;          // -1 detrás · 0 desconocido · +1 delante (histéresis ±5 m) → bug RÉCORD
   let lastRecordBug = -1e9;
+  let ghostBeaten = false;    // ya has superado la distancia de tu mejor marca (aviso único al reloj)
+  // App nativa (iPhone + Apple Watch, js/integrations/native-bridge.js): en Safari, un adaptador vacío
+  let nb = attachPlayer(null);
+  let autoStarted = false;    // ?autostart=1 (orden «Empezar» del reloj): solo una vez
   // Música DJ
   let music = null;           // motor (js/audio/music.js)
   let musicUnlocked = false;
@@ -351,11 +357,39 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
   }
 
+  // Reloj: estado de la clase en directo, sus órdenes (cmd) y su pulso. Inerte fuera de la app nativa.
+  nb = attachPlayer({
+    workout,
+    planDate,
+    getState,
+    getEngine: () => engine,
+    extras: () => ({
+      muted, musicOn, appMusic, countingDown, finale, finished: finishedHandled,
+      np: musicStarted ? mcall('nowPlaying') : null, vol: sndPend?.music, sub: refs.sub?.textContent || '',
+      ghost, ghostSide, canSkip: typeof music?.skipTrack === 'function',
+    }),
+    commands: {
+      start: () => onStartTap(),
+      toggle: () => onToggle(),
+      skip: (dir) => doSkip(dir, true),
+      endTest: () => doEndTest(),
+      finish: () => { engine?.finish(); },
+      discard: () => discard(),
+      voice: () => toggleMute(null),
+      nextSong: () => mcall('skipTrack'),
+      adjust: (dir) => doAdjust(dir),
+      volume: (v) => { applySound('music', v * 100); scheduleSoundSave(); },
+    },
+    onHr: () => { if (liveMounted()) renderHr(); },
+  });
+  disposers.push(() => nb.detach());
+
   if (snap) {
     if (Array.isArray(snap.musicTracks)) musicTracks.push(...snap.musicTracks.filter((x) => typeof x === 'string'));
     if (Array.isArray(snap.skips)) skips.push(...snap.skips.filter((g) => Array.isArray(g) && g.length >= 2));
     if (Array.isArray(snap.timeline)) timeline.push(...snap.timeline.filter((e) => Array.isArray(e) && e.length >= 2));
     engine = restoreEngine(snap, workout, callbacks);
+    nb.restore(snap.hrLive);
     const st = engine.getState();
     // Desde la última instantánea hasta que se reanude, nada corre (el pulso de ese hueco no cuenta)
     if (st.status !== 'finished') mark(false, st.totalElapsed, Number(snap.savedAt) || Date.now());
@@ -369,7 +403,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
     renderLive();
     applySegment(st, { reason: 'restore', silent: true });
     update(st);
+    nb.resumed(st);
     notify('Retomamos donde lo dejaste · pulsa ▶ cuando estés listo', { icon: 'refresh', duration: 3600 });
+    // «Empezar» desde el reloj con la clase a medias: se reanuda sola (con su cuenta 3-2-1)
+    if (query?.autostart === '1' && isNative() && !autoStarted) {
+      autoStarted = true;
+      dropAutostart();
+      later(onToggle, 600);
+    }
   } else {
     renderReady();
   }
@@ -416,12 +457,17 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const cat = workout.category || 'intervals';
     const minutes = workout.minutes || Math.round((workout.totalSec || 0) / 60);
     const lead = Number(st.treadmill?.announceLead) || 10;
+    // App nativa con el reloj instalado: el entreno del Watch lo abre la propia app al empezar
+    const watchAuto = nb.watchManaged();
     const checks = [
       { ic: 'gauge', html: `Sube a la cinta y ponla a <b class="num">${firstSpeed} km/h</b>` },
-      st.integrations?.watchReminder !== false
-        ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
+      watchAuto
+        ? { ic: 'watch', html: 'El reloj se abre solo al empezar' }
+        : st.integrations?.watchReminder !== false
+          ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
       // Con «Mi música» la sesión de audio debe mezclarse (Ambient en iOS): la voz obedece al modo silencio
-      appMusic
+      // (en la app nativa no: el iPhone pone la sesión de audio para que el modo silencio no calle la clase)
+      appMusic || isNative()
         ? { ic: 'speaker', html: `Sube el volumen: te aviso <b>${lead} s</b> antes de cada cambio` }
         : { ic: 'speaker', html: `Sube el volumen y <b>quita el modo silencio</b>: con tu música, la voz del coach lo respeta` },
       workout.isTest
@@ -499,6 +545,22 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // La escena 3D (renderer, escenario, shaders) se crea YA, oculta, mientras lees la preparación: así el trabajo
     // pesado del hilo principal no cae en la cuenta 3-2-1 ni en los primeros segundos de carrera
     later(initScene, 450);
+    nb.ready();
+    // «Empezar» desde el reloj (app nativa): la clase arranca sola, una vez
+    if (query?.autostart === '1' && isNative() && !autoStarted) {
+      autoStarted = true;
+      dropAutostart();
+      later(onStartTap, 600);
+    }
+  }
+
+  /** Quita ?autostart=1 de la URL (una recarga no debe volver a arrancar la clase). */
+  function dropAutostart() {
+    try {
+      const h = String(location.hash || '');
+      const clean = h.replace(/([?&])autostart=1(&|$)/, (m, a, b) => (b ? a : '')).replace(/[?&]$/, '');
+      if (clean !== h) history.replaceState(history.state, '', clean || '#/today');
+    } catch { /* sin historial */ }
   }
 
   function readyMusicHtml() {
@@ -1389,8 +1451,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
         if (ghostSide === -1 && performance.now() - lastRecordBug > 45000) {
           lastRecordBug = performance.now();
           showBug({ lbl: 'Récord', val: `+${d} m`, color: GOLD, kind: 'record' });
+          nb.record('overtake', d);
         }
         ghostSide = 1;
+      }
+      // Superas la distancia total de tu mejor marca (una vez): el reloj enseña «¡Récord!»
+      if (!ghostBeaten && s.distanceKm > ghost.km) {
+        ghostBeaten = true;
+        nb.record('beaten', d);
       }
     }
     if (cache.ghostTxt === txt) return;
@@ -1682,7 +1750,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function keepAwake() {
     requestWakeLock().then((ok) => {
       // Reanudar desde la pantalla de bloqueo (página oculta) siempre falla: lo pedirá wakelock.js al volver a verse
-      if (ok || wakeWarned || disposed || document.visibilityState === 'hidden') return;
+      // En la app nativa la pantalla la mantiene encendida el iPhone (sin aviso)
+      if (ok || wakeWarned || disposed || isNative() || document.visibilityState === 'hidden') return;
       wakeWarned = true;
       // Sin la API (p. ej. abierta por http en la red local, sin HTTPS): en CADA clase, porque con la pantalla
       // bloqueada iOS congela la app y la música se queda repitiendo frase o se corta
@@ -1712,6 +1781,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     countingDown = true;
     try {
       engine = createEngine(workout, callbacks);
+      nb.prepare();
       initMusic();
       renderLive();
       cache.cdShow = true;
@@ -1767,7 +1837,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         ...(st.audio || {}),
         name: st.profile?.name || '',
         announceLead: Number(st.treadmill?.announceLead) || 10,
-        watchReminder: st.integrations?.watchReminder !== false,
+        watchReminder: st.integrations?.watchReminder !== false && !nb.watchManaged(),
         // Comentarios de música (flow/energía) solo mientras suena la mezcla de la app
         music: appMusic && musicOn,
         // Subtítulos de retransmisión (motion.js): la frase que dice el coach, en una línea sobre el lower third
@@ -1796,6 +1866,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     cache.cdShow = true;
     const s = engine.getState();
     const speed = fmt.speed(s.segment?.speed || 0);
+    const phase = s.status === 'ready' ? 'start' : 'resume';
     refs.goLbl.textContent = s.status === 'ready' ? 'Empezamos' : 'Seguimos';
     refs.goHint.textContent = s.status === 'ready' ? 'Pon la cinta a' : 'Vuelve a poner la cinta a';
     refs.goSpeed.textContent = `${speed} km/h`;
@@ -1813,6 +1884,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       const go = refs.goNum;
       go.textContent = n > 0 ? String(n) : '¡Ya!';
       go.classList.toggle('is-go', n <= 0);
+      // Reloj: 3-2-1 con el instante del «¡Ya!» (el primero lo fija)
+      try { nb.countdown(n, phase, k === 0 ? Date.now() + n * 1000 : null); } catch { /* sin puente */ }
       if (n > 0) {
         sceneEvent('countdown', { n });
         doBeep('tick');
@@ -1862,6 +1935,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       try { musicTick(s); } catch (err) { reportOnce(err); }
       guardSession();
     }
+    try { nb.tick(s); } catch (err) { reportOnce(err); }
   }
 
   function reportOnce(err) {
@@ -1906,12 +1980,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
       }
     }
     cache.segSpeed = s.currentSpeed;
+    try { nb.segment(s, info || {}); } catch (err) { reportOnce(err); }
     persist();
   }
 
   function onEvent(type, data) {
     if (disposed) return;
     forwardToScene(type, data);
+    try { nb.event(type, data || {}); } catch (err) { reportOnce(err); }
     if (type === 'km' && !data?.silent) {
       coachCall('say', 'km', { km: data.km, pace: data.pace });
       showBug({ lbl: 'KM', val: data.km, sub: data.pace ? `${data.pace} /km` : '', kind: 'km' });
@@ -2017,7 +2093,6 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!root || !s.segment) return;
     const seg = s.segment;
     const next = s.nextSegment;
-    const st = getState();
     const zc = zoneColor(seg.zone);
     root.dataset.zone = seg.zone;
     setVar('--zc', zc);
@@ -2052,11 +2127,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     cache.repKey = seg.rep?.n ? `${seg.block || ''}:${seg.rep.i}/${seg.rep.n}` : '';
     setText('incline', seg.incline > 0 ? `${fmt.dec1(seg.incline)} %` : '');
 
-    try {
-      const hr = hrTargetForZone(seg.zone, st.profile || {});
-      setText('hrZone', `Z${hr.zone}`);
-      setText('hr', `${hr.min}–${hr.max}`);
-    } catch { setText('hrZone', ''); setText('hr', '–'); }
+    renderHr(seg);
 
     renderNext(s);
 
@@ -2077,6 +2148,38 @@ export function mount(el, { params = {}, query = {} } = {}) {
       subtitle: `${zoneName(seg.zone)} · ${fmt.speed(seg.speed)} km/h`,
       artwork,
     });
+  }
+
+  /**
+   * FC del HUD: con la app nativa y el reloj, tu pulso en directo (lectura de hace ≤ 15 s) y su zona de FC; si no,
+   * el rango objetivo del tramo (lo de siempre en Safari).
+   */
+  function renderHr(seg = engine?.getState().segment) {
+    if (!root || !refs.hr) return;
+    const live = nb.liveHr();
+    if (live) {
+      const p = getState().profile || {};
+      let z = 0;
+      try { z = hrZoneOf(live.bpm, p); } catch { z = 0; }
+      setText('hrZone', z ? `Z${z}` : '');
+      setText('hr', String(Math.round(live.bpm)));
+      let color = '';
+      try { color = hrZones(p.hrMax || hrMaxFromAge(p.age || 46), p.hrRest)[z - 1]?.color || ''; } catch { color = ''; }
+      if (cache.hrColor !== color) { cache.hrColor = color; refs.hrZone?.style.setProperty('--hz', color); }
+      cache.hrZoneKey = '';
+    } else if (seg && (cache.hrLive || cache.hrZoneKey !== seg.zone)) {
+      try {
+        const hr = hrTargetForZone(seg.zone, getState().profile || {});
+        setText('hrZone', `Z${hr.zone}`);
+        setText('hr', `${hr.min}–${hr.max}`);
+      } catch { setText('hrZone', ''); setText('hr', '–'); }
+      cache.hrZoneKey = seg.zone;
+    }
+    const on = !!live;
+    if (cache.hrLive !== on) {
+      cache.hrLive = on;
+      refs.hr.closest('.hud-m--hr')?.classList.toggle('is-live', on);
+    }
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
@@ -2156,6 +2259,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
     setText('km', fmt.km(s.distanceKm));
     setText('kcal', fmt.int(s.kcal));
+    if (seg) renderHr(seg);
     updateGhost(s);
     updateProfile(s);
     mo('tick', s);
@@ -2227,16 +2331,18 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
   }
 
-  function doSkip(dir) {
-    if (!engine || countingDown) return;
+  /** ⏮ / ⏭. fromCmd (orden del reloj): sin diálogos ni avisos; devuelve false si no se pudo saltar. */
+  function doSkip(dir, fromCmd = false) {
+    if (!engine || countingDown) return false;
     const s0 = engine.getState();
-    if (s0.status !== 'running' && s0.status !== 'paused') return;
+    if (s0.status !== 'running' && s0.status !== 'paused') return false;
     if (s0.inTestStage) {
-      notify('Durante el test, aguanta o pulsa «No puedo más»', { icon: 'gauge' });
-      return;
+      if (!fromCmd) notify('Durante el test, aguanta o pulsa «No puedo más»', { icon: 'gauge' });
+      return false;
     }
     if (dir > 0 && s0.segIndex >= s0.segCount - 1) {
-      if (confirmOpen) return; // un solo diálogo aunque se pulse ⏭ varias veces
+      if (fromCmd) return false; // el reloj pregunta él («¿Terminar ya?») y manda end
+      if (confirmOpen) return false; // un solo diálogo aunque se pulse ⏭ varias veces
       confirmOpen = true;
       confirmDialog({
         title: '¿Terminar ya?',
@@ -2244,16 +2350,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
         confirmText: 'Terminar',
         cancelText: 'Seguir',
       }).then((yes) => { confirmOpen = false; if (yes && engine && !disposed) engine.finish(); }, () => { confirmOpen = false; });
-      return;
+      return false;
     }
     // Los bugs de la serie que dejas atrás ya no son actuales (el del tramo nuevo, si lo hay, llega con el salto)
     dropBugs(['rep', 'stage']);
     suppressCoach = true;
     const done = engine.skip(dir);
     suppressCoach = false;
-    if (!done) return;
+    if (!done) return false;
     const s = engine.getState();
-    if (s.status === 'finished') return;
+    if (s.status === 'finished') return true;
     if (dir > 0) noteSkip(s0.totalElapsed, s.totalElapsed);
     mark(s.status === 'running', s.totalElapsed);
     rebaseGhost(s0.totalElapsed, s.totalElapsed);
@@ -2263,15 +2369,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     musicSeek(s);
     doBeep('go');
     haptic('light');
+    return true;
   }
 
   function doEndTest() {
-    if (!engine) return;
+    if (!engine) return false;
     const pos0 = engine.getState().totalElapsed;
     suppressCoach = true;
     const done = engine.endTest();
     suppressCoach = false;
-    if (!done) return;
+    if (!done) return false;
     const s = engine.getState();
     noteSkip(pos0, s.totalElapsed);
     mark(s.status === 'running', s.totalElapsed);
@@ -2286,6 +2393,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     dropBugs(['stage']);
     if (vam) showBug({ lbl: 'VAM', val: fmt.speed(vam), sub: 'km/h', color: '#7D7AFF', kind: 'vam' });
     notify('¡Test terminado! Ahora, vuelta a la calma', { icon: 'gauge', duration: 4200 });
+    return true;
   }
 
   function doAdjust(dir) {
@@ -2354,13 +2462,15 @@ export function mount(el, { params = {}, query = {} } = {}) {
     disposers.push(stop);
   }
 
+  /** Coach en silencio / activo. b = el botón (null desde el reloj: se busca el del HUD). */
   function toggleMute(b) {
     muted = !muted;
     coachCall('setMuted', muted);
     if (muted) { try { window.speechSynthesis?.cancel?.(); } catch { /* nada */ } }
-    root.classList.toggle('is-muted', muted);
-    b.setAttribute('aria-pressed', String(muted));
-    b.setAttribute('aria-label', muted ? 'Activar coach' : 'Silenciar coach');
+    root?.classList.toggle('is-muted', muted);
+    const btn = b || root?.querySelector('[data-act="mute"]');
+    btn?.setAttribute('aria-pressed', String(muted));
+    btn?.setAttribute('aria-label', muted ? 'Activar coach' : 'Silenciar coach');
     haptic('selection');
     notify(muted ? 'Coach en silencio' : 'Coach activado', { icon: muted ? 'speaker-off' : 'speaker', duration: 1600 });
   }
@@ -2763,6 +2873,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function discard() {
     discarded = true;
+    nb.discard('user');
     saveActiveSession(null);
     teardownRuntime();
     haptic('warning');
@@ -2777,6 +2888,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     clearInterval(snapTimer);
     const st = getState();
     if ((s.activeSec || 0) < MIN_SAVE_SEC) {
+      nb.discard('short');
       saveActiveSession(null);
       stopMusic(1);
       teardownRuntime();
@@ -2801,6 +2913,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     session.pausedSec = Number.isFinite(startMs)
       ? Math.max(0, Math.round((endMs - startMs) / 1000 - (Number(session.elapsedSec) || 0)))
       : 0;
+    // App nativa: el pulso que el reloj ha mandado en directo (mismo cálculo que el Atajo); en Safari, nada
+    try { Object.assign(session, nb.hrFields(session, st.profile || {})); } catch { /* sin pulso */ }
     // 'playback' hasta que acabe la frase final (el fundido de la música devolvería la sesión a 'auto')
     sessionHoldUntil = performance.now() + SESSION_HOLD_MS;
     stopMusic(3);
@@ -2817,12 +2931,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
       try {
         saveActiveSession({
           ...engine?.snapshot?.(), workoutId: workout.id, planDate, musicTracks: musicTracks.slice(),
-          skips: skips.slice(), timeline: timeline.slice(),
+          skips: skips.slice(), timeline: timeline.slice(), hrLive: nb.samples(),
           title: workout.title || '', savedAt: Date.now(), updatedAt: new Date().toISOString(),
         });
       } catch { /* queda la última instantánea */ }
       toast('No hay espacio para guardar este entreno. Lo guardaremos al volver a abrir la app: libera espacio en el iPhone', { icon: 'warning', kind: 'warning', duration: 9000 });
     }
+    nb.finish(session, { saved });
     coachCall('say', 'finish', { km: fmt.km(session.distanceKm), min: Math.round(session.elapsedSec / 60), completed: !!session.completed });
     doBeep('done');
     haptic('success');
@@ -2901,6 +3016,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       musicTracks: musicTracks.slice(),
       skips: skips.slice(),
       timeline: timeline.slice(),
+      hrLive: nb.samples(),
       title: workout.title || '',
       savedAt: Date.now(),
       updatedAt: new Date().toISOString(),

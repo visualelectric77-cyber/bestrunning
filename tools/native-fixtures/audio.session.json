@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "audio.session",
+  "seq": 2,
+  "boot": "jcud2bs",
+  "at": 1792386131123,
+  "data": {
+    "type": "playback"
+  }
+}

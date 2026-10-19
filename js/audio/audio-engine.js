@@ -36,11 +36,18 @@ const nowMs = () => (globalThis.performance?.now ? performance.now() : Date.now(
 
 /* ───────────── Sesión de audio (navigator.audioSession, Safari 17+) ───────────── */
 
+let postedSession = null;       // último tipo avisado a la app nativa (audio.session)
+
 function setSessionType(type) {
   try {
     const s = globalThis.navigator?.audioSession;
     if (s && s.type !== type) s.type = type;
   } catch { /* API no disponible */ }
+  // App nativa (native-bridge.js): la misma petición se traslada a AVAudioSession para que el modo silencio no
+  // calle la clase. En Safari BRNative no existe y no pasa nada.
+  if (type !== postedSession) {
+    try { if (globalThis.BRNative?.post?.('audio.session', { type })) postedSession = type; } catch { /* sin puente */ }
+  }
 }
 
 const autoType = () => (cfg.duckMusic ? 'transient' : 'ambient');

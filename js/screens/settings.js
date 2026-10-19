@@ -12,6 +12,7 @@ import { APP_VERSION } from '../version.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
 import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
+import { isNative, nativeStatus, post as nativePost } from '../integrations/native-bridge.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -60,6 +61,8 @@ const GROUPS = [
   { title: 'Coach y música', items: ['audio', 'music', 'watch'] },
   { title: 'App', items: ['install', 'data', 'about'] },
 ];
+/** En la app nativa ya está instalada: fuera «Instalar en iPhone». */
+const groupItems = (g) => (isNative() ? g.items.filter((k) => k !== 'install') : g.items);
 
 const CYCLE_NAMES = ['Base', 'Construcción', 'Pico', 'Descarga + Test'];
 const REASONS = {
@@ -263,7 +266,9 @@ function rowSummary(key, s) {
       if (m.mode === 'own') return 'Mi música';
       return m.enabled === false ? 'Apagada' : 'DJ BestRunning';
     }
-    case 'watch': return s.integrations?.watchReminder === false ? 'Sin recordatorio' : 'Pulso con Atajos';
+    case 'watch':
+      if (isNative()) return 'App del reloj';
+      return s.integrations?.watchReminder === false ? 'Sin recordatorio' : 'Pulso con Atajos';
     case 'install': return isStandalone() ? 'Instalada' : 'Sin instalar';
     case 'data': return `${hist.length} ${hist.length === 1 ? 'sesión' : 'sesiones'}`;
     case 'about': return `v${esc(APP_VERSION)}`;
@@ -279,7 +284,7 @@ function rootHtml(s) {
   const vam = safe(() => vamFromLevels(s.levels || DEFAULT_LEVELS), 0);
   const meta = [p.age ? `${p.age} años` : '', p.weightKg ? `${fmt.dec1(p.weightKg).replace(',0', '')} kg` : ''].filter(Boolean).join(' · ');
   const since = memberSince(s);
-  const groups = GROUPS.map((g) => group(g.title, g.items.map((k) => {
+  const groups = GROUPS.map((g) => group(g.title, groupItems(g).map((k) => {
     const sec = SECTIONS[k];
     return `<div class="list__row st-nav" role="button" tabindex="0" data-href="#/settings/${k}">
       ${sqIcon(sec.icon, sec.color)}
@@ -1062,7 +1067,47 @@ function saveHrTest(ctx) {
   paintHrTest(ctx);
 }
 
+/** App nativa: estado del reloj (lo cuenta el iPhone en native.hello / native.status) y permiso de Salud. */
+function nativeWatchHtml() {
+  const ns = nativeStatus();
+  const w = ns?.watch;
+  let c;
+  if (!ns) {
+    c = { ok: false, ic: 'watch', title: 'Comprobando tu Apple Watch…', text: 'El iPhone está mirando si tienes un reloj emparejado con BestRunning.' };
+  } else if (w?.paired && w?.installed) {
+    c = { ok: true, ic: 'check', title: 'Apple Watch conectado · pulso en directo', text: 'El reloj se abre solo al empezar la clase: vibra antes de cada cambio, te pasa el pulso en directo y guarda el entreno en Salud.' };
+  } else if (w?.paired) {
+    c = { ok: false, ic: 'download', title: 'Instala BestRunning en el reloj: app Watch › Apps disponibles', text: 'Abre la app Watch del iPhone, baja hasta «Apps disponibles» y toca «Instalar» junto a BestRunning.' };
+  } else {
+    c = { ok: false, ic: 'watch', title: 'No hay ningún Apple Watch emparejado', text: 'Puedes entrenar igual. Cuando emparejes uno, instala en él BestRunning para tener el pulso en directo.' };
+  }
+  const auth = ns?.health?.auth;
+  const askHealth = ns && auth !== 'granted';
+  return `<section class="card st-install${c.ok ? ' is-ok' : ''}">
+      <span class="st-install__icon">${icon(c.ic, 28, c.ok ? { stroke: 3 } : undefined)}</span>
+      <b class="st-install__title">${esc(c.title)}</b>
+      <p>${esc(c.text)}</p>
+    </section>
+    ${askHealth ? `<div class="st-group">
+      <button type="button" class="btn btn--primary btn--lg btn--block" data-st="health-auth">${icon('heart', 18)}<span>Permitir acceso a Salud</span></button>
+      <p class="st-note">${auth === 'denied'
+        ? 'Salud no deja a BestRunning guardar tus entrenos. Puedes cambiarlo en Ajustes › Salud › Acceso a datos y dispositivos › BestRunning.'
+        : 'Para guardar cada clase en Salud como carrera en interior, con pulso, distancia y calorías.'}</p>
+    </div>` : ''}`;
+}
+
 function watchHtml(s) {
+  if (isNative()) {
+    // App nativa: el estado del reloj arriba; el Atajo queda como respaldo (sin reloj o sin la app del reloj)
+    return `<div class="stack-lg" data-slot="nwatch">${nativeWatchHtml()}</div>
+      <details class="st-more st-watch-legacy"><summary><span class="st-more__chev">${icon('chevron-right', 14, { stroke: 2.5 })}</span>Sin la app del reloj: pulso con Atajos</summary>
+        <div class="stack-lg">${watchShortcutHtml(s)}</div>
+      </details>`;
+  }
+  return watchShortcutHtml(s);
+}
+
+function watchShortcutHtml(s) {
   const ig = s.integrations || {};
   const name = String(ig.hrShortcut || '').trim();
   const shown = esc(name || HR_SHORTCUT);
@@ -1205,9 +1250,10 @@ async function exportBackup() {
   }
 }
 
-async function importBackup(input) {
+/** Restaura una copia desde un <input type="file"> (también lo usa la bienvenida de la app nativa). → true si se restauró. */
+export async function importBackup(input) {
   const file = input?.files?.[0];
-  if (!file) return;
+  if (!file) return false;
   let text = '';
   try {
     text = await file.text();
@@ -1228,7 +1274,7 @@ async function importBackup(input) {
   if (!ok) {
     haptic('error');
     toast('Ese archivo no es una copia de BestRunning', { kind: 'error' });
-    return;
+    return false;
   }
   const n = Array.isArray(j.history) ? j.history.length : 0;
   const when = typeof j.exportedAt === 'string' && !Number.isNaN(Date.parse(j.exportedAt))
@@ -1240,7 +1286,7 @@ async function importBackup(input) {
     cancelText: 'Cancelar',
     destructive: true,
   });
-  if (!yes) return;
+  if (!yes) return false;
   const done = safe(() => importState(text), false);
   if (done) {
     haptic('success');
@@ -1249,6 +1295,7 @@ async function importBackup(input) {
     haptic('error');
     toast('No he podido leer la copia: el archivo no es válido', { kind: 'error' });
   }
+  return !!done;
 }
 
 async function resetAll() {
@@ -2787,6 +2834,12 @@ const PAGES = {
   watch: {
     render: watchHtml,
     init(ctx) {
+      if (isNative()) {
+        // Solo se repinta la tarjeta del reloj (la conexión va y viene al bajar la muñeca: el resto no se toca)
+        const onStatus = () => { if (ctx.alive) ctx.setSlot('nwatch', nativeWatchHtml()); };
+        window.addEventListener('br:native-status', onStatus);
+        ctx.cleanups.push(() => window.removeEventListener('br:native-status', onStatus));
+      }
       loadWatch().then((m) => {
         if (!m || !ctx.alive) return;
         const g = ctx.body.querySelector('[data-guide]');
@@ -2847,6 +2900,10 @@ const PAGES = {
       if (name === 'hr-test') runHrTest(ctx);
       else if (name === 'hr-paste') pasteHrTest(ctx);
       else if (name === 'hr-save') saveHrTest(ctx);
+      else if (name === 'health-auth') {
+        haptic('medium');
+        if (!nativePost('health.authorize', {})) toast('No se ha podido abrir el permiso de Salud', { kind: 'error' });
+      }
     },
   },
 

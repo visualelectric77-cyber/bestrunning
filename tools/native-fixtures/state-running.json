@@ -1,0 +1,67 @@
+{
+  "v": 1,
+  "type": "state",
+  "seq": 91,
+  "boot": "jba6a33",
+  "at": 1792386243373,
+  "data": {
+    "status": "running",
+    "run": "2026-10-19T05:02:53.123Z",
+    "classId": "test-tpl~9~1~100",
+    "title": "Clase de prueba",
+    "isTest": false,
+    "inTestStage": false,
+    "seg": {
+      "i": 1,
+      "n": 6,
+      "zone": "run",
+      "label": "Correr",
+      "short": "Correr",
+      "kmh": 12,
+      "incline": 0,
+      "sec": 300,
+      "left": 289.8,
+      "adj": 0,
+      "endAt": 1792386533123,
+      "sub": "Tramo 2/6"
+    },
+    "next": {
+      "zone": "fast",
+      "label": "Correr rápido",
+      "kmh": 13,
+      "sec": 30,
+      "dir": "up"
+    },
+    "hrTarget": {
+      "z": 3,
+      "min": 123,
+      "max": 141
+    },
+    "hrUsual": {
+      "lo": 150,
+      "hi": 154
+    },
+    "elapsed": 70.3,
+    "remaining": 469.8,
+    "total": 540,
+    "km": 0.143,
+    "kcal": 8,
+    "avgKmh": 7.3,
+    "record": {
+      "d": 25,
+      "side": 1,
+      "bestKm": 0.9,
+      "beaten": false
+    },
+    "voice": true,
+    "music": {
+      "on": true,
+      "app": true,
+      "volume": 0.8,
+      "canSkip": true,
+      "title": "Better Machine",
+      "artist": "Conathor",
+      "bpm": 128
+    }
+  }
+}

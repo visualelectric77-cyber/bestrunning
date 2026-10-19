@@ -19,6 +19,7 @@ import {
   withHrOverlay, hrLegendHtml, hrZonesHtml, hrLevelsHtml, hrStatsHtml, hrMaxHintHtml, ensureWatchHrStyles, isWatchShortcutReady,
   HR_ENTRY_MIN, HR_ENTRY_MAX,
 } from '../integrations/watch-hr.js';
+import { isNative, nativeStatus } from '../integrations/native-bridge.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -54,6 +55,12 @@ const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(pre
 const feelings = () => (Array.isArray(FEELINGS) && FEELINGS.length ? FEELINGS : LOCAL_FEELINGS);
 const zoneName = (z) => ZONES[z]?.name || z;
 const zoneColor = (z) => ZONES[z]?.color || '#ff6a1a';
+const WATCH_WAIT_MS = 10 * 60000;  // app nativa: el pulso del reloj suele llegar en segundos; se espera hasta 10 min
+/** App nativa con BestRunning instalada en un Apple Watch emparejado. */
+const watchManaged = () => {
+  const w = nativeStatus()?.watch;
+  return !!(w && w.paired && w.installed);
+};
 
 export function mount(el, { params = {} } = {}) {
   el.classList.add('screen--fullscreen', 'sm-screen');
@@ -69,6 +76,7 @@ export function mount(el, { params = {} } = {}) {
   let cardKey = '';
   let cardPromise = null;
   let saving = false;
+  let waitT = null;           // app nativa: fin de la espera del pulso del reloj
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); if (!disposed) fn(); }, ms);
@@ -104,8 +112,25 @@ export function mount(el, { params = {} } = {}) {
     if (next !== session && (!isFormMode() || !draftDirty())) { session = next; render(); }
   });
 
+  // App nativa: el pulso del reloj (y «Guardado en Salud») llega solo, a veces con el resumen ya abierto. El borrador
+  // toma la media y la máxima nuevas: si no, «Guardar» pisaría el pulso recién llegado con las casillas vacías.
+  const onNativeHr = (e) => {
+    if (disposed || String(e?.detail?.sessionId || '') !== id) return;
+    const next = findSession();
+    if (!next) return;
+    if (draft && next.hrAvg != null) { draft.hrAvg = next.hrAvg ?? null; draft.hrMax = next.hrMax ?? null; }
+    const rated = !isFormMode();
+    session = next;
+    invalidateCard();
+    render();
+    // Con la sesión ya valorada, los logros de pulso se evalúan aquí (si no, al pulsar Guardar), como con el Atajo
+    if (rated && hasHrSeries(next)) later(awardAchievements, 1700);
+  };
+  window.addEventListener('br:native-hr', onNativeHr);
+
   return () => {
     disposed = true;
+    window.removeEventListener('br:native-hr', onNativeHr);
     unsub();
     stopHr?.();
     for (const t of timers) clearTimeout(t);
@@ -282,12 +307,14 @@ export function mount(el, { params = {} } = {}) {
       </section>
 
       <section class="card sm-card whr-card${hasHrSeries(s) ? '' : ' whr-glow'}" style="--i:6">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span><span class="sm-opt">${hasHrSeries(s) ? 'Importado' : 'Opcional'}</span></div>
+        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span><span class="sm-opt">${hasHrSeries(s) ? hrLabel(s) : 'Opcional'}</span></div>
         ${hasHrSeries(s) ? hrImported(s) : hrCta()}
         ${hasHrSeries(s)
           ? `<details class="whr-details whr-manual-hr"><summary>Corregir a mano</summary>${manualHr(f)}</details>`
           : `<span class="sm-ro__label">O anótalo a mano</span>${manualHr(f)}`}
-        <p class="muted sm-note">Una web no puede leer el pulso del Watch en directo: el Atajo lo trae de Salud al terminar. También ves la media y la máxima en la app Fitness.</p>
+        <p class="muted sm-note">${isNative()
+          ? 'Con BestRunning en el reloj, el pulso llega solo al terminar. Si no llega, tráelo con el Atajo.'
+          : 'Una web no puede leer el pulso del Watch en directo: el Atajo lo trae de Salud al terminar. También ves la media y la máxima en la app Fitness.'}</p>
       </section>
 
       ${sessionMusicHtml(s, { variant: 'summary', index: 7 })}
@@ -325,7 +352,7 @@ export function mount(el, { params = {} } = {}) {
           </div>` : ''}
       </section>
       <section class="card sm-card whr-card${hasHrSeries(s) ? '' : ' whr-glow'}" style="--i:6">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span>${hasHrSeries(s) ? '<span class="sm-opt">Importado</span>' : ''}</div>
+        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span>${hasHrSeries(s) ? `<span class="sm-opt">${hrLabel(s)}</span>` : ''}</div>
         ${hasHrSeries(s) ? hrImported(s) : hrCta()}
       </section>
       ${sessionMusicHtml(s, { variant: 'summary', index: 7 })}
@@ -348,7 +375,34 @@ export function mount(el, { params = {} } = {}) {
         </div>`;
   }
 
+  /** Etiqueta del pulso guardado: el del reloj (app nativa) o el importado con el Atajo. */
+  function hrLabel(s) {
+    return s?.hrSource ? 'Del Apple Watch' : 'Importado';
+  }
+
+  /** App nativa con BestRunning en el reloj: ms que quedan de espera a su pulso (sesión de hace < 10 min sin pulso), o 0.
+   *  Sin la app del reloj no hay nada que esperar: se ofrece el Atajo enseguida. */
+  function watchWaitMs(s) {
+    if (!s || !isNative() || !watchManaged() || hasHrSeries(s)) return 0;
+    let end = Date.parse(s.endedAt || '');
+    if (!Number.isFinite(end)) end = Date.parse(s.startedAt || '') + ((Number(s.elapsedSec) || 0) + (Number(s.pausedSec) || 0)) * 1000;
+    if (!Number.isFinite(end)) return 0;
+    return Math.max(0, end + WATCH_WAIT_MS - Date.now());
+  }
+
   function hrCta() {
+    const wait = watchWaitMs(session);
+    if (wait > 0) {
+      // Pasada la espera, vuelve el botón del Atajo (respaldo si el reloj no llegó a mandar nada)
+      if (!waitT) waitT = later(() => { waitT = null; render(); }, wait + 500);
+      return `<div class="whr-cta" role="status">
+          <div class="whr-cta__row">
+            <span class="whr-cta__icon" aria-hidden="true">${icon('watch', 24)}<i class="whr-beat">${icon('heart', 12, { stroke: 2.6 })}</i></span>
+            <div><b class="whr-cta__title">Esperando el pulso del Apple Watch…</b>
+              <p class="whr-cta__text">Llega solo en cuanto el reloj guarda el entreno en Salud. Mientras, puedes valorar la sesión.</p></div>
+          </div>
+        </div>`;
+    }
     const ready = isWatchShortcutReady(getState());
     return `<div class="whr-cta">
           <div class="whr-cta__row">
@@ -475,12 +529,16 @@ export function mount(el, { params = {} } = {}) {
 
   function extraActions(s) {
     const shortcut = (getState().integrations?.healthShortcut || '').trim();
+    // App nativa: el reloj guarda el entreno en Salud él solo (con pulso, distancia y calorías)
+    let health;
+    if (s?.health?.uuid) health = `<p class="muted sm-note sm-health">${icon('check', 15)} Guardado en Salud</p>`;
+    else if (isNative() && watchManaged()) health = `<p class="muted sm-note sm-health">${icon('watch', 15)} Se guarda en Salud desde el reloj</p>`;
+    else if (shortcut) health = `<button class="btn btn--secondary btn--block" data-act="health">${icon('heart', 18)}<span>Guardar en Salud</span></button>`;
+    else health = `<button class="btn btn--ghost btn--block sm-more__link" data-href="#/settings/watch">${icon('heart', 16)}<span>Configura «Guardar en Salud»</span></button>`;
     return `
       <section class="sm-more" style="--i:8">
         <button class="btn btn--secondary btn--block" data-act="share">${icon('share', 18)}<span>Compartir tarjeta</span></button>
-        ${shortcut
-          ? `<button class="btn btn--secondary btn--block" data-act="health">${icon('heart', 18)}<span>Guardar en Salud</span></button>`
-          : `<button class="btn btn--ghost btn--block sm-more__link" data-href="#/settings/watch">${icon('heart', 16)}<span>Configura «Guardar en Salud»</span></button>`}
+        ${health}
       </section>`;
   }
 

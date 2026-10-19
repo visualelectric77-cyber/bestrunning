@@ -1,0 +1,56 @@
+{
+  "v": 1,
+  "type": "today",
+  "seq": 6,
+  "boot": "jhqqi5v",
+  "at": 1792911600000,
+  "data": {
+    "date": "2026-10-25",
+    "status": "rest",
+    "classId": null,
+    "href": null,
+    "title": null,
+    "category": null,
+    "categoryLabel": null,
+    "categoryColor": null,
+    "minutes": null,
+    "estKm": null,
+    "recordKm": null,
+    "segments": [],
+    "next": {
+      "label": "Mañana",
+      "minutes": 20,
+      "title": "Velocidad punta"
+    },
+    "weekDone": 0,
+    "weekPlanned": 6,
+    "reminder": "19:00",
+    "hrZones": [
+      {
+        "z": 1,
+        "min": 88,
+        "max": 106
+      },
+      {
+        "z": 2,
+        "min": 106,
+        "max": 123
+      },
+      {
+        "z": 3,
+        "min": 123,
+        "max": 141
+      },
+      {
+        "z": 4,
+        "min": 141,
+        "max": 158
+      },
+      {
+        "z": 5,
+        "min": 158,
+        "max": 176
+      }
+    ]
+  }
+}

@@ -6,7 +6,7 @@
 //   node tools/precache.mjs --bump minor    → 1.0.1 → 1.1.0   (también acepta major)
 //   node tools/precache.mjs --dry-run       → muestra el resultado sin escribir
 //
-// Excluye docs/, tools/, .git, node_modules, *.md, ficheros ocultos (incluidos los "._*" de macOS en discos
+// Excluye docs/, tools/, native/, .git, node_modules, *.md, ficheros ocultos (incluidos los "._*" de macOS en discos
 // externos), los mp3 de audio/packs/<pack>/ (su index.json SÍ entra) y la música (audio/music/*.m4a,
 // audio/music-src/) que se cachean en tiempo de ejecución o no se publican, y las imágenes de arranque de
 // assets/splash/ (iOS las lee al instalar).
@@ -29,7 +29,8 @@ if (bump && !['patch', 'minor', 'major'].includes(bump)) {
   process.exit(1);
 }
 
-const EXCLUDED_DIRS = new Set(['docs', 'tools', '.git', '.github', '.claude', '.vscode', 'node_modules', 'tests', 'test']);
+// native/: el proyecto Xcode (git lo ignora y GitHub Pages no lo publica)
+const EXCLUDED_DIRS = new Set(['docs', 'tools', 'native', '.git', '.github', '.claude', '.vscode', 'node_modules', 'tests', 'test']);
 const EXCLUDED_FILES = new Set(['sw.js', 'CNAME', 'LICENSE', 'package.json', 'package-lock.json']);
 const EXCLUDED_EXT = /\.(md|py|mjs|map|log|sh|txt|psd|sketch|zip)$/i;
 

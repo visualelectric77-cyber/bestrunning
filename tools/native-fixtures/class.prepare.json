@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "class.prepare",
+  "seq": 5,
+  "boot": "jba6a33",
+  "at": 1792386170123,
+  "data": {
+    "classId": "test-tpl~9~1~100",
+    "title": "Clase de prueba",
+    "totalSec": 540
+  }
+}

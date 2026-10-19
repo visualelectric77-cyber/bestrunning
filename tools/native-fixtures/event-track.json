@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 65,
+  "boot": "jqqyzex",
+  "at": 1792387154073,
+  "data": {
+    "name": "track",
+    "title": "Night Drive",
+    "artist": "Lumen",
+    "bpm": 126
+  }
+}

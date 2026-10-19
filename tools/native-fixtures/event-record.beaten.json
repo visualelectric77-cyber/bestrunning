@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "event",
+  "seq": 404,
+  "boot": "jd7cvgo",
+  "at": 1792387147823,
+  "data": {
+    "name": "record.beaten",
+    "bestKm": 0.9,
+    "km": 1.166
+  }
+}

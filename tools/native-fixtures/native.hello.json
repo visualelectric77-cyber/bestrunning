@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "type": "native.hello",
+  "seq": 42,
+  "boot": "p4k8m2",
+  "at": 1760850731000,
+  "data": {
+    "proto": 1,
+    "app": "1.0 (1)",
+    "watch": {
+      "paired": true,
+      "installed": true,
+      "reachable": true,
+      "link": "wc",
+      "workout": "idle",
+      "run": null
+    },
+    "health": {
+      "auth": "granted"
+    },
+    "backup": {
+      "savedAt": 1760850000000,
+      "sessions": 23,
+      "bytes": 812345
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "v": 1,
+  "type": "class.start",
+  "seq": 13,
+  "boot": "jba6a33",
+  "at": 1792386173123,
+  "data": {
+    "run": "2026-10-19T05:02:53.123Z",
+    "classId": "test-tpl~9~1~100",
+    "title": "Clase de prueba",
+    "category": "endurance",
+    "categoryLabel": "Resistencia",
+    "categoryColor": "#30D158",
+    "isTest": false,
+    "totalSec": 540,
+    "resumed": false,
+    "segments": [
+      {
+        "sec": 60,
+        "kmh": 6.5,
+        "zone": "warmup"
+      },
+      {
+        "sec": 300,
+        "kmh": 12,
+        "zone": "run"
+      },
+      {
+        "sec": 30,
+        "kmh": 13,
+        "zone": "fast"
+      },
+      {
+        "sec": 60,
+        "kmh": 8.3,
+        "zone": "jog"
+      },
+      {
+        "sec": 30,
+        "kmh": 13,
+        "zone": "fast"
+      },
+      {
+        "sec": 60,
+        "kmh": 6,
+        "zone": "cooldown"
+      }
+    ],
+    "hrZones": [
+      {
+        "z": 1,
+        "min": 88,
+        "max": 106
+      },
+      {
+        "z": 2,
+        "min": 106,
+        "max": 123
+      },
+      {
+        "z": 3,
+        "min": 123,
+        "max": 141
+      },
+      {
+        "z": 4,
+        "min": 141,
+        "max": 158
+      },
+      {
+        "z": 5,
+        "min": 158,
+        "max": 176
+      }
+    ],
+    "record": {
+      "bestKm": 0.9
+    }
+  }
+}

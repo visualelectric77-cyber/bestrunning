@@ -31,3 +31,6 @@ docs/backup/
 docs/launch/
 docs/audio-tests/
 tools/capture/out/
+
+# App nativa de iPhone + Apple Watch (proyecto Xcode, repositorio git propio; no se publica en GitHub Pages)
+native/

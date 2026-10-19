@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "type": "hello",
+  "seq": 1,
+  "boot": "jcud2bs",
+  "at": 1792386131123,
+  "data": {
+    "proto": 1,
+    "app": "1.4.0-test",
+    "caps": [
+      "state",
+      "cmd",
+      "hr",
+      "summary",
+      "backup",
+      "audio"
+    ]
+  }
+}

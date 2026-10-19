@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "type": "workout.summary",
+  "seq": 78,
+  "boot": "w3f9a0",
+  "at": 1760850731000,
+  "id": "sum-2026-10-19T05:02:11.123Z",
+  "data": {
+    "run": "2026-10-19T05:02:11.123Z",
+    "sessionId": "ses_x",
+    "startedAt": 1760850127000,
+    "endedAt": 1760852900000,
+    "uuid": "6F1C…",
+    "kcalActive": 540,
+    "hrAvg": 136,
+    "hrMax": 153,
+    "hrMin": 96,
+    "samples": [
+      [
+        1760850131000,
+        96
+      ]
+    ],
+    "source": "watch"
+  }
+}

@@ -1,0 +1,107 @@
+{
+  "v": 1,
+  "type": "today",
+  "seq": 2,
+  "boot": "jhqqi5v",
+  "at": 1792387777823,
+  "data": {
+    "date": "2026-10-19",
+    "status": "today",
+    "classId": "z2-cadence~20~mm1xnc~77",
+    "href": "#/play/z2-cadence~20~mm1xnc~77?date=2026-10-19",
+    "title": "Zona 2 con cadencia",
+    "category": "endurance",
+    "categoryLabel": "Resistencia",
+    "categoryColor": "#30D158",
+    "minutes": 20,
+    "estKm": 2.72,
+    "recordKm": null,
+    "segments": [
+      {
+        "sec": 60,
+        "kmh": 7.1,
+        "zone": "warmup"
+      },
+      {
+        "sec": 60,
+        "kmh": 7.7,
+        "zone": "warmup"
+      },
+      {
+        "sec": 120,
+        "kmh": 8.3,
+        "zone": "jog"
+      },
+      {
+        "sec": 240,
+        "kmh": 8.4,
+        "zone": "jog"
+      },
+      {
+        "sec": 60,
+        "kmh": 8.6,
+        "zone": "jog"
+      },
+      {
+        "sec": 240,
+        "kmh": 8.4,
+        "zone": "jog"
+      },
+      {
+        "sec": 60,
+        "kmh": 8.6,
+        "zone": "jog"
+      },
+      {
+        "sec": 240,
+        "kmh": 8.3,
+        "zone": "jog"
+      },
+      {
+        "sec": 60,
+        "kmh": 7.8,
+        "zone": "cooldown"
+      },
+      {
+        "sec": 60,
+        "kmh": 6.5,
+        "zone": "cooldown"
+      }
+    ],
+    "next": {
+      "label": "Mañana",
+      "minutes": 20,
+      "title": "Tempo con chispas"
+    },
+    "weekDone": 0,
+    "weekPlanned": 6,
+    "reminder": "07:00",
+    "hrZones": [
+      {
+        "z": 1,
+        "min": 88,
+        "max": 106
+      },
+      {
+        "z": 2,
+        "min": 106,
+        "max": 123
+      },
+      {
+        "z": 3,
+        "min": 123,
+        "max": 141
+      },
+      {
+        "z": 4,
+        "min": 141,
+        "max": 158
+      },
+      {
+        "z": 5,
+        "min": 158,
+        "max": 176
+      }
+    ]
+  }
+}

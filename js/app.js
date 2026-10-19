@@ -46,12 +46,18 @@ function renderTabbar() {
 
 /* ───── Detalles nativos ───── */
 
+/** ¿Dentro de la app nativa de iPhone (WKWebView con el puente «bestrunning»)? */
+const inNativeApp = () => !!window.webkit?.messageHandlers?.bestrunning;
+
 function nativeTweaks() {
   const root = document.documentElement;
-  const standalone =
+  const native = inNativeApp();
+  // La app nativa cuenta como instalada (pantalla completa, sin barras de Safari)
+  const standalone = native ||
     navigator.standalone === true ||
     (typeof matchMedia === 'function' && matchMedia('(display-mode: standalone)').matches);
   root.classList.toggle('is-standalone', standalone);
+  root.classList.toggle('is-native', native);
   root.dataset.version = APP_VERSION;
 
   // Sin zoom por gestos (pinza) ni doble toque
@@ -275,6 +281,12 @@ function redirectReloadedPlay() {
 function boot() {
   redirectReloadedPlay();
   nativeTweaks();
+  // App nativa: puente con el iPhone y el Apple Watch (en Safari ni se descarga)
+  if (inNativeApp()) {
+    import('./integrations/native-bridge.js')
+      .then((m) => m.initNativeBridge({ navigate, app: APP_VERSION }))
+      .catch(() => {});
+  }
   errorToasts();
   renderTabbar();
   routes();

@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "phone.status",
+  "seq": 80,
+  "boot": "p4k8m2",
+  "at": 1760850731000,
+  "data": {
+    "page": "ready",
+    "fg": true,
+    "classActive": true
+  }
+}

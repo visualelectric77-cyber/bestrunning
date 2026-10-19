@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "ack",
+  "seq": 470,
+  "boot": "jqqyzex",
+  "at": 1792387513823,
+  "data": {
+    "ref": "cmd",
+    "id": "w3f9a0-135",
+    "ok": false,
+    "reason": "last"
+  }
+}

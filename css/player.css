@@ -912,6 +912,9 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   transition: background-color 600ms ease;
 }
 .hud-m .hud-hrz:empty { display: none; }
+/* App nativa: pulso en directo del Apple Watch (la insignia toma el color de tu zona de FC) */
+.hud-m--hr.is-live .hud-hrz { background: var(--hz, #ff3b5c); }
+.hud-m--hr.is-live .hud-lbl { color: #ff3b5c; }
 .hud-vsep { flex: none; width: 1px; height: 16px; background: rgba(255, 255, 255, 0.12); }
 .hud-np {
   display: flex;
@@ -1464,6 +1467,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-more { display: flex; flex-direction: column; gap: 8px; }
 .sm-more .btn { gap: 8px; }
 .sm-more__link { color: var(--text-2); font-size: var(--fs-sub); }
+/* App nativa: «Guardado en Salud» / «Se guarda en Salud desde el reloj» (texto, no botón) */
+.sm-health { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; text-align: center; }
 
 /* Solo lectura */
 .sm-edit { min-height: 36px; padding: 0 12px; gap: 6px; font-size: 15px; }
