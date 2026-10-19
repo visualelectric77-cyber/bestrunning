@@ -66,20 +66,21 @@ export function mountMusicDebug(host, { getMusic } = {}) {
   const el = doc.createElement('pre');
   el.className = 'br-music-debug';
   el.setAttribute('aria-hidden', 'true');
+  // Nunca tapa ni se come toques (1.4.1 tapaba «Terminar», «Pausa» y «Salir» arriba): a media pantalla, encima del
+  // número grande, sin eventos de puntero y con las líneas clave primero.
   Object.assign(el.style, {
-    position: 'fixed', left: '8px', top: 'calc(env(safe-area-inset-top, 0px) + 8px)', zIndex: '9999', margin: '0',
-    maxWidth: 'calc(100vw - 16px)', maxHeight: '60vh', overflow: 'hidden', padding: '6px 8px', borderRadius: '8px',
-    background: 'rgba(0,0,0,.74)', color: '#e8ffe8', font: '10px/1.35 ui-monospace, Menlo, monospace',
-    whiteSpace: 'pre-wrap', wordBreak: 'break-all', pointerEvents: 'auto', WebkitUserSelect: 'none', userSelect: 'none',
+    position: 'fixed', left: '8px', right: '8px', top: '34vh', zIndex: '40', margin: '0',
+    maxHeight: '26vh', overflow: 'hidden', padding: '5px 7px', borderRadius: '8px',
+    background: 'rgba(0,0,0,.62)', color: '#e8ffe8', font: '9px/1.3 ui-monospace, Menlo, monospace',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-all', pointerEvents: 'none', WebkitUserSelect: 'none', userSelect: 'none',
   });
-  let compact = false;
-  const toggle = (e) => { e.stopPropagation(); compact = !compact; paint(); };
-  el.addEventListener('pointerdown', (e) => e.stopPropagation());
-  el.addEventListener('click', toggle);
   function paint() {
     let text;
     try { text = lines(getMusic?.()); } catch (err) { text = [`error: ${err?.message || err}`]; }
-    el.textContent = compact ? text.slice(0, 3).join('\n') : text.join('\n');
+    // la línea de volumen y nivel, la más útil, arriba del todo
+    const k = text.findIndex((l) => l.startsWith('volumen '));
+    if (k > 0) text.unshift(text.splice(k, 1)[0]);
+    el.textContent = text.join('\n');
   }
   host.appendChild(el);
   paint();
