@@ -4,7 +4,7 @@ import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
   icon, navBar, enableCollapsingHeader, intensityDots, profileChart, ring, openSheet, sectionHeader, emptyState, stat,
-  photo, categoryPhotoName, bgVideo,
+  photo, categoryPhotoName,
 } from '../ui/components.js';
 import { planWeek, planDay, cycleInfo, nextTestDate, CYCLE_WEEKS } from '../training/planner.js';
 import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js';
@@ -164,11 +164,11 @@ function trainHero(day, state, today, animate) {
     w.estKcal ? metaNum(fmt.int(w.estKcal), 'kcal') : '',
   ].filter(Boolean).join('<span class="td-meta__sep" aria-hidden="true">·</span>');
   const goLabel = missed ? 'Hacerla ahora' : 'Empezar';
-  // Cabecera en vídeo (el bucle de campaña, mudo; con «Reducir movimiento» queda el póster) y velo inferior: el título
-  // blanco siempre legible; el perfil, debajo
+  // Cabecera con la foto de su categoría (cada tipo de clase la suya), que se acerca muy despacio, y velo inferior:
+  // el título blanco siempre legible; el perfil, debajo. Sin vídeo: no debe tocar la sesión de audio del iPhone.
   return `<article class="card td-hero td-hero--photo${animate ? ' td-hero--in' : ''}">
     <div class="td-hero__media">
-      ${bgVideo('hero-loop', { cls: 'td-hero__img td-hero__video' })}
+      ${photo(categoryPhotoName(w.category), { cls: 'td-hero__img td-hero__live', eager: true })}
       <div class="td-hero__top">
         <span class="eyebrow">${esc(rel)} · ${esc(catName(w.category))}</span>
         ${status}

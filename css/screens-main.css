@@ -940,6 +940,13 @@
   inset: 0;
   z-index: -2;
 }
+/* Foto de la categoría: se acerca muy despacio (scale/translate sueltos: no pisan el volteo de .photo--flip) */
+.td-hero__media > .td-hero__live { animation: tdHeroLive 16s ease-in-out infinite alternate; transform-origin: 50% 45%; }
+@keyframes tdHeroLive {
+  from { scale: 1; translate: 0 0; }
+  to { scale: 1.08; translate: -1.5% -1%; }
+}
+@media (prefers-reduced-motion: reduce) { .td-hero__media > .td-hero__live { animation: none; } }
 /* El bucle es vertical (9:16): encuadre de la cabeza a la cintura de la corredora, que queda a la izquierda */
 .td-hero__media > .bg-video {
   position: absolute;

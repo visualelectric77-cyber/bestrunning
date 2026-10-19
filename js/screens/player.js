@@ -936,9 +936,25 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   /* ═════════════════ Arranque ═════════════════ */
+  // Red de seguridad: un <video> en marcha (aunque mudo) puede dejar la sesión de audio de iOS en «ambient» (calla con
+  // el modo silencio). Antes de desbloquear el audio se paran y se sueltan todos los de la página.
+  function releaseVideos() {
+    try {
+      document.querySelectorAll('video').forEach((v) => {
+        try {
+          v.pause();
+          v.removeAttribute('src');
+          v.querySelectorAll('source').forEach((s) => s.remove());
+          v.load();
+        } catch { /* nada */ }
+      });
+    } catch { /* sin DOM */ }
+  }
+
   function unlockAudioNow() {
     // Debe ocurrir dentro del gesto del usuario (iOS). La sesión se fija ANTES de crear/reanudar el AudioContext:
     // así nace ya en la categoría buena (con 'playback' el modo silencio no calla al coach)
+    releaseVideos();
     try { audioMod?.applyAudioSettings?.(getState().audio); } catch { /* sin audio */ }
     syncSession();
     try { audioMod?.unlockAudio?.()?.catch?.(() => {}); } catch { /* idem */ }
