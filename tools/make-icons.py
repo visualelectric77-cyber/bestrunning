@@ -9,6 +9,7 @@ de velocidad: chevrón adelante + tres líneas de velocidad + la banda de la cin
 """
 import math
 import os
+import sys
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -187,60 +188,35 @@ def load_font(size, weight='Bold', rounded=True):
 
 
 def render_splash(w, h, icon_img):
-    S = SS // 2 or 1  # 2× basta para el texto; el fondo es suave
+    """Arranque v2 («serio, elegante»): negro puro, el icono sin sombra ni resplandor y la marca en SF Pro Bold,
+    «Best» blanco y «Running» ember sólido (nunca degradado). Igual que #boot en index.html."""
+    S = SS // 2 or 1  # 2× basta para el texto
     W, H = w * S, h * S
-    img = Image.new('RGB', (W, H), BG)
-
-    # Resplandor ember radial (sutil) detrás del logo
+    img = Image.new('RGB', (W, H), (0, 0, 0))
     cy = H * 0.43
-    glow = radial_mask((W, H), W / 2, cy, W * 0.95, power=2.4)
-    ember = Image.new('RGB', (W, H), (0xFF, 0x5A, 0x1F))
-    img = Image.composite(ember, img, glow.point(lambda v: int(v * 0.30)))
-    glow2 = radial_mask((W, H), W / 2, cy, W * 0.45, power=2.0)
-    rose = Image.new('RGB', (W, H), (0xFF, 0x2D, 0x55))
-    img = Image.composite(rose, img, glow2.point(lambda v: int(v * 0.16)))
 
-    # Logo (tile redondeado) con sombra
     tile = int(W * 0.235)
     ic = icon_img.resize((tile, tile), Image.LANCZOS)
     mask = rounded_mask(tile)
     x0, y0 = (W - tile) // 2, int(cy - tile / 2)
-    sh = Image.new('L', (W, H), 0)
-    sh.paste(mask, (x0, y0 + int(tile * 0.08)))
-    sh = sh.filter(ImageFilter.GaussianBlur(tile * 0.12))
-    img = Image.composite(Image.new('RGB', (W, H), (0x30, 0x06, 0x0E)), img, sh.point(lambda v: int(v * 0.85)))
     img.paste(ic, (x0, y0), mask)
 
-    # Marca de texto "BestRunning" ("Running" en ember)
     fs = int(W * 0.082)
-    font = load_font(fs, 'Heavy')
+    font = load_font(fs, 'Bold', rounded=False)
     d = ImageDraw.Draw(img)
     t1, t2 = 'Best', 'Running'
     w1 = d.textlength(t1, font=font)
     w2 = d.textlength(t2, font=font)
     tx = (W - (w1 + w2)) / 2
     ty = y0 + tile + int(tile * 0.30)
-    d.text((tx, ty), t1, font=font, fill=(245, 245, 247))
-    # Texto con degradado
-    txt_mask = Image.new('L', (W, H), 0)
-    ImageDraw.Draw(txt_mask).text((tx + w1, ty), t2, font=font, fill=255)
-    # Degradado ajustado a la caja de la palabra
-    grad = Image.new('RGB', (W, H), (0xFF, 0x5A, 0x1F))
-    bbox = txt_mask.getbbox()
-    if bbox:
-        gw, gh = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        g = diagonal_gradient(max(gw, gh)).resize((gw, gh))
-        grad = Image.new('RGB', (W, H))
-        grad.paste(g, (bbox[0], bbox[1]))
-    img = Image.composite(grad, img, txt_mask)
+    d.text((tx, ty), t1, font=font, fill=(255, 255, 255))
+    d.text((tx + w1, ty), t2, font=font, fill=(0xFF, 0x5A, 0x1F))
 
-    # Lema
     fs2 = int(W * 0.034)
-    f2 = load_font(fs2, 'Semibold', rounded=False)
-    d = ImageDraw.Draw(img)
+    f2 = load_font(fs2, 'Medium', rounded=False)
     tag = 'Tu entrenador personal de cinta'
     tw = d.textlength(tag, font=f2)
-    d.text(((W - tw) / 2, ty + fs * 1.45), tag, font=f2, fill=(150, 150, 160))
+    d.text(((W - tw) / 2, ty + fs * 1.45), tag, font=f2, fill=(150, 150, 155))
 
     return img.resize((w, h), Image.LANCZOS)
 
@@ -297,6 +273,13 @@ def svg_icon():
 def main():
     os.makedirs(ICONS, exist_ok=True)
     os.makedirs(SPLASH, exist_ok=True)
+
+    if '--splash-only' in sys.argv:
+        big = render_icon(1024)
+        for (w, h) in ((1320, 2868), (1290, 2796), (1206, 2622), (1179, 2556)):
+            render_splash(w, h, big).save(os.path.join(SPLASH, f'splash-{w}x{h}.png'), optimize=True)
+        print('Splash regenerados en assets/splash')
+        return
 
     big = render_icon(1024)
     big.save(os.path.join(ICONS, 'icon-1024.png'), optimize=True)

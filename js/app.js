@@ -27,6 +27,40 @@ function routes() {
 
 /* ───── Tab bar ───── */
 
+/* Glifos con la geometría de SF Symbols (regular, trazo 1,6 en 24 pt): contorno sin seleccionar y «.fill» al seleccionar */
+const SW = 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
+const TAB_GLYPHS = {
+  // house / house.fill
+  home: [
+    `<path ${SW} d="M3.4 10.9 12 3.8l8.6 7.1"/><path ${SW} d="M5.6 9.3v10a1.4 1.4 0 0 0 1.4 1.4h3.2v-5.4h3.6v5.4H17a1.4 1.4 0 0 0 1.4-1.4v-10"/>`,
+    `<path fill="currentColor" d="M12.5 3.2a.8.8 0 0 0-1 0L2.9 10.3a.8.8 0 1 0 1 1.24l1.2-1V19.3A2 2 0 0 0 7.1 21.3h3.1v-5.5a.6.6 0 0 1 .6-.6h2.4a.6.6 0 0 1 .6.6v5.5h3.1a2 2 0 0 0 2-2v-8.76l1.2 1a.8.8 0 1 0 1-1.24z"/>`,
+  ],
+  // calendar / calendar (relleno)
+  calendar: [
+    `<rect ${SW} x="3.4" y="4.4" width="17.2" height="16.2" rx="3.2"/><path ${SW} d="M3.4 9h17.2"/><g fill="currentColor"><rect x="6.9" y="11.6" width="2.1" height="2.1" rx=".5"/><rect x="10.95" y="11.6" width="2.1" height="2.1" rx=".5"/><rect x="15" y="11.6" width="2.1" height="2.1" rx=".5"/><rect x="6.9" y="15.6" width="2.1" height="2.1" rx=".5"/><rect x="10.95" y="15.6" width="2.1" height="2.1" rx=".5"/></g>`,
+    `<path fill="currentColor" fill-rule="evenodd" d="M6.6 3.6h10.8a4 4 0 0 1 4 4v9.8a4 4 0 0 1-4 4H6.6a4 4 0 0 1-4-4V7.6a4 4 0 0 1 4-4zM2.6 8.4v1.2h18.8V8.4zM7.4 11.6a.5.5 0 0 0-.5.5v1.1a.5.5 0 0 0 .5.5h1.1a.5.5 0 0 0 .5-.5v-1.1a.5.5 0 0 0-.5-.5zm4.05 0a.5.5 0 0 0-.5.5v1.1a.5.5 0 0 0 .5.5h1.1a.5.5 0 0 0 .5-.5v-1.1a.5.5 0 0 0-.5-.5zm4.05 0a.5.5 0 0 0-.5.5v1.1a.5.5 0 0 0 .5.5h1.1a.5.5 0 0 0 .5-.5v-1.1a.5.5 0 0 0-.5-.5zM7.4 15.6a.5.5 0 0 0-.5.5v1.1a.5.5 0 0 0 .5.5h1.1a.5.5 0 0 0 .5-.5v-1.1a.5.5 0 0 0-.5-.5zm4.05 0a.5.5 0 0 0-.5.5v1.1a.5.5 0 0 0 .5.5h1.1a.5.5 0 0 0 .5-.5v-1.1a.5.5 0 0 0-.5-.5z"/>`,
+  ],
+  // square.grid.2x2 / .fill
+  grid: [
+    `<g ${SW}><rect x="3.6" y="3.6" width="7" height="7" rx="2"/><rect x="13.4" y="3.6" width="7" height="7" rx="2"/><rect x="3.6" y="13.4" width="7" height="7" rx="2"/><rect x="13.4" y="13.4" width="7" height="7" rx="2"/></g>`,
+    `<g fill="currentColor"><rect x="2.8" y="2.8" width="8.6" height="8.6" rx="2.6"/><rect x="12.6" y="2.8" width="8.6" height="8.6" rx="2.6"/><rect x="2.8" y="12.6" width="8.6" height="8.6" rx="2.6"/><rect x="12.6" y="12.6" width="8.6" height="8.6" rx="2.6"/></g>`,
+  ],
+  // chart.bar / .fill
+  chart: [
+    `<g ${SW}><rect x="3.4" y="13" width="4.4" height="7.6" rx="1.4"/><rect x="9.8" y="8.2" width="4.4" height="12.4" rx="1.4"/><rect x="16.2" y="3.4" width="4.4" height="17.2" rx="1.4"/></g>`,
+    `<g fill="currentColor"><rect x="2.6" y="12.2" width="6" height="9.2" rx="1.9"/><rect x="9" y="7.4" width="6" height="14" rx="1.9"/><rect x="15.4" y="2.6" width="6" height="18.8" rx="1.9"/></g>`,
+  ],
+  // person.crop.circle / .fill
+  person: [
+    `<circle ${SW} cx="12" cy="12" r="8.8"/><circle ${SW} cx="12" cy="9.7" r="3.2"/><path ${SW} d="M6 18.3c1.4-2.1 3.5-3.2 6-3.2s4.6 1.1 6 3.2"/>`,
+    `<path fill="currentColor" fill-rule="evenodd" d="M12 2.4a9.6 9.6 0 1 1 0 19.2 9.6 9.6 0 0 1 0-19.2zm0 3.7a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4zm0 8.6c-2.75 0-5.1 1.2-6.6 3.4a8.2 8.2 0 0 0 13.2 0c-1.5-2.2-3.85-3.4-6.6-3.4z"/>`,
+  ],
+};
+const tabGlyph = (name) => {
+  const [line, fill] = TAB_GLYPHS[name];
+  return `<svg class="tabbar__glyph tabbar__glyph--line" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">${line}</svg><svg class="tabbar__glyph tabbar__glyph--fill" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" focusable="false">${fill}</svg>`;
+};
+
 const TABS = [
   { tab: 'today', label: 'Hoy', icon: 'home', href: '#/today' },
   { tab: 'plan', label: 'Plan', icon: 'calendar', href: '#/plan' },
@@ -40,7 +74,7 @@ function renderTabbar() {
   if (!nav) return;
   nav.innerHTML = `<div class="tabbar__inner">${TABS.map(
     (t) =>
-      `<button type="button" class="tabbar__item" data-tab="${t.tab}" data-href="${t.href}" aria-label="${t.label}"><span class="tabbar__icon">${icon(t.icon, 24, { stroke: 2 })}</span><span class="tabbar__label">${t.label}</span></button>`,
+      `<button type="button" class="tabbar__item" data-tab="${t.tab}" data-href="${t.href}" aria-label="${t.label}"><span class="tabbar__icon">${tabGlyph(t.icon)}</span><span class="tabbar__label">${t.label}</span></button>`,
   ).join('')}</div>`;
 }
 

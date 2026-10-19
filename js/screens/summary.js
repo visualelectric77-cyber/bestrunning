@@ -5,7 +5,7 @@ import { fmt, esc, clamp, round1, todayKey, capitalize } from '../core/utils.js'
 import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels } from '../training/levels.js';
 import { getState, setState, subscribe, lastPersistOk } from '../core/store.js';
 import { navigate } from '../core/router.js';
-import { icon, profileChart, zoneBar, ring, stat, openSheet, toast, confirmDialog, celebrate, emptyState } from '../ui/components.js';
+import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, toast, confirmDialog, celebrate, emptyState } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import { workoutFromId } from '../training/generator.js';
 import { applyFeedback, evaluateTest, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
@@ -26,13 +26,13 @@ const CAT_NAMES = {
   hills: 'Cuestas', recovery: 'Recuperación', challenge: 'Retos', test: 'Test',
 };
 const LOCAL_FEELINGS = [
-  { key: 'easy', label: 'Muy fácil', emoji: '😌', rpe: 3 },
-  { key: 'ok', label: 'Cómodo', emoji: '🙂', rpe: 5 },
-  { key: 'hard', label: 'Exigente', emoji: '😤', rpe: 7 },
-  { key: 'max', label: 'Al límite', emoji: '🥵', rpe: 9 },
-  { key: 'fail', label: 'No pude', emoji: '😵', rpe: 10 },
+  { key: 'easy', label: 'Muy fácil', rpe: 3 },
+  { key: 'ok', label: 'Cómodo', rpe: 5 },
+  { key: 'hard', label: 'Exigente', rpe: 7 },
+  { key: 'max', label: 'Al límite', rpe: 9 },
+  { key: 'fail', label: 'No pude', rpe: 10 },
 ];
-const FEEL_COLORS = { easy: '#30D158', ok: '#64D2FF', hard: '#FF9F0A', max: '#FF375F', fail: '#BF5AF2' };
+/** Escala de esfuerzo (v2, monocroma): cinco barras crecientes, encendidas hasta el nivel de la sensación (1–5). */
 const FEEL_HINTS = {
   easy: '¡Genial! Si se te sigue haciendo fácil, subiremos el ritmo.',
   ok: 'Perfecto: así es como se progresa. Unas cuantas más así y subimos.',
@@ -171,54 +171,66 @@ export function mount(el, { params = {} } = {}) {
     const st = getState();
     const s = session;
     const pct = clamp(Number(s.completionPct) || 0, 0, 1);
-    const headline = s.isTest ? (pct >= 0.9 ? '¡Test completado!' : 'Test terminado')
-      : s.completed ? '¡Entrenamiento completado!'
-      : pct >= 0.6 ? '¡Buen trabajo!' : 'Cada paso cuenta';
+    const pctTxt = `${Math.round(pct * 100)} %`;
+    // Estado pequeño del héroe (✓ verde solo si se completó): el título es la clase
+    const status = s.isTest ? (pct >= 0.9 ? 'Test completado' : 'Test terminado')
+      : s.completed ? 'Entrenamiento completado'
+      : `${pctTxt} completado`;
+    const done = s.isTest ? pct >= 0.9 : !!s.completed;
     const dateLbl = s.dayKey ? capitalize(fmt.dateLong(s.dayKey)) : '';
     const cat = s.category || workout?.category || null;
     const badges = recordBadges(s, st.history || []);
+    const sub = [dateLbl, cat ? (CAT_NAMES[cat] || cat) : '', fmt.durationLong(s.elapsedSec || 0)].filter(Boolean).join(' · ');
+    const km = s.distanceKm || 0;
+    const sixth = s.hrAvg
+      ? statCell({ label: 'Pulso medio', value: fmt.int(s.hrAvg), unit: 'ppm', count: s.hrAvg, kind: 'int' })
+      : statCell({ label: 'Completado', value: String(Math.round(pct * 100)), unit: '%', count: Math.round(pct * 100), kind: 'int' });
 
     el.innerHTML = `
-      <div class="sm ${s.completed ? 'sm--done' : ''}" style="--cc:var(--c-${esc(cat || 'intervals')}, var(--accent))">
-        <div class="sm-bg" aria-hidden="true"><div class="sm-bg__glow sm-bg__glow--a"></div><div class="sm-bg__glow sm-bg__glow--b"></div></div>
+      <div class="sm ${s.completed ? 'sm--done' : ''}">
         <header class="sm-top">
-          <button class="sm-iconbtn" data-act="close" aria-label="Cerrar">${icon('close', 20)}</button>
+          <button class="sm-iconbtn" data-act="close" aria-label="Cerrar">${icon('close', 17)}</button>
           <div class="sm-top__title">Resumen</div>
-          <button class="sm-iconbtn" data-act="share" aria-label="Compartir tarjeta">${icon('share', 20)}</button>
+          <button class="sm-iconbtn" data-act="share" aria-label="Compartir tarjeta">${icon('share', 18)}</button>
         </header>
         <div class="sm-scroll">
           <div class="container sm-content">
             <div class="sm-side stagger">
             <section class="sm-hero" style="--i:0">
-              <div class="sm-hero__ring">
-                ${ring({ value: pct, size: 148, stroke: 12, color: 'ember', track: 'rgba(255,255,255,0.08)',
-                  inner: `<div class="sm-hero__inner">${s.completed ? `<span class="sm-hero__check">${icon('check', 40, { stroke: 3 })}</span>` : `<span class="sm-hero__pct num">${Math.round(pct * 100)}<small>%</small></span>`}</div>` })}
+              <div class="sm-hero__status">${done
+                ? `<span class="sm-hero__check" aria-hidden="true">${icon('check', 12)}</span>`
+                : ring({ value: pct, size: 18, stroke: 2.5, track: 'var(--surface-3)' })}<span>${esc(status)}</span></div>
+              <h1 class="sm-hero__title">${esc(s.title || 'Entrenamiento')}</h1>
+              <p class="sm-hero__sub">${esc(sub)}</p>
+              <div class="sm-hero__big sm-stat" data-count="${Number(km)}" data-kind="km" data-final="${esc(fmt.km(km))}">
+                <span class="sm-hero__num">${esc(fmt.km(km))}</span>
+                <span class="sm-hero__unit">Kilómetros</span>
               </div>
-              <div class="sm-hero__eyebrow">${esc(dateLbl)}${cat ? ` · <span class="sm-hero__cat">${esc(CAT_NAMES[cat] || cat)}</span>` : ''}</div>
-              <h1 class="sm-hero__title">${esc(headline)}</h1>
-              <p class="sm-hero__sub">${esc(s.title || 'Entrenamiento')} · ${esc(fmt.durationLong(s.elapsedSec || 0))}</p>
-              ${badges.length ? `<div class="sm-badges">${badges.map((b) => `<span class="sm-badge">${icon(b.icon, 14)}${esc(b.text)}</span>`).join('')}</div>` : ''}
+              ${badges.length ? `<div class="sm-badges">${badges.map((b) => `<span class="sm-badge${b.record ? '' : ' is-muted'}">${icon(b.icon, 15)}${esc(b.text)}</span>`).join('')}</div>` : ''}
             </section>
             </div>
             <div class="sm-main stagger">
-            <section class="sm-stats" style="--i:1">
-              ${statCell({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0), ic: 'timer', count: s.elapsedSec || 0, kind: 'clock' })}
-              ${statCell({ label: 'Distancia', value: fmt.km(s.distanceKm || 0), unit: 'km', ic: 'route', count: s.distanceKm || 0, kind: 'km' })}
-              ${statCell({ label: 'Vel. media', value: fmt.speed(s.avgSpeed || 0), unit: 'km/h', ic: 'gauge', count: s.avgSpeed || 0, kind: 'speed' })}
-              ${statCell({ label: 'Ritmo', value: s.avgSpeed > 0 ? fmt.pace(s.avgSpeed) : '–:––', unit: '/km', ic: 'clock' })}
-              ${statCell({ label: 'Kcal', value: fmt.int(s.kcal || 0), ic: 'flame', count: s.kcal || 0, kind: 'int' })}
-              ${statCell({ label: 'Vel. máx.', value: fmt.speed(s.maxSpeed || 0), unit: 'km/h', ic: 'bolt', count: s.maxSpeed || 0, kind: 'speed' })}
+            <section class="card sm-stats" style="--i:1">
+              <div class="stat-grid">
+                ${statCell({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0), count: s.elapsedSec || 0, kind: 'clock' })}
+                ${statCell({ label: 'Ritmo medio', value: s.avgSpeed > 0 ? fmt.pace(s.avgSpeed) : '–:––', unit: '/km' })}
+                ${statCell({ label: 'Kcal', value: fmt.int(s.kcal || 0), count: s.kcal || 0, kind: 'int' })}
+                ${statCell({ label: 'Vel. media', value: fmt.speed(s.avgSpeed || 0), unit: 'km/h', count: s.avgSpeed || 0, kind: 'speed' })}
+                ${statCell({ label: 'Vel. máx.', value: fmt.speed(s.maxSpeed || 0), unit: 'km/h', count: s.maxSpeed || 0, kind: 'speed' })}
+                ${sixth}
+              </div>
             </section>
 
             ${s.isTest ? testCard(s, st) : ''}
 
             <section class="card sm-card" style="--i:3">
-              <div class="sm-card__head"><span class="sm-card__title">Tu sesión</span>
+              <div class="sm-card__head"><span class="sm-card__title">Plan vs real</span>
                 <span class="sm-legend"><i class="sm-legend__bar"></i>Plan <i class="sm-legend__line"></i>Real${hasHrSeries(s) ? hrLegendHtml() : ''}</span></div>
               <div class="sm-chart">
                 ${workout?.segments?.length
-                  ? withHrOverlay(profileChart(workout.segments, { height: 140, trace: Array.isArray(s.speedTrace) ? s.speedTrace : null, progressSec: s.isTest ? null : traceCursorSec(s), gaps: skippedRanges(s) }), s, { segments: workout.segments, height: 140 })
+                  ? withHrOverlay(profileChart(workout.segments, { height: 140, tone: 'mono', trace: Array.isArray(s.speedTrace) ? s.speedTrace : null, progressSec: s.isTest || s.completed ? null : traceCursorSec(s), gaps: skippedRanges(s) }), s, { segments: workout.segments, height: 140 })
                   : `<p class="muted sm-note">No hay perfil disponible para esta clase.</p>`}
+                ${zoneRibbon(workout?.segments)}
               </div>
               ${adjustChips(s)}
             </section>
@@ -237,16 +249,17 @@ export function mount(el, { params = {} } = {}) {
         <div class="sm-cta">
           ${form
             ? `<button class="btn btn--primary btn--lg btn--block sm-save" data-act="save" ${draft?.feeling ? '' : 'aria-disabled="true"'}>
-                 ${icon('check', 20)}<span>${editing ? 'Guardar cambios' : 'Guardar'}</span></button>
-               ${editing ? '<button class="btn btn--ghost btn--block" data-act="cancel-edit">Cancelar</button>' : ''}`
-            : `<button class="btn btn--primary btn--lg btn--block" data-act="home">${icon('home', 20)}<span>Volver a Hoy</span></button>`}
+                 <span>${editing ? 'Guardar cambios' : 'Guardar'}</span></button>
+               ${editing ? '<button class="btn btn--plain btn--block" data-act="cancel-edit">Cancelar</button>' : ''}`
+            : `<button class="btn btn--primary btn--lg btn--block" data-act="home"><span>Volver a Hoy</span></button>`}
         </div>
       </div>`;
 
     bind();
     countUp();
     hydrateSessionMusic(el, s, () => !disposed);
-    if (!celebrated && s.completed && !s.feeling) {
+    // Confeti sobrio solo con un récord personal real (no por terminar ni por la primera sesión)
+    if (!celebrated && !s.feeling && badges.some((b) => b.record)) {
       celebrated = true;
       later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin confeti */ } }, 420);
     }
@@ -254,9 +267,13 @@ export function mount(el, { params = {} } = {}) {
     later(prepareCard, 900);
   }
 
-  function statCell({ label, value, unit = '', ic, count = null, kind = '' }) {
+  /** Celda de la rejilla de métricas (misma estructura que stat(): el recuento busca el texto de la cifra). */
+  function statCell({ label, value, unit = '', count = null, kind = '' }) {
     const attrs = count != null && kind ? ` data-count="${Number(count)}" data-kind="${kind}" data-final="${esc(value)}"` : '';
-    return `<div class="sm-stat"${attrs}>${stat({ label, value, unit, icon: ic, size: 'md' })}</div>`;
+    return `<div class="stat sm-stat"${attrs}>
+      <div class="stat__label"><span>${esc(label)}</span></div>
+      <div class="stat__value">${esc(value ?? '–')}${unit ? `<span class="stat__unit">${esc(unit)}</span>` : ''}</div>
+    </div>`;
   }
 
   function testCard(s, st) {
@@ -272,7 +289,7 @@ export function mount(el, { params = {} } = {}) {
     const delta = res?.deltaVam;
     return `
       <section class="card sm-card sm-test" style="--i:2">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('gauge', 16)} Resultado del test</span></div>
+        <div class="sm-card__head"><span class="sm-card__title">Resultado del test</span></div>
         <div class="sm-test__row">
           <div class="sm-test__big"><span class="num">${fmt.speed(vam)}</span><small>km/h</small><em>VAM</em></div>
           <div class="sm-test__big sm-test__big--alt"><span class="num">${fmt.dec1(vo2)}</span><small>ml/kg/min</small><em>VO₂máx est.</em></div>
@@ -300,29 +317,20 @@ export function mount(el, { params = {} } = {}) {
         <div class="sm-faces" role="radiogroup" aria-label="Sensación">
           ${feelings().map((x, i) => `
             <button class="sm-face ${f.feeling === x.key ? 'is-picked' : ''}" role="radio" aria-checked="${f.feeling === x.key}" aria-label="${esc(x.label)}"
-                    data-feel="${esc(x.key)}" style="--fc:${FEEL_COLORS[x.key] || 'var(--accent)'};--i:${i}">
-              <span class="sm-face__emoji">${x.emoji}</span>
+                    data-feel="${esc(x.key)}" style="--i:${i}">
+              ${effortBars(i + 1)}
               <span class="sm-face__lbl">${esc(x.label)}</span>
             </button>`).join('')}
         </div>
         <p class="sm-feel__hint" data-feel-hint>${esc(feelHint(f.feeling, s))}</p>
       </section>
 
-      <section class="card sm-card whr-card${hasHrSeries(s) ? '' : ' whr-glow'}" style="--i:6">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span><span class="sm-opt">${hasHrSeries(s) ? hrLabel(s) : 'Opcional'}</span></div>
-        ${hasHrSeries(s) ? hrImported(s) : hrCta()}
-        ${hasHrSeries(s)
-          ? `<details class="whr-details whr-manual-hr"><summary>Corregir a mano</summary>${manualHr(f)}</details>`
-          : `<span class="sm-ro__label">O anótalo a mano</span>${manualHr(f)}`}
-        <p class="muted sm-note">${isNative()
-          ? 'Con BestRunning en el reloj, el pulso llega solo al terminar. Si no llega, tráelo con el Atajo.'
-          : 'Una web no puede leer el pulso del Watch en directo: el Atajo lo trae de Salud al terminar. También ves la media y la máxima en la app Fitness.'}</p>
-      </section>
+      ${pulseCard(s, f)}
 
       ${sessionMusicHtml(s, { variant: 'summary', index: 7 })}
 
       <section class="card sm-card" style="--i:7">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('edit', 16)} Notas</span><span class="sm-opt">Opcional</span></div>
+        <div class="sm-card__head"><span class="sm-card__title">Notas</span><span class="sm-opt">Opcional</span></div>
         <textarea class="field sm-notes" rows="3" maxlength="500" data-notes
           placeholder="¿Algo que destacar? Molestias, cómo dormiste, la música…">${esc(f.notes || '')}</textarea>
       </section>
@@ -331,14 +339,15 @@ export function mount(el, { params = {} } = {}) {
   }
 
   function readOnlySections(s) {
-    const fx = feelings().find((x) => x.key === s.feeling);
+    const fi = feelings().findIndex((x) => x.key === s.feeling);
+    const fx = fi >= 0 ? feelings()[fi] : null;
     const changes = Array.isArray(s.levelChanges) ? s.levelChanges : [];
     return `
       <section class="card sm-card sm-ro" style="--i:5">
-        <div class="sm-card__head"><span class="sm-card__title">Tu valoración</span>
-          <button class="btn btn--ghost sm-edit" data-act="edit">${icon('edit', 16)}<span>Editar</span></button></div>
-        <div class="sm-ro__feel" style="--fc:${FEEL_COLORS[s.feeling] || 'var(--accent)'}">
-          <span class="sm-ro__emoji">${fx?.emoji || '🙂'}</span>
+        <div class="sm-card__head"><span class="sm-card__title">Sensación</span>
+          <button class="btn btn--ghost sm-edit" data-act="edit"><span>Editar</span></button></div>
+        <div class="sm-ro__feel">
+          ${effortBars(fi >= 0 ? fi + 1 : 0)}
           <div><b>${esc(fx?.label || '—')}</b>${s.rpe ? `<span class="muted"> · Esfuerzo ${s.rpe}/10</span>` : ''}</div>
         </div>
         ${!hasHrSeries(s) && (s.hrAvg || s.hrMax) ? `
@@ -353,10 +362,10 @@ export function mount(el, { params = {} } = {}) {
             ${changes.map((c) => levelRow(c)).join('')}
           </div>` : ''}
       </section>
-      <section class="card sm-card whr-card${hasHrSeries(s) ? '' : ' whr-glow'}" style="--i:6">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('watch', 16)} Pulso del Apple Watch</span>${hasHrSeries(s) ? `<span class="sm-opt">${hrLabel(s)}</span>` : ''}</div>
+      ${isNative() && !hasHrSeries(s) && watchWaitMs(session) <= 0 ? '' : `<section class="card sm-card whr-card" style="--i:6">
+        <div class="sm-card__head"><span class="sm-card__title">Pulso · Apple Watch</span>${hasHrSeries(s) ? `<span class="sm-opt">${hrLabel(s)}</span>` : ''}</div>
         ${hasHrSeries(s) ? hrImported(s) : hrCta()}
-      </section>
+      </section>`}
       ${sessionMusicHtml(s, { variant: 'summary', index: 7 })}
       ${extraActions(s, true)}`;
   }
@@ -390,6 +399,26 @@ export function mount(el, { params = {} } = {}) {
     if (!Number.isFinite(end)) end = Date.parse(s.startedAt || '') + ((Number(s.elapsedSec) || 0) + (Number(s.pausedSec) || 0)) * 1000;
     if (!Number.isFinite(end)) return 0;
     return Math.max(0, end + WATCH_WAIT_MS - Date.now());
+  }
+
+  /**
+   * Tarjeta del pulso. En la app nativa el reloj manda el pulso solo: nada de Atajo ni de «Ya lo he copiado» o
+   * «anótalo a mano» (si no llegó, la tarjeta no sale); en Safari, el flujo del Atajo como siempre.
+   */
+  function pulseCard(s, f) {
+    const has = hasHrSeries(s);
+    const native = isNative();
+    if (native && !has && watchWaitMs(session) <= 0) return '';
+    return `<section class="card sm-card whr-card" style="--i:6">
+        <div class="sm-card__head"><span class="sm-card__title">Pulso · Apple Watch</span><span class="sm-opt">${has ? hrLabel(s) : native ? '' : 'Opcional'}</span></div>
+        ${has ? hrImported(s) : hrCta()}
+        ${has
+          ? `<details class="whr-details whr-manual-hr"><summary>Corregir a mano</summary>${manualHr(f)}</details>`
+          : native ? '' : `<span class="sm-ro__label">O anótalo a mano</span>${manualHr(f)}`}
+        <p class="muted sm-note">${native
+          ? 'Con BestRunning en el reloj, el pulso llega solo al terminar.'
+          : 'Una web no puede leer el pulso del Watch en directo: el Atajo lo trae de Salud al terminar. También ves la media y la máxima en la app Fitness.'}</p>
+      </section>`;
   }
 
   function hrCta() {
@@ -438,11 +467,11 @@ export function mount(el, { params = {} } = {}) {
     try { zt = hrZoneTimes(s.hrSeries, st.profile); } catch { zt = s.hrZones || null; }
     return `
       <section class="card sm-card" style="--i:5">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('heart', 16)} Zonas de pulso</span><span class="sm-opt">Apple Watch</span></div>
+        <div class="sm-card__head"><span class="sm-card__title">Zonas de pulso</span><span class="sm-opt">Apple Watch</span></div>
         ${hrZonesHtml(zt, st.profile)}
       </section>
       <section class="card sm-card" style="--i:5">
-        <div class="sm-card__head"><span class="sm-card__title">${icon('gauge', 16)} Pulso por velocidad</span></div>
+        <div class="sm-card__head"><span class="sm-card__title">Pulso por velocidad</span></div>
         ${hrLevelsHtml(trends, st.profile)}
       </section>`;
   }
@@ -526,7 +555,6 @@ export function mount(el, { params = {} } = {}) {
       for (const a of newAch) if (!d.achievements[a.id]) d.achievements[a.id] = now;
     });
     toast(newAch.length === 1 ? `Logro desbloqueado: ${newAch[0].title || 'nuevo logro'}` : `${newAch.length} logros desbloqueados`, { icon: 'medal', kind: 'success', duration: 3600 });
-    try { celebrate({ intensity: 1.2 }); } catch { /* sin confeti */ }
   }
 
   function extraActions(s) {
@@ -765,15 +793,15 @@ export function mount(el, { params = {} } = {}) {
       : '';
     const html = `
       <div class="sm-result">
-        <div class="sm-result__badge ${ups.length ? 'is-up' : ''}">${icon(ups.length ? 'trophy' : newAch.length ? 'medal' : 'check', 34)}</div>
+        <div class="sm-result__badge ${ups.length ? 'is-up' : ''}">${icon(ups.length ? 'trophy' : newAch.length ? 'medal' : 'check', 44)}</div>
         ${message ? `<p class="sm-result__msg">${esc(message)}</p>` : ''}
         ${changes.length ? `<div class="sm-levels">${changes.map((c, i) => levelRow(c, i, true)).join('')}</div>` : keep}
         ${newAch.length ? `
           <div class="sm-ach">
-            <div class="sm-ach__title">${icon('sparkles', 16)} ${newAch.length === 1 ? 'Logro desbloqueado' : `${newAch.length} logros desbloqueados`}</div>
+            <div class="sm-ach__title">${newAch.length === 1 ? 'Logro desbloqueado' : `${newAch.length} logros desbloqueados`}</div>
             ${newAch.slice(0, 3).map((a, i) => `
               <div class="sm-medal sm-medal--${esc(a.tier || 'bronze')}" style="--i:${i}">
-                <span class="sm-medal__ic">${icon(a.icon || 'medal', 24)}</span>
+                <span class="sm-medal__ic">${icon(a.icon || 'medal', 26)}</span>
                 <span class="sm-medal__txt"><b>${esc(a.title || 'Logro')}</b><span>${esc(a.description || '')}</span></span>
               </div>`).join('')}
             ${newAch.length > 3 ? `<p class="muted sm-note">Y ${newAch.length - 3} más: las tienes todas en Progreso.</p>` : ''}
@@ -792,8 +820,9 @@ export function mount(el, { params = {} } = {}) {
       });
     } catch { sheet = null; }
     if (!sheet) toast(title, { icon: 'check' });
-    if (ups.length || newAch.length || testRes?.vam) {
-      later(() => { try { celebrate({ intensity: newAch.length ? 1.6 : 1.2 }); } catch { /* sin confeti */ } }, 260);
+    // Confeti sobrio solo con un avance real (subes de nivel o nueva VAM), no por un logro suelto
+    if (ups.length || testRes?.vam) {
+      later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin confeti */ } }, 260);
     }
   }
 
@@ -927,12 +956,12 @@ const sessionTime = (x) => {
 function recordBadges(s, history) {
   const t0 = sessionTime(s);
   const others = history.filter((x) => x && x.id !== s.id && sessionTime(x) < t0);
-  if (!others.length) return s.elapsedSec > 0 ? [{ icon: 'star', text: 'Primera sesión' }] : [];
+  if (!others.length) return s.elapsedSec > 0 ? [{ icon: 'star', text: 'Primera sesión', record: false }] : [];
   const out = [];
   const max = (fn) => Math.max(0, ...others.map((x) => Number(fn(x)) || 0));
-  if (s.distanceKm > 0.5 && s.distanceKm > max((x) => x.distanceKm)) out.push({ icon: 'trophy', text: 'Récord de distancia' });
-  if (s.maxSpeed > 0 && s.maxSpeed > max((x) => x.maxSpeed)) out.push({ icon: 'bolt', text: 'Velocidad récord' });
-  if (s.elapsedSec > 600 && s.elapsedSec > max((x) => x.elapsedSec)) out.push({ icon: 'timer', text: 'Sesión más larga' });
-  if (s.avgSpeed > 0 && s.elapsedSec >= 900 && s.avgSpeed > max((x) => (x.elapsedSec >= 900 ? x.avgSpeed : 0))) out.push({ icon: 'flame', text: 'Mejor media' });
+  if (s.distanceKm > 0.5 && s.distanceKm > max((x) => x.distanceKm)) out.push({ icon: 'trophy', text: 'Récord de distancia', record: true });
+  if (s.maxSpeed > 0 && s.maxSpeed > max((x) => x.maxSpeed)) out.push({ icon: 'bolt', text: 'Velocidad récord', record: true });
+  if (s.elapsedSec > 600 && s.elapsedSec > max((x) => x.elapsedSec)) out.push({ icon: 'timer', text: 'Sesión más larga', record: true });
+  if (s.avgSpeed > 0 && s.elapsedSec >= 900 && s.avgSpeed > max((x) => (x.elapsedSec >= 900 ? x.avgSpeed : 0))) out.push({ icon: 'flame', text: 'Mejor media', record: true });
   return out.slice(0, 3);
 }

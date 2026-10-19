@@ -1,7 +1,7 @@
-/* BestRunning · motion graphics del HUD de retransmisión (js/player/motion.js).
+/* BestRunning · motion graphics del HUD de retransmisión (js/player/motion.js). v2: sin rebotes marcados ni pesos 800.
    Solo transform/opacity (y clip-path de sus PROPIOS rótulos): nada de filtros, desenfoques ni máscaras sobre la
    escena (§15.3). prefers-reduced-motion: fundidos sencillos. */
-.pl--live { --mo-spring: cubic-bezier(0.2, 1.28, 0.36, 1); --mo-out: cubic-bezier(0.16, 1, 0.3, 1); }
+.pl--live { --mo-spring: cubic-bezier(0.22, 1.06, 0.36, 1); --mo-out: cubic-bezier(0.16, 1, 0.3, 1); }
 
 /* ───────── Cifras rodantes (velocidad gigante, cuenta atrás del tramo) ───────── */
 .mo-roll { font-variant-numeric: tabular-nums; }
@@ -47,7 +47,7 @@
   height: 36px;
   padding: 0 12px 0 12px;
   background: var(--plate);
-  border: 1px solid var(--plate-edge);
+  border: var(--hairline, 0.5px) solid var(--plate-edge);
   border-radius: 10px;
   pointer-events: none;
   opacity: 0;
@@ -75,11 +75,11 @@
 .pl.is-cd .mo-deck,
 .pl.is-test-stage .mo-deck,
 .pl.is-finale .mo-deck { opacity: 0; visibility: hidden; }
-.mo-deck__bar { flex: none; width: 3px; height: 16px; border-radius: 2px; background: var(--dc, var(--nc)); }
+.mo-deck__bar { flex: none; width: 2px; height: 14px; border-radius: 1px; background: var(--dc, var(--nc)); }
 .mo-deck__lbl {
   flex: none;
-  font: 700 10.5px/1 var(--font);
-  letter-spacing: 0.12em;
+  font: 600 10.5px/1 var(--font);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--lbl);
 }
@@ -90,14 +90,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   /* line-height > 1: con overflow hidden, 1 recortaba las tildes de las mayúsculas («RÁPIDO» salía «RAPIDO») */
-  font: 800 12.5px/1.35 var(--font);
-  letter-spacing: 0.12em;
+  font: 600 12.5px/1.35 var(--font);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--dc, var(--nc));
 }
 .mo-deck__sp {
   flex: none;
-  font: 800 18px/1 var(--font-display);
+  font: 700 18px/1 var(--font-display);
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   color: #fff;
@@ -105,7 +105,7 @@
 .mo-deck__u { flex: none; margin-left: -4px; font: 600 11px/1 var(--font); color: var(--ink2); }
 .mo-deck__dur {
   flex: none;
-  font: 700 13px/1 var(--font);
+  font: 600 13px/1 var(--font);
   font-variant-numeric: tabular-nums;
   color: var(--ink2);
 }
@@ -231,27 +231,26 @@
   animation: mo-title-life 3400ms linear both;
 }
 .mo-title__kick {
-  font: 700 11px/1 var(--font);
-  letter-spacing: 0.22em;
+  font: 600 13px/1 var(--font);
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--zc);
+  color: rgba(235, 235, 245, 0.72);
   text-shadow: var(--ink-shadow);
   animation: mo-fade-up 600ms var(--mo-out) 120ms backwards;
 }
 .mo-title__name {
   max-width: 100%;
-  font: 800 clamp(28px, 8vw, 46px)/1.04 var(--font-display);
-  letter-spacing: 0.1em;
-  margin-right: -0.1em;
+  font: 700 clamp(30px, 8.6vw, 44px)/1.08 var(--font-display);
+  letter-spacing: -0.02em;
   color: #fff;
-  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   text-wrap: balance;
 }
 .mo-w { display: inline-block; white-space: nowrap; }
-.mo-l { display: inline-block; animation: mo-track 1100ms var(--mo-out) backwards; animation-delay: calc(var(--i) * 16ms); }
-@keyframes mo-track { from { opacity: 0; transform: translateX(calc(var(--k) * 0.34em)); } to { opacity: 1; transform: none; } }
+.mo-l { display: inline-block; animation: mo-track 520ms var(--mo-out) backwards; animation-delay: calc(var(--i) * 12ms); }
+@keyframes mo-track { from { opacity: 0; transform: translateX(calc(var(--k) * 0.06em)) translateY(4px); } to { opacity: 1; transform: none; } }
 .mo-title__rule {
-  display: block;
+  display: none;
   width: 72px;
   height: 2px;
   border-radius: 1px;
@@ -270,8 +269,8 @@
 }
 @keyframes mo-bar { from { transform: scaleY(0); opacity: 0; } 30% { opacity: 1; } to { transform: none; opacity: 1; } }
 .mo-title__meta {
-  font: 700 12.5px/1 var(--font);
-  letter-spacing: 0.08em;
+  font: 600 13px/1 var(--font);
+  letter-spacing: 0;
   color: var(--ink2);
   text-shadow: var(--ink-shadow);
   animation: mo-fade-up 600ms var(--mo-out) 900ms backwards;

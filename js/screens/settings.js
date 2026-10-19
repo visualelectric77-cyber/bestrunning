@@ -1,16 +1,17 @@
 // BestRunning · Pantalla «Perfil» (ajustes): lista agrupada iOS y subpáginas #/settings/<section>.
 import { getState, setState, subscribe, resetState, exportState, importState } from '../core/store.js';
 import { navigate } from '../core/router.js';
-import { icon, navBar, enableCollapsingHeader, toggle, stepper, segmented, openSheet, toast, confirmDialog } from '../ui/components.js';
+import { icon, listIcon, navBar, enableCollapsingHeader, toggle, stepper, segmented, openSheet, toast, confirmDialog, bgVideo } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import {
   ZONES, LEVEL_KEYS, MIN_LEVEL_GAP, hrZones, hrMaxFromAge, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category, enforceLevelOrder,
 } from '../training/levels.js';
 import { CATEGORIES } from '../training/templates.js';
-import { planWeek } from '../training/planner.js';
+import { planWeek, cycleInfo, CYCLE_WEEKS } from '../training/planner.js';
 import { APP_VERSION } from '../version.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
 import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
+import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
 import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
 
@@ -46,10 +47,10 @@ const SECTIONS = {
   profile: { title: 'Sobre ti', icon: 'person', color: 'var(--c-tempo)' },
   speeds: { title: 'Velocidades', icon: 'bolt', color: 'var(--c-intervals)' },
   week: { title: 'Mi semana', icon: 'calendar', color: 'var(--c-test)' },
-  treadmill: { title: 'Cinta', icon: 'route', color: 'var(--c-endurance)' },
-  display: { title: 'Pantalla de entreno', icon: 'sparkles', color: 'linear-gradient(135deg, #ff6a1a, #bf5af2)' },
+  treadmill: { title: 'Cinta', icon: 'treadmill', color: 'var(--c-endurance)' },
+  display: { title: 'Pantalla de entreno', icon: 'mountain', color: 'var(--c-fartlek)' },
   audio: { title: 'Voz y audio', icon: 'speaker', color: 'var(--c-fartlek)' },
-  music: { title: 'Música', icon: 'music', color: 'linear-gradient(135deg, #ff375f, #bf5af2)' },
+  music: { title: 'Música', icon: 'music', color: 'var(--c-fartlek)' },
   watch: { title: 'Apple Watch y Salud', icon: 'watch', color: 'var(--accent-2)' },
   install: { title: 'Instalar en iPhone', icon: 'download', color: 'var(--info)' },
   data: { title: 'Datos', icon: 'upload', color: 'var(--c-hills)' },
@@ -64,7 +65,7 @@ const GROUPS = [
 /** En la app nativa ya está instalada: fuera «Instalar en iPhone». */
 const groupItems = (g) => (isNative() ? g.items.filter((k) => k !== 'install') : g.items);
 
-const CYCLE_NAMES = ['Base', 'Construcción', 'Pico', 'Descarga + Test'];
+const CYCLE_NAMES = ['Arranque', 'Progresión', 'Pico', 'Descarga'];
 const REASONS = {
   init: { label: 'Inicio', color: 'var(--info)' },
   progression: { label: 'Progresión', color: 'var(--ok)' },
@@ -174,7 +175,8 @@ const toggleRow = (id, title, sub, checked) => `<div class="list__row st-row">${
 
 const segRow = (title, sub, name, options, value) => `<div class="list__row st-row st-row--stack">${label(title, sub)}<div class="st-seg">${segmented({ name, options, value: String(value) })}</div></div>`;
 
-const sqIcon = (name, color, size = 17) => `<span class="list__icon st-sq" style="background:${color}">${icon(name, size, { stroke: 2.2 })}</span>`;
+/** v2: icono de fila gris, sin cuadrado de color (el color solo marca lo destructivo). */
+const sqIcon = (name, color) => listIcon(name, { tone: color === 'var(--danger)' ? 'danger' : '' });
 
 const steps = (items) => `<ol class="st-steps">${items.map((t, i) => `<li><span class="st-steps__n num">${i + 1}</span><span class="st-steps__t">${t}</span></li>`).join('')}</ol>`;
 
@@ -287,27 +289,26 @@ function rootHtml(s) {
   const groups = GROUPS.map((g) => group(g.title, groupItems(g).map((k) => {
     const sec = SECTIONS[k];
     return `<div class="list__row st-nav" role="button" tabindex="0" data-href="#/settings/${k}">
-      ${sqIcon(sec.icon, sec.color)}
+      ${listIcon(sec.icon)}
       <span class="list__title">${esc(sec.title)}</span>
       <span class="list__value">${rowSummary(k, s)}</span>
-      <span class="list__chev">${icon('chevron-right', 16, { stroke: 2.5 })}</span>
+      <span class="list__chev">${icon('chevron-right', 14)}</span>
     </div>`;
   }).join(''))).join('');
   return `<section class="st-hero">
       <button type="button" class="st-avatar" data-href="#/settings/profile" aria-label="Editar perfil">
-        <span class="st-avatar__ring" aria-hidden="true"></span>
         <span class="st-avatar__face">${name ? esc(name[0].toUpperCase()) : icon('person', 40)}</span>
       </button>
       <h2 class="st-hero__name">${name ? esc(name) : 'Corredor/a'}</h2>
       <div class="st-hero__meta">${esc(meta)}${since ? `<br>${esc(since)}` : ''}</div>
-      <div class="st-hero__stats">
-        <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'sesión' : 'sesiones'}</span></div>
-        <div><b class="num">${fmt.dec1(km)}</b><span>km</span></div>
-        <div><b class="num">${fmt.speed(vam)}</b><span>VAM</span></div>
+      <div class="card st-hero__stats">
+        <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'Sesión' : 'Sesiones'}</span></div>
+        <div><b class="num">${fmt.dec1(km)}</b><span>Kilómetros</span></div>
+        <div><b class="num">${fmt.speed(vam)}</b><span>VAM km/h</span></div>
       </div>
     </section>
     ${groups}
-    <p class="st-foot">BestRunning ${esc(APP_VERSION)} · Hecho para correr más y mejor</p>`;
+    <p class="st-foot">BestRunning ${esc(APP_VERSION)}</p>`;
 }
 
 /* ───────────── PERFIL ───────────── */
@@ -320,13 +321,19 @@ function hrZonesHtml(s) {
   const lo = zones[0].min;
   const span = Math.max(1, hrMax - lo);
   const map = { 1: 'Calentar · Calma', 2: 'Trotar', 3: 'Correr', 4: 'Rápido', 5: 'Sprint' };
-  const rows = zones.map((z) => `<div class="st-hrz" style="--zc:${z.color}">
-      <span class="st-hrz__badge num">Z${z.zone}</span>
-      <span class="st-hrz__main"><b>${esc(String(z.name).replace(/^Z\d\s*·\s*/, ''))}</b><span>${map[z.zone] || ''}</span></span>
-      <span class="st-hrz__range num">${z.min}–${z.max}<small>ppm</small></span>
-      <span class="st-hrz__bar"><i style="left:${((z.min - lo) / span) * 100}%;width:${Math.max(4, ((z.max - z.min) / span) * 100)}%"></i></span>
+  const track = zones.map((z) => `<i style="flex:${Math.max(1, z.max - z.min)};--zc:${z.color}"></i>`).join('');
+  const rows = zones.map((z) => `<div class="list__row st-hrz">
+      <span class="st-hrz__badge num" style="--zc:${z.color}">Z${z.zone}</span>
+      <span class="st-hrz__main"><span class="list__title">${esc(String(z.name).replace(/^Z\d\s*·\s*/, ''))}</span><span class="st-hrz__sub">${map[z.zone] || ''}</span></span>
+      <span class="st-hrz__range"><b class="num">${z.min}–${z.max}</b><span class="unit">ppm</span></span>
     </div>`).join('');
-  return `${rows}<p class="st-hrz__foot">${p.hrRest ? `Método Karvonen con FC en reposo de ${p.hrRest} ppm` : 'Porcentaje de tu FC máxima'} · FC máx. ${hrMax} ppm</p>`;
+  return `<div class="st-hrz__track" aria-hidden="true" data-lo="${lo}" data-span="${span}">${track}</div>${rows}`;
+}
+
+function hrZonesFoot(s) {
+  const p = s.profile || {};
+  const hrMax = p.hrMax || hrMaxFromAge(p.age || 46);
+  return `${p.hrRest ? `Método Karvonen con FC en reposo de ${p.hrRest}\u00a0ppm` : 'Porcentaje de tu FC máxima'} · FC máx. ${hrMax}\u00a0ppm`;
 }
 
 function profileHtml(s) {
@@ -340,14 +347,15 @@ function profileHtml(s) {
     `, 'Los usamos para calcular calorías, zonas de pulso y tu categoría de VO₂máx.')}
     ${group('Frecuencia cardiaca', `
       ${stepRow('FC máxima', 'Pulsaciones por minuto', 'st-hrmax', { value: p.hrMax || auto, step: 1, min: 120, max: 220, unit: 'ppm', decimals: 0 })}
-      <div class="list__row st-row st-action" role="button" tabindex="0" data-st="hr-auto">
-        ${sqIcon('refresh', 'var(--accent)', 15)}<span class="list__title">Calcular por edad</span><span class="list__value" data-hr-auto>${auto} ppm</span>
+      <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="hr-auto">
+        <span class="list__title">Calcular por edad</span><span class="list__value" data-hr-auto>${auto} ppm</span>
       </div>
       <label class="list__row st-row">${label('FC en reposo', 'Opcional · nada más despertar')}<input id="st-hrrest" class="st-input st-input--num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="—" value="${p.hrRest || ''}"><span class="st-unit">ppm</span></label>
     `, 'La FC máxima se estima con la fórmula de Tanaka (208 − 0,7 × edad). Si la conoces por una prueba de esfuerzo, ponla tal cual. Con la FC en reposo usamos el método Karvonen, más personal.')}
     <div class="st-group">
       <div class="st-group__title">Tus zonas de pulso</div>
-      <div class="card st-hrzones" data-hrzones>${hrZonesHtml(s)}</div>
+      <div class="list st-hrzones" data-hrzones>${hrZonesHtml(s)}</div>
+      <p class="st-note" data-hrzones-foot>${hrZonesFoot(s)}</p>
     </div>`;
 }
 
@@ -358,11 +366,10 @@ function vamCardHtml(s) {
   const vo2 = safe(() => estimateVo2max(vam), 0);
   const cat = safe(() => vo2Category(vo2, s.profile?.age || 46, s.profile?.sex || 'm'), null);
   const last = s.progression?.lastTest;
-  return `<div class="st-vam__glow" aria-hidden="true"></div>
-    <div class="eyebrow">VAM estimada</div>
-    <div class="st-vam__big num">${fmt.speed(vam)}<small>km/h</small></div>
+  return `<div class="eyebrow">VAM estimada</div>
+    <div class="st-vam__big"><span class="num">${fmt.speed(vam)}</span><span class="unit">km/h</span></div>
     <div class="st-vam__sub">VO₂máx ≈ <b class="num">${fmt.dec1(vo2)}</b>${cat ? ` · ${esc(cat.label)}` : ''}${last?.vam ? ` · último test ${fmt.speed(last.vam)}` : ''}</div>
-    <button type="button" class="btn btn--secondary st-vam__btn" data-st="vam">${icon('target', 17)}<span>Recalcular desde VAM…</span></button>`;
+    <button type="button" class="btn btn--secondary btn--block st-vam__btn" data-st="vam"><span>Recalcular desde tu VAM</span></button>`;
 }
 
 function levelHistoryHtml(s) {
@@ -373,15 +380,15 @@ function levelHistoryHtml(s) {
     const e = hist[i];
     const prev = hist[i - 1]?.levels || null;
     const lowered = !!prev && LEVEL_KEYS.some((k) => typeof prev[k] === 'number' && typeof e.levels[k] === 'number' && e.levels[k] < prev[k] - 0.04);
-    const r = e.reason === 'progression' && lowered ? { label: 'Ajuste', color: 'var(--text-3)' } : (REASONS[e.reason] || REASONS.manual);
+    const r = e.reason === 'progression' && lowered ? { label: 'Ajuste' } : (REASONS[e.reason] || REASONS.manual);
     const vals = LEVEL_KEYS.map((k) => {
       const v = e.levels[k];
       const d = prev && typeof prev[k] === 'number' && typeof v === 'number' ? round1(v - prev[k]) : 0;
       const delta = d ? `<i class="${d > 0 ? 'is-up' : 'is-down'}">${d > 0 ? '+' : '−'}${fmt.dec1(Math.abs(d))}</i>` : '';
-      return `<span style="--zc:var(--z-${k})"><b class="num">${typeof v === 'number' ? fmt.speed(v) : '–'}</b>${delta}</span>`;
+      return `<span><i class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></i><b class="num">${typeof v === 'number' ? fmt.speed(v) : '–'}</b>${delta}</span>`;
     }).join('');
     rows.push(`<div class="list__row st-lvh">
-      <div class="st-lvh__head"><span class="st-lvh__date">${esc(e.date ? fmt.dateShort(e.date) : '')}</span><span class="st-tag" style="--tc:${r.color}">${r.label}</span>${e.note ? `<span class="st-lvh__note">${esc(e.note)}</span>` : ''}</div>
+      <div class="st-lvh__head"><span class="st-lvh__date">${esc(e.date ? fmt.dateShort(e.date) : '')}</span><span class="st-tag">${r.label}</span>${e.note ? `<span class="st-lvh__note">${esc(e.note)}</span>` : ''}</div>
       <div class="st-lvh__vals">${vals}</div>
     </div>`);
   }
@@ -395,8 +402,8 @@ function levelStepper(k, v, tm) {
 function speedsHtml(s) {
   const lv = s.levels || DEFAULT_LEVELS;
   const tm = s.treadmill || {};
-  const rows = LEVEL_KEYS.map((k) => `<div class="list__row st-row st-level" style="--zc:var(--z-${k})">
-      <span class="st-level__swatch" aria-hidden="true"></span>
+  const rows = LEVEL_KEYS.map((k) => `<div class="list__row st-row st-level">
+      <span class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></span>
       <span class="st-row__label"><span class="list__title">${esc(ZONES[k]?.name || k)}</span><span class="list__sub" data-pace="${k}">Ritmo ${fmt.pace(lv[k])} /km</span></span>
       <span class="spacer"></span>
       ${slot(`st-lv-${k}`, levelStepper(k, lv[k], tm))}
@@ -424,7 +431,7 @@ function openVamSheet(ctx) {
     return LEVEL_KEYS.map((k) => {
       const d = round1(l[k] - (s.levels?.[k] ?? l[k]));
       const delta = d ? `<i class="${d > 0 ? 'is-up' : 'is-down'}">${d > 0 ? '+' : '−'}${fmt.speed(Math.abs(d))}</i>` : '<i>=</i>';
-      return `<div class="st-vprev" style="--zc:var(--z-${k})"><span>${esc(ZONES[k]?.short || k)}</span><b class="num">${fmt.speed(l[k])}</b>${delta}</div>`;
+      return `<div class="st-vprev"><span><i class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></i>${esc(ZONES[k]?.short || k)}</span><b class="num">${fmt.speed(l[k])}</b>${delta}</div>`;
     }).join('');
   };
   let sheetEl = null;
@@ -493,7 +500,7 @@ function weekPreviewHtml(s) {
       cat = realCat(w) || 'challenge';
     }
     total += min;
-    return `<div class="st-wk__day${min ? '' : ' is-rest'}" style="--cc:${cat ? `var(--c-${cat})` : 'var(--surface-3)'};--h:${clamp(min / 60, 0.08, 1)}" title="${cat ? esc(CATEGORIES?.[cat]?.name || '') : 'Descanso'}">
+    return `<div class="st-wk__day${min ? '' : ' is-rest'}" style="--h:${clamp(min / 60, 0.08, 1)}" title="${cat ? esc(CATEGORIES?.[cat]?.name || '') : 'Descanso'}">
       <span class="st-wk__bar"></span><b class="num">${min || '·'}</b><span>${fmt.weekdayShort(w)}</span>
     </div>`;
   }).join('');
@@ -504,17 +511,23 @@ function weekPreviewHtml(s) {
 function cycleHtml(s) {
   const today = todayKey();
   const start = s.plan?.startDate || mondayOf(today);
+  // Mismas palabras y la misma barra que Mi plan y Hoy (Bloque n de 13 · Arranque/Progresión/Pico/Descarga)
+  const ci = safe(() => cycleInfo(s, today), null);
   const weeks = Math.max(0, Math.floor(daysBetween(start, mondayOf(today)) / 7));
-  const cycle = Math.floor(weeks / 4) + 1;
-  const w = (weeks % 4) + 1;
-  const bar = [1, 2, 3, 4].map((i) => `<span class="${i < w ? 'is-done' : i === w ? 'is-now' : ''}"><i>${esc(CYCLE_NAMES[i - 1])}</i></span>`).join('');
+  const w = ci?.weekInCycle || (weeks % 4) + 1;
+  const names = Array.isArray(CYCLE_WEEKS) && CYCLE_WEEKS.length === 4 ? CYCLE_WEEKS : CYCLE_NAMES;
+  const blk = ci?.mesoNumber ? `Bloque ${ci.mesoNumber} de 13` : `Bloque ${Math.floor(weeks / 4) + 1}`;
+  const segs = names.map((name, i) => {
+    const n = i + 1;
+    const cls = [n < w ? 'is-past' : '', n === w ? 'is-current' : ''].join(' ');
+    return `<div class="pn-cycle__seg ${cls}"><span class="pn-cycle__track"><span class="pn-cycle__fill"></span></span><span class="pn-cycle__name">${esc(name)}</span></div>`;
+  }).join('');
   return `<div class="st-cycle__top">
-      <div><div class="eyebrow">Ciclo ${cycle}</div><b class="st-cycle__title">Semana ${w} de 4 · ${esc(CYCLE_NAMES[w - 1])}</b></div>
-      <span class="st-cycle__icon">${icon('repeat', 20)}</span>
+      <div><div class="eyebrow">${esc(blk)}</div><b class="st-cycle__title">Semana ${w} de 4 · ${esc(ci?.weekName || names[w - 1] || '')}</b></div>
     </div>
-    <div class="st-cycle__bar">${bar}</div>
-    <p class="st-note">Empezó el ${esc(fmt.dateLong(start))}. Cada ciclo sube la carga tres semanas y la cuarta descarga y mide tu VAM.</p>
-    <button type="button" class="btn btn--secondary btn--block" data-st="reset-cycle">${icon('refresh', 17)}<span>Reiniciar ciclo</span></button>`;
+    <div class="pn-cycle__bar" role="img" aria-label="${esc(`${blk}, semana ${w} de 4`)}">${segs}</div>
+    <p class="st-note">Empezó el ${esc(fmt.dateLong(start))}. Cada bloque sube la carga tres semanas y la cuarta descarga para que asimiles.</p>
+    <button type="button" class="btn btn--secondary btn--block" data-st="reset-cycle"><span>Reiniciar ciclo</span></button>`;
 }
 
 function weekHtml(s) {
@@ -554,7 +567,7 @@ function treadmillHtml(s) {
 
 /* ───────────── PANTALLA DE ENTRENO (escenarios 3D §15 + HUD de retransmisión §16) ───────────── */
 
-const VISUAL_DEFAULTS = { quality: 'auto', theme: DEFAULT_THEME, tvMode: false, strideBob: true, ghost: true };
+const VISUAL_DEFAULTS = { quality: 'auto', theme: AUTO_THEME, tvMode: false, strideBob: true, ghost: true };
 const QUALITY_OPTS = [
   { value: 'auto', label: 'Auto' },
   { value: 'high', label: 'Alta' },
@@ -574,15 +587,25 @@ const SCENES = (() => {
   const rank = (id) => { const i = SCENE_ORDER.indexOf(id); return i < 0 ? SCENE_ORDER.length : i; };
   return list.filter((t) => t && t.id && !t.hidden).sort((a, b) => rank(a.id) - rank(b.id));
 })();
-const sceneOf = (id) => SCENES.find((t) => t.id === id) || SCENES.find((t) => t.id === DEFAULT_THEME) || SCENES[0] || { id: DEFAULT_THEME, name: 'Aurora', description: '' };
+/** «Automático»: cada clase en su mundo (js/player/scene-pick.js). Primera opción y la predeterminada. */
+const AUTO_SCENE = {
+  id: AUTO_THEME,
+  name: 'Automático',
+  description: 'Cada clase en su mundo: cuestas en la Cordillera, series y ritmos en el Estadio, rodajes largos en la Aurora y recuperación en Grafito.',
+};
+const sceneOf = (id) => (id === AUTO_THEME ? AUTO_SCENE : SCENES.find((t) => t.id === id) || SCENES.find((t) => t.id === DEFAULT_THEME) || SCENES[0] || { id: DEFAULT_THEME, name: 'Aurora', description: '' });
 const visualsOf = (s) => {
   const v = { ...VISUAL_DEFAULTS, ...(s?.visuals || {}) };
   // Solo escenarios ofrecidos (nunca el 'legacy' oculto ni valores corruptos)
-  if (!SCENES.some((t) => t.id === v.theme)) v.theme = sceneOf(DEFAULT_THEME).id;
+  if (v.theme !== AUTO_THEME && !SCENES.some((t) => t.id === v.theme)) v.theme = AUTO_THEME;
   return v;
 };
+// La demo es una Pirámide (series): con Automático se ve el mundo que le toca
+const DEMO_CLASS = { category: 'intervals', templateId: 'pyramid' };
+const demoWorld = (id) => (id === AUTO_THEME ? autoTheme(DEMO_CLASS).id : sceneOf(id).id);
+const demoBadge = (id) => (id === AUTO_THEME ? `AUTOMÁTICO · ${sceneOf(demoWorld(id)).name.toUpperCase()}` : sceneOf(id).name.toUpperCase());
 const sceneThumb = (id) => `./assets/scenes/${encodeURIComponent(id)}.jpg`;
-const SCENE_NOTE_ON = 'Se aplica en tu próximo entreno. Todos los escenarios se mueven a la velocidad real de tu cinta y dejan los datos siempre por delante.';
+const SCENE_NOTE_ON = 'Es el escenario de cada clase; en Preparación puedes cambiarlo solo para esa sesión. Todos se mueven a la velocidad real de tu cinta y dejan los datos siempre por delante.';
 const SCENE_NOTE_OFF = 'Activa las animaciones 3D para usar un escenario. Ahora verás el fondo clásico.';
 
 /* Estilos propios de esta página que aún no están en screens-more.css (se inyectan una vez, sin coste). */
@@ -590,22 +613,24 @@ const SETTINGS_CSS = `
 .st-scenes.is-off{opacity:.45;pointer-events:none}
 .st-scene{gap:14px;padding-block:10px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .st-scene:active{background:var(--surface-2)}
-.st-scene__thumb{width:56px;height:100px;flex:none;object-fit:cover;object-position:50% 45%;border-radius:10px;border:1px solid var(--line);background:#05060a;transition:outline-color var(--dur-fast,.15s)}
-.st-scene.is-on .st-scene__thumb{outline:2px solid var(--accent);outline-offset:2px}
+.st-scene__thumb{width:56px;height:100px;flex:none;object-fit:cover;object-position:50% 45%;border-radius:10px;background:#05060a;outline:2px solid transparent;outline-offset:2px;transition:outline-color var(--dur-fast,.15s)}
+.st-scene__thumb--auto{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;overflow:hidden}
+.st-scene__thumb--auto img{width:100%;height:100%;object-fit:cover;object-position:50% 60%;display:block}
+.st-scene.is-on .st-scene__thumb{outline:2px solid var(--text);outline-offset:2px}
 .st-scene .st-row__label{min-width:0;flex:1}
 .st-scene .list__title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .st-scene .list__sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.st-scene.is-on .list__title{color:var(--accent);font-weight:700}
+.st-scene.is-on .list__title{color:var(--text);font-weight:600}
 .st-scene .st-voice__check{margin-left:auto}
 @media (orientation:landscape) and (max-height:520px){.st-scene{padding-block:8px}.st-scene__thumb{width:44px;height:72px;border-radius:8px}}
-.st-scene.is-on .st-voice__check{color:#fff;background:var(--accent);box-shadow:0 0 12px rgba(255,106,26,.5);transform:scale(1.05)}
+.st-scene.is-on .st-voice__check{color:var(--accent);background:none;box-shadow:none}
 .pl-demo__stage[data-scene-bg]{background-size:cover;background-position:50% 50%}
 .st-lvh__date{flex:none;white-space:nowrap}
 .st-lvh__note{min-width:0}
 .mu-apponly.is-off [data-mu-dep]{opacity:.45;pointer-events:none}
 .mu-tap .mu-tap__big{font-size:24px;letter-spacing:.06em;white-space:nowrap}
 .st-more{border-top:0}
-.st-more>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:12px var(--s-4,16px);color:var(--accent);font-weight:600;font-size:var(--fs-sub,15px);-webkit-tap-highlight-color:transparent}
+.st-more>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;min-height:44px;padding:10px var(--s-4,16px);color:var(--accent);font-weight:400;font-size:var(--fs-sub,15px);-webkit-tap-highlight-color:transparent}
 .st-more>summary::-webkit-details-marker{display:none}
 .st-more>summary .st-more__chev{display:inline-flex;transition:transform var(--dur-fast,.15s)}
 .st-more[open]>summary .st-more__chev{transform:rotate(90deg)}
@@ -632,14 +657,19 @@ function qualityNote(q) {
 }
 
 function sceneRow(t, on) {
+  const auto = t.id === AUTO_THEME;
+  // Automático: mosaico de los cuatro mundos en la misma miniatura vertical
+  const thumb = auto
+    ? `<span class="st-scene__thumb st-scene__thumb--auto" aria-hidden="true">${SCENES.slice(0, 4).map((x) => `<img src="${sceneThumb(x.id)}" alt="" loading="lazy" decoding="async">`).join('')}</span>`
+    : `<img class="st-scene__thumb" src="${sceneThumb(t.id)}" width="56" height="100" alt="" loading="lazy" decoding="async">`;
   return `<div class="list__row st-row st-scene${on ? ' is-on' : ''}" data-st="scene" data-scene="${esc(t.id)}" role="radio" aria-checked="${on}" tabindex="0">
-    <img class="st-scene__thumb" src="${sceneThumb(t.id)}" width="56" height="100" alt="" loading="lazy" decoding="async">
-    <span class="st-row__label"><span class="list__title">${esc(t.name)}${t.id === DEFAULT_THEME ? ' <span class="st-badge">Recomendado</span>' : ''}</span><span class="list__sub">${esc(t.description)}</span></span>
-    <span class="st-voice__check">${icon('check', 18, { stroke: 3 })}</span>
+    ${thumb}
+    <span class="st-row__label"><span class="list__title">${esc(t.name)}${auto ? ' <span class="st-badge">Recomendado</span>' : ''}</span><span class="list__sub">${esc(t.description)}</span></span>
+    <span class="st-voice__check">${icon('check', 14)}</span>
   </div>`;
 }
 
-const demoLabel = (v) => (v.quality === 'off' ? 'Activa las animaciones para verla' : `Ver demo de ${sceneOf(v.theme).name}`);
+const demoLabel = (v) => (v.quality === 'off' ? 'Activa las animaciones para verla' : `Ver demo de ${sceneOf(demoWorld(v.theme)).name}`);
 const demoBg = (id) => `background-image:radial-gradient(70% 62% at 50% 52%,rgba(5,6,10,.78),rgba(5,6,10,.3)),url('./assets/scenes/${encodeURIComponent(id)}-poster.jpg')`;
 
 function displayHtml(s) {
@@ -649,7 +679,7 @@ function displayHtml(s) {
   const sc = sceneOf(v.theme);
   const scenes = SCENES.length ? `<div class="st-group">
       <div class="st-group__title">Escenario</div>
-      <div class="list st-scenes${canDemo ? '' : ' is-off'}" role="radiogroup" aria-label="Escenario">${SCENES.map((t) => sceneRow(t, t.id === sc.id)).join('')}</div>
+      <div class="list st-scenes${canDemo ? '' : ' is-off'}" role="radiogroup" aria-label="Escenario">${[AUTO_SCENE, ...SCENES].map((t) => sceneRow(t, t.id === sc.id)).join('')}</div>
       <p class="st-note" data-scene-note>${esc(canDemo ? SCENE_NOTE_ON : SCENE_NOTE_OFF)}</p>
     </div>` : '';
   return `${scenes}
@@ -661,9 +691,9 @@ function displayHtml(s) {
       ${toggleRow('st-captions', 'Subtítulos del coach', 'Lo que dice tu coach, en una línea pequeña sobre el rótulo inferior (también con la voz silenciada)', v.captions !== false)}
     `, 'La escena se mueve a la velocidad real de tu cinta y cambia de color con cada tramo. Los datos siempre por delante: cifras nítidas sobre una escena oscura. Con «Reducir movimiento» del iPhone, todo se vuelve sereno.')}
     <section class="card pl-demo" data-demo3d>
-      <div class="pl-demo__stage" data-demo-stage data-scene-bg style="${demoBg(sc.id)}">
+      <div class="pl-demo__stage" data-demo-stage data-scene-bg style="${demoBg(demoWorld(sc.id))}">
         <div class="pl-demo__poster" data-demo-poster>
-          <span class="pl-demo__badge">${icon('sparkles', 15)}<span data-demo-badge>${esc(sc.name.toUpperCase())}</span></span>
+          <span class="pl-demo__badge"><span data-demo-badge>${esc(demoBadge(sc.id))}</span></span>
           <b>Vista previa de 10 segundos</b>
           <span>Una Pirámide real: del trote a tu primer sprint</span>
         </div>
@@ -727,7 +757,7 @@ async function runDemo3d(ctx, btn) {
     stage.appendChild(canvas);
     const reduced = safe(() => matchMedia('(prefers-reduced-motion: reduce)').matches, false);
     run.scene = await sceneMod.createScene3D(canvas, {
-      workout: wk, levels: s.levels, quality: v.quality, reducedMotion: reduced, tvMode: false, theme: v.theme,
+      workout: wk, levels: s.levels, quality: v.quality, reducedMotion: reduced, tvMode: false, theme: demoWorld(v.theme),
       strideBob: v.strideBob !== false, treadmill: s.treadmill || null, onError: () => stop(),
     });
     if (!run.alive) { try { run.scene?.destroy?.({ releaseContext: true }); } catch { /* nada */ } return; }
@@ -771,10 +801,10 @@ function voiceRow(v, on) {
   const uri = v.voiceURI || '';
   const name = cleanVoiceName(v.name);
   return `<div class="list__row st-row st-voice${on ? ' is-on' : ''}" data-voice="${esc(uri)}" role="button" tabindex="0" aria-pressed="${on}">
-    <span class="st-voice__check">${icon('check', 18, { stroke: 3 })}</span>
+    <span class="st-voice__check">${icon('check', 14)}</span>
     <span class="st-row__label"><span class="list__title">${esc(name)}</span><span class="list__sub">${langLabel(v.lang)}${v.localService === false ? ' · en línea' : ''}</span></span>
     ${qualityBadge(voiceQuality(v))}
-    <button type="button" class="st-play" data-play="${esc(uri)}" aria-label="Escuchar ${esc(name)}">${icon('play', 15)}</button>
+    <button type="button" class="st-play" data-play="${esc(uri)}" aria-label="Escuchar ${esc(name)}">${icon('play', 14)}</button>
   </div>`;
 }
 
@@ -799,20 +829,20 @@ function voicesHtml(s) {
   const others = main.filter((v) => !isEsES(v)).sort(sorter);
   const extraOpen = !!sel && extra.some((v) => v.voiceURI === sel);
   const auto = `<div class="list__row st-row st-voice${!exists ? ' is-on' : ''}" data-voice="" role="button" tabindex="0" aria-pressed="${!exists}">
-    <span class="st-voice__check">${icon('check', 18, { stroke: 3 })}</span>
+    <span class="st-voice__check">${icon('check', 14)}</span>
     <span class="st-row__label"><span class="list__title">Automática</span><span class="list__sub">La mejor disponible${def ? ` · ahora ${esc(cleanVoiceName(def.name))}` : ''}</span></span>
     <span class="st-badge">Recomendada</span>
-    <button type="button" class="st-play" data-play="" aria-label="Escuchar la voz automática">${icon('play', 15)}</button>
+    <button type="button" class="st-play" data-play="" aria-label="Escuchar la voz automática">${icon('play', 14)}</button>
   </div>`;
   return `<div class="list">${auto}${es.map((v) => voiceRow(v, v.voiceURI === sel)).join('')}</div>
     ${others.length ? `<div class="st-group__title st-group__title--inner">Otras voces en español</div><div class="list">${others.map((v) => voiceRow(v, v.voiceURI === sel)).join('')}</div>` : ''}
-    ${extra.length ? `<details class="st-more"${extraOpen ? ' open' : ''}><summary><span class="st-more__chev">${icon('chevron-right', 14, { stroke: 2.5 })}</span>Más voces (${extra.length})</summary><div class="list">${extra.map((v) => voiceRow(v, v.voiceURI === sel)).join('')}</div></details>` : ''}`;
+    ${extra.length ? `<details class="st-more"${extraOpen ? ' open' : ''}><summary><span class="st-more__chev">${icon('chevron-right', 14)}</span>Más voces (${extra.length})</summary><div class="list">${extra.map((v) => voiceRow(v, v.voiceURI === sel)).join('')}</div></details>` : ''}`;
 }
 
 function packsHtml(s, packs) {
   const sel = s.audio?.packId || null;
   const sys = `<div class="list__row st-row st-voice${!sel ? ' is-on' : ''}" data-pack="" role="button" tabindex="0" aria-pressed="${!sel}">
-    <span class="st-voice__check">${icon('check', 18, { stroke: 3 })}</span>
+    <span class="st-voice__check">${icon('check', 14)}</span>
     ${label('Voz del sistema', 'Síntesis de voz del iPhone (la que elijas abajo)')}
   </div>`;
   if (packs == null) return `<div class="list__row st-row"><span class="st-spinner" aria-hidden="true"></span><span class="list__sub">Buscando voces grabadas…</span></div>${sys}`;
@@ -826,7 +856,7 @@ function packsHtml(s, packs) {
       ? `${fmt.int(count)} frases grabadas${isEva ? ' · español de España' : ''}`
       : isEva ? 'Grabaciones en camino · mientras, voz del sistema' : 'Este pack no tiene grabaciones';
     return `<div class="list__row st-row st-voice mu-pack${on ? ' is-on' : ''}${ready ? '' : ' is-pending'}" data-pack="${esc(p.id)}" role="button" tabindex="0" aria-pressed="${on}">
-      <span class="st-voice__check">${icon('check', 18, { stroke: 3 })}</span>
+      <span class="st-voice__check">${icon('check', 14)}</span>
       <span class="mu-pack__avatar" aria-hidden="true">${esc(packName(p).charAt(0).toUpperCase() || 'V')}</span>
       ${label(esc(packName(p)), sub)}
       <span class="st-badge${ready ? ' st-badge--premium' : ''}">${ready ? 'Grabada' : 'Pronto'}</span>
@@ -874,7 +904,7 @@ function audioHtml(s) {
       ${stepRow('Volumen de la voz', 'Respecto al del iPhone', 'st-volume', { value: Math.round((a.volume ?? 1) * 100), step: 10, min: 10, max: 100, unit: '%', decimals: 0 })}
     `)}
     <button type="button" class="btn btn--primary btn--lg btn--block st-test" data-st="test-coach">${icon('play', 20)}<span>Probar coach</span></button>
-    <p class="st-note st-note--center">${icon('bell', 14)} El modo silencio del iPhone (botón de Acción o Centro de control) puede silenciar los pitidos. Si no los oyes, desactívalo y sube el volumen.</p>`;
+    <p class="st-note st-note--center">El modo silencio del iPhone (botón de Acción o Centro de control) puede silenciar los pitidos. Si no los oyes, desactívalo y sube el volumen.</p>`;
 }
 
 /* ───────────── APPLE WATCH Y SALUD ───────────── */
@@ -1086,7 +1116,7 @@ function nativeWatchHtml() {
   // 'prompt': aún sale la hoja de Salud (el botón la enseña) · 'denied': ya se dijo que no a algo (el botón abre Ajustes)
   const miss = ns ? healthMissingOf(ns) : null;
   return `<section class="card st-install${c.ok ? ' is-ok' : ''}">
-      <span class="st-install__icon">${icon(c.ic, 28, c.ok ? { stroke: 3 } : undefined)}</span>
+      <span class="st-install__icon">${icon(c.ok ? 'check-circle' : c.ic, 40)}</span>
       <b class="st-install__title">${esc(c.title)}</b>
       <p>${esc(c.text)}</p>
     </section>
@@ -1098,15 +1128,31 @@ function nativeWatchHtml() {
     </div>` : ''}`;
 }
 
+/** Cabecera de Apple Watch: el reloj real con la pantalla «Clase» de BestRunning, en bucle (póster sin movimiento). */
+function watchHero() {
+  const native = isNative();
+  return `<section class="st-watchhero" aria-label="Apple Watch">
+      ${bgVideo('watch-loop', { cls: 'st-watchhero__media' })}
+      <div class="st-watchhero__text">
+        <b>${native ? 'Tu clase, en la muñeca' : 'Tu Apple Watch, en cada clase'}</b>
+        <span>${native ? 'Cada cambio con un toque y tu pulso en directo' : 'Graba tu carrera en cinta y trae tu pulso al resumen'}</span>
+      </div>
+    </section>`;
+}
+
 function watchHtml(s) {
   if (isNative()) {
     // App nativa: el estado del reloj arriba; el Atajo queda como respaldo (sin reloj o sin la app del reloj)
-    return `<div class="stack-lg" data-slot="nwatch">${nativeWatchHtml()}</div>
-      <details class="st-more st-watch-legacy"><summary><span class="st-more__chev">${icon('chevron-right', 14, { stroke: 2.5 })}</span>Sin la app del reloj: pulso con Atajos</summary>
-        <div class="stack-lg">${watchShortcutHtml(s)}</div>
-      </details>`;
+    // App nativa: la app del reloj se conecta sola y manda el pulso en directo (sin Atajos ni «Cinta de correr»)
+    return `${watchHero()}<div class="stack-lg" data-slot="nwatch">${nativeWatchHtml()}</div>
+      <section class="card st-info">
+        <div>
+          <b class="st-info__title">Pulso en directo, sin hacer nada</b>
+          <p>BestRunning en tu Apple Watch se conecta solo al empezar la clase y manda tu pulso al iPhone en directo: lo ves en la clase, por zonas y sobre tu perfil de velocidad en el resumen. Al terminar, el entreno se guarda en Salud.</p>
+        </div>
+      </section>`;
   }
-  return watchShortcutHtml(s);
+  return `${watchHero()}${watchShortcutHtml(s)}`;
 }
 
 function watchShortcutHtml(s) {
@@ -1119,7 +1165,6 @@ function watchShortcutHtml(s) {
       ${toggleRow('st-watch', 'Recordarme iniciar el Watch', 'Antes de empezar: Entreno → Cinta de correr', ig.watchReminder !== false)}
     `)}
     <section class="card st-info">
-      <span class="st-info__icon">${icon('heart', 20)}</span>
       <div>
         <b class="st-info__title">Pulso del Watch: al terminar, no en directo</b>
         <p>Una web no puede leer el pulso del Apple Watch mientras corres: Safari no da acceso a HealthKit ni al Bluetooth del reloj. La solución pro: el Watch graba tu entreno de <i>Cinta de correr</i> y, al acabar, un <b>Atajo</b> lee de Salud tu frecuencia cardiaca de esa franja y te la trae: media, máxima, gráfico sobre tu perfil de velocidad y tiempo en cada zona.</p>
@@ -1127,9 +1172,9 @@ function watchShortcutHtml(s) {
     </section>
     <section class="card mu-hrflow" aria-label="Cómo llega el pulso">
       <div class="mu-hrflow__step"><span>${icon('watch', 20)}</span><b>Watch</b> <small>Graba Cinta de correr</small></div>
-      <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 16, { stroke: 2.6 })}</i>
-      <div class="mu-hrflow__step"><span>${icon('sparkles', 20)}</span><b>Atajo</b> <small>Lee Salud y copia</small></div>
-      <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 16, { stroke: 2.6 })}</i>
+      <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 14)}</i>
+      <div class="mu-hrflow__step"><span>${icon('zap', 20)}</span><b>Atajo</b> <small>Lee Salud y copia</small></div>
+      <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 14)}</i>
       <div class="mu-hrflow__step"><span>${icon('pulse', 20)}</span><b>BestRunning</b> <small>Pegar en el resumen</small></div>
     </section>
     ${group('Atajo de pulso', `
@@ -1154,12 +1199,12 @@ function installHtml() {
   const ok = isStandalone();
   const status = ok
     ? `<section class="card st-install is-ok">
-        <span class="st-install__icon">${icon('check', 30, { stroke: 3 })}</span>
+        <span class="st-install__icon">${icon('check-circle', 40)}</span>
         <b class="st-install__title">¡BestRunning ya está instalada!</b>
         <p>La estás usando como app: pantalla completa, sin barras de Safari y funcionando sin conexión.</p>
       </section>`
     : `<section class="card st-install">
-        <span class="st-install__icon">${icon('download', 28)}</span>
+        <span class="st-install__icon">${icon('download', 40)}</span>
         <b class="st-install__title">Instálala en tu pantalla de inicio</b>
         <p>Diez segundos y la tendrás como una app más, con su icono y a pantalla completa.</p>
       </section>`;
@@ -1167,8 +1212,8 @@ function installHtml() {
     ['bolt', 'Arranque instantáneo desde su icono'],
     ['moon', 'Pantalla siempre encendida durante la clase'],
     ['route', 'Funciona sin conexión en el gimnasio'],
-    ['sparkles', 'Pantalla completa, sin barras de Safari'],
-  ].map(([ic, t]) => `<div class="st-benefit"><span>${icon(ic, 16)}</span>${t}</div>`).join('');
+    ['eye', 'Pantalla completa, sin barras de Safari'],
+  ].map(([ic, t]) => `<div class="list__row st-benefit">${listIcon(ic)}<span class="list__title">${t}</span></div>`).join('');
   return `${status}
     <div class="st-group">
       <div class="st-group__title">${ok ? 'Si algún día la reinstalas' : 'Paso a paso'}</div>
@@ -1182,7 +1227,7 @@ function installHtml() {
     </div>
     <div class="st-group">
       <div class="st-group__title">Por qué merece la pena</div>
-      <div class="card st-benefits">${benefits}</div>
+      <div class="list st-benefits">${benefits}</div>
       <p class="st-note">La app instalada guarda sus datos aparte de Safari. Si ya entrenaste desde Safari, exporta una copia en <b>Datos</b> y luego impórtala dentro de la app.</p>
     </div>`;
 }
@@ -1194,23 +1239,23 @@ function dataHtml(s) {
   const bytes = safe(() => new Blob([exportState()]).size, 0);
   const firstKey = hist.reduce((m, h) => (h?.dayKey && (!m || h.dayKey < m) ? h.dayKey : m), null);
   return `<section class="card st-datasum">
-      <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'sesión' : 'sesiones'}</span></div>
-      <div><b class="num">${firstKey ? esc(fmt.dateShort(firstKey).split(' ').slice(1).join(' ')) : '—'}</b><span>primera</span></div>
-      <div><b class="num">${bytes < 1024 * 1024 ? `${fmt.int(bytes / 1024)}` : fmt.dec1(bytes / 1048576)}</b><span>${bytes < 1024 * 1024 ? 'KB' : 'MB'}</span></div>
+      <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'Sesión' : 'Sesiones'}</span></div>
+      <div><b class="num">${firstKey ? esc(fmt.dateShort(firstKey).split(' ').slice(1).join(' ')) : '—'}</b><span>Primera</span></div>
+      <div><b class="num">${bytes < 1024 * 1024 ? `${fmt.int(bytes / 1024)}` : fmt.dec1(bytes / 1048576)}<span class="unit">${bytes < 1024 * 1024 ? 'KB' : 'MB'}</span></b><span>Tamaño</span></div>
     </section>
     <p class="st-note st-persist" data-persist></p>
     ${group('Copia de seguridad', `
       <div class="list__row st-row st-action" role="button" tabindex="0" data-st="export">
-        ${sqIcon('share', 'var(--info)', 15)}${label('Exportar copia', 'Archivo JSON con todo: plan, historial y ajustes')}<span class="list__chev">${icon('chevron-right', 16, { stroke: 2.5 })}</span>
+        ${listIcon('share')}${label('Exportar copia', 'Archivo JSON con todo: plan, historial y ajustes')}<span class="list__chev">${icon('chevron-right', 14)}</span>
       </div>
       <label class="list__row st-row st-action" for="st-import">
-        ${sqIcon('download', 'var(--ok)', 15)}${label('Importar copia', 'Sustituye los datos actuales por los de la copia')}<span class="list__chev">${icon('chevron-right', 16, { stroke: 2.5 })}</span>
+        ${listIcon('download')}${label('Importar copia', 'Sustituye los datos actuales por los de la copia')}<span class="list__chev">${icon('chevron-right', 14)}</span>
         <input id="st-import" class="st-file" type="file" accept="application/json,.json">
       </label>
     `, 'Tus datos solo viven en este iPhone: no hay cuentas ni nube. Exporta una copia de vez en cuando (a Archivos o iCloud Drive) y siempre antes de cambiar de móvil.')}
     ${group('Zona peligrosa', `
       <div class="list__row st-row st-action st-danger" role="button" tabindex="0" data-st="reset">
-        ${sqIcon('trash', 'var(--danger)', 15)}<span class="list__title">Borrar todos los datos</span>
+        ${listIcon('trash', { tone: 'danger' })}<span class="list__title">Borrar todos los datos</span>
       </div>
     `, 'Elimina historial, plan, logros y ajustes de este dispositivo y vuelve a empezar desde la bienvenida.')}`;
 }
@@ -1332,13 +1377,13 @@ function aboutHtml(s) {
       <div class="st-about__logo" aria-hidden="true"></div>
       <h2 class="st-about__name">BestRunning</h2>
       <p class="st-about__tag">Tu entrenador personal de cinta</p>
-      <span class="st-about__ver num">Versión ${esc(APP_VERSION)}</span>
+      <span class="st-about__ver">Versión ${esc(APP_VERSION)}</span>
     </section>
     ${group('', `
       <div class="list__row st-row"><span class="list__title">Hecha para</span><span class="list__value">${name ? esc(name) : 'ti'}</span></div>
       <div class="list__row st-row"><span class="list__title">Funciona sin conexión</span><span class="list__value">Sí</span></div>
       <div class="list__row st-row"><span class="list__title">Tus datos</span><span class="list__value">Solo en este dispositivo</span></div>
-      <div class="list__row st-row st-action" role="button" tabindex="0" data-st="update">${sqIcon('refresh', 'var(--accent)', 15)}<span class="list__title">Buscar actualizaciones</span></div>
+      <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="update"><span class="list__title">Buscar actualizaciones</span></div>
     `)}
     <div class="st-group">
       <div class="st-group__title">Créditos</div>
@@ -1352,7 +1397,7 @@ function aboutHtml(s) {
       </div>
     </div>
     <section class="card st-warn">
-      <span class="st-warn__icon">${icon('heart', 18)}</span>
+      <span class="st-warn__icon">${icon('info', 18)}</span>
       <p>BestRunning no es un dispositivo médico. Si notas dolor en el pecho, mareo o una falta de aire fuera de lo normal, para la cinta y consulta a tu médico.</p>
     </section>
     <p class="st-foot">Hecho con cariño y muchos kilómetros</p>`;
@@ -1366,7 +1411,7 @@ async function checkUpdate() {
       return;
     }
     await reg.update();
-    if (reg.waiting || reg.installing) toast('Hay una versión nueva en camino…', { icon: 'sparkles' });
+    if (reg.waiting || reg.installing) toast('Hay una versión nueva en camino…', { icon: 'download' });
     else toast('Ya tienes la última versión', { icon: 'check', kind: 'success' });
   } catch {
     toast('No he podido comprobarlo ahora mismo', { kind: 'error' });
@@ -1601,7 +1646,7 @@ function trackRow(t, disabled, i) {
     </span>
     ${energyBars(t.energy)}
     ${user ? `<button type="button" class="mu-more" data-edit-track="${esc(t.id)}" aria-label="Editar ${esc(title)}">${icon('edit', 17)}</button>` : ''}
-    ${toggle({ id: `mu-tr-${i}`, checked: !off, attrs: `data-track-toggle="${esc(t.id)}" aria-label="Usar ${esc(title)}"` })}
+    <label class="mu-check"><input type="checkbox" id="mu-tr-${i}"${off ? '' : ' checked'} data-track-toggle="${esc(t.id)}" aria-label="Usar ${esc(title)}"><span class="mu-check__mark" aria-hidden="true">${icon('check', 18)}</span></label>
   </div>`;
 }
 
@@ -1642,9 +1687,9 @@ function heroStatsHtml(s) {
   const range = bpms.length ? `${Math.round(Math.min(...bpms))}–${Math.round(Math.max(...bpms))}` : '–';
   const off = offline.status;
   const pct = off && off.total ? Math.round((off.cached / off.total) * 100) : null;
-  return `<div><b class="num">${mlib.builtIn || mlib.user ? active.length : '–'}</b><span>canciones</span></div>
+  return `<div><b class="num">${mlib.builtIn || mlib.user ? active.length : '–'}</b><span>Canciones</span></div>
     <div><b class="num">${range}</b><span>BPM</span></div>
-    <div><b class="num">${pct == null ? '–' : `${pct} %`}</b><span>sin conexión</span></div>`;
+    <div><b class="num">${pct == null ? '–' : `${pct} %`}</b><span>Sin conexión</span></div>`;
 }
 
 function musicHtml(s) {
@@ -1652,7 +1697,6 @@ function musicHtml(s) {
   const own = m.mode === 'own';
   const vol = Math.round(clamp(numOr(m.volume, 0.8), 0, 1) * 100);
   return `<section class="card mu-hero${own ? ' is-own' : ''}">
-      <div class="mu-hero__glow" aria-hidden="true"></div>
       <div class="mu-hero__eq" aria-hidden="true">${'<i></i>'.repeat(9)}</div>
       <div class="eyebrow">DJ BestRunning</div>
       <h2 class="mu-hero__title">Cada tramo, su música</h2>
@@ -1694,11 +1738,10 @@ function musicHtml(s) {
       <div class="st-group__title">Importar canciones</div>
       <section class="card mu-import">
         <div class="mu-import__top">
-          <span class="mu-import__icon">${icon('download', 22)}</span>
           <p>Elige canciones de la app <b>Archivos</b> (MP3, M4A, WAV…). Las analizamos aquí mismo —BPM, compases y drops— para mezclarlas a tempo. No salen de tu iPhone.</p>
         </div>
         <label class="btn btn--secondary btn--block mu-import__btn${importJob?.running ? ' is-busy' : ''}" for="mu-files">
-          ${icon('plus', 18)}<span>${importJob?.running ? 'Importando…' : 'Importar canciones'}</span>
+          <span>${importJob?.running ? 'Importando…' : 'Importar canciones'}</span>
           <input id="mu-files" class="st-file" type="file" accept="audio/*" multiple${importJob?.running ? ' disabled' : ''}>
         </label>
         <div class="mu-import__job" data-mu-import>${importJobHtml()}</div>
@@ -2169,7 +2212,7 @@ function offlineHtml() {
     : full ? `Las ${st.total} pistas están en tu iPhone${st.totalBytes ? ` · ${fmtMB(st.totalBytes)}` : ''}`
       : `${st.cached} de ${st.total} pistas guardadas${st.totalBytes ? ` · ${fmtMB(st.bytes || 0)} de ${fmtMB(st.totalBytes)}` : ''}`;
   return `<div class="mu-offline__top">
-      <span class="mu-offline__icon${full ? ' is-ok' : ''}">${icon(full ? 'check' : 'download', 22, { stroke: full ? 3 : 2 })}</span>
+      <span class="mu-offline__icon${full ? ' is-ok' : ''}">${icon(full ? 'check-circle' : 'download', 24)}</span>
       <div class="mu-offline__txt"><b>${full ? 'Lista para entrenar sin red' : 'Música para el gimnasio sin cobertura'}</b><span data-mu-off-line>${esc(job ? job.text || 'Descargando…' : statusLine)}</span></div>
     </div>
     <div class="mu-progress__bar mu-offline__bar${job ? ' is-active' : ''}"><i style="--p:${pct.toFixed(3)}"></i></div>
@@ -2383,6 +2426,8 @@ const PAGES = {
       const refreshZones = () => {
         const host = ctx.body.querySelector('[data-hrzones]');
         if (host) host.innerHTML = hrZonesHtml(getState());
+        const foot = ctx.body.querySelector('[data-hrzones-foot]');
+        if (foot) foot.textContent = hrZonesFoot(getState());
       };
       if (id === 'st-name') {
         ctx.save((d) => { d.profile.name = String(v || '').trim().slice(0, 30); });
@@ -2607,25 +2652,24 @@ const PAGES = {
     action(name, el, ctx) {
       if (name === 'demo3d') fire(() => runDemo3d(ctx, el));
       else if (name === 'scene') {
-        const id = sceneOf(el.dataset.scene).id;
+        const id = el.dataset.scene === AUTO_THEME ? AUTO_THEME : sceneOf(el.dataset.scene).id;
         const before = visualsOf(getState()).theme;
         ctx.body.querySelectorAll('[data-scene]').forEach((r) => {
           const on = r.dataset.scene === id;
           r.classList.toggle('is-on', on);
           r.setAttribute('aria-checked', String(on));
         });
-        const sc = sceneOf(id);
         const badge = ctx.body.querySelector('[data-demo-badge]');
-        if (badge) badge.textContent = sc.name.toUpperCase();
+        if (badge) badge.textContent = demoBadge(id);
         const stage = ctx.body.querySelector('[data-demo-stage]');
-        if (stage) stage.style.backgroundImage = demoBg(id).replace(/^background-image:/, '');
+        if (stage) stage.style.backgroundImage = demoBg(demoWorld(id)).replace(/^background-image:/, '');
         if (id === before) return;
         haptic('selection');
         ctx.save((d) => { d.visuals = { ...VISUAL_DEFAULTS, ...(d.visuals || {}), theme: id }; });
         const b = ctx.body.querySelector('[data-st="demo3d"]');
         if (b && !ctx.demo3d) { const t = b.querySelector('span'); if (t) t.textContent = demoLabel(visualsOf(getState())); }
         // Demo en marcha: cambia de escenario en caliente
-        fire(() => ctx.demo3d?.scene?.setTheme?.(id));
+        fire(() => ctx.demo3d?.scene?.setTheme?.(demoWorld(id)));
       }
     },
   },

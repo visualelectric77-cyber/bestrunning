@@ -1,4 +1,5 @@
-/* BestRunning · base: reset, shell, tab bar, transiciones, tipografía y animaciones utilitarias. */
+/* BestRunning · base v2: reset, shell, tab bar iOS, transiciones, tipografía y animaciones utilitarias.
+   Reglas en docs/design/ui-v2.md (negro puro, tipografía, un único acento sólido). */
 
 /* ───── Reset ───── */
 *,
@@ -32,8 +33,8 @@ body {
   color: var(--text);
   font-family: var(--font);
   font-size: var(--fs-body);
-  line-height: 1.35;
-  letter-spacing: -0.012em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -109,8 +110,8 @@ h2,
 h3,
 h4 {
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
   text-wrap: balance;
 }
 
@@ -135,7 +136,7 @@ li {
 }
 
 ::selection {
-  background: var(--accent-soft);
+  background: rgba(255, 90, 31, 0.35);
 }
 
 /* ───── Shell ───── */
@@ -180,14 +181,7 @@ li {
   padding-bottom: calc(var(--safe-b) + var(--s-6));
 }
 
-/* Brillo ambiental sutil en lo alto de cada pantalla (se desplaza con el contenido) */
-.screen:not(.screen--fullscreen) {
-  background:
-    radial-gradient(120% 340px at 85% -60px, rgba(255, 90, 31, 0.13), transparent 70%) no-repeat,
-    radial-gradient(90% 300px at 0% -90px, rgba(255, 45, 85, 0.07), transparent 70%) no-repeat,
-    var(--bg);
-  background-attachment: local, local, scroll;
-}
+/* v2: fondo negro puro, sin brillos ambientales */
 
 /* El zoom por doble toque se desactiva en cada contenedor con scroll propio */
 .screen,
@@ -199,32 +193,47 @@ li {
   touch-action: manipulation;
 }
 
-/* ───── Tab bar ───── */
+/* ───── Tab bar (iOS 26: cápsula flotante de Liquid Glass sobre el indicador de inicio) ─────
+   La barra (#tabbar) ocupa la franja inferior sin fondo; la cápsula (.tabbar__inner) flota con sangrado lateral.
+   El contenido pasa por detrás. Seleccionado: glifo «.fill» en ember con una lente de cristal detrás. */
 .tabbar {
+  --tb-cap: 62px; /* alto de la cápsula */
+  --tb-gap: max(calc(var(--safe-b) - 13px), 12px); /* distancia al borde inferior (sobre el indicador de inicio) */
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 50;
-  height: calc(var(--tabbar-h) + var(--safe-b));
-  padding: 0 var(--safe-r) var(--safe-b) var(--safe-l);
+  height: calc(var(--tb-cap) + var(--tb-gap));
+  padding: 0 max(var(--safe-r), 20px) var(--tb-gap) max(var(--safe-l), 20px);
   display: flex;
-  align-items: stretch;
+  align-items: flex-end;
   justify-content: center;
-  background: var(--glass);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  box-shadow: 0 -0.5px 0 var(--line-strong);
-  view-transition-name: tabbar;
+  pointer-events: none;
   transition:
-    transform var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-ios),
     opacity var(--dur) var(--ease-out);
 }
 
 .tabbar__inner {
+  /* El nombre de transición va en la cápsula: en la barra la convertiría en raíz del desenfoque y no se vería nada detrás */
+  view-transition-name: tabbar;
+  pointer-events: auto;
   display: flex;
+  align-items: stretch;
   width: 100%;
-  max-width: var(--content-max);
+  max-width: 440px;
+  height: var(--tb-cap);
+  padding: 4px;
+  border-radius: var(--r-pill);
+  background: rgba(30, 30, 32, 0.74);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  /* Liquid Glass: canto de luz de 0,5 px arriba, borde neutro y una sombra corta (sin halo) */
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.22),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 10px 30px -8px rgba(0, 0, 0, 0.55);
 }
 
 .tabbar__item {
@@ -234,61 +243,75 @@ li {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  padding-top: 4px;
-  /* --text-3 (≈4,6:1 sobre la barra): con 0,46 los rótulos de 10 px quedaban por debajo de AA */
-  color: var(--text-3);
+  gap: 1px;
+  padding: 0;
+  border-radius: var(--r-pill);
+  color: var(--text-2);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.01em;
   text-decoration: none;
   position: relative;
-  transition: color var(--dur-fast) ease;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color var(--dur-fast) ease,
+    background-color var(--dur) var(--ease-ios);
+}
+
+/* Lente de cristal detrás de la pestaña seleccionada */
+.tabbar__item.is-active {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
 }
 
 .tabbar__icon {
   position: relative;
   display: grid;
   place-items: center;
-  width: 46px;
-  height: 30px;
-  border-radius: var(--r-pill);
-  transition:
-    transform var(--dur) var(--ease-spring),
-    background-color var(--dur) ease;
+  width: 30px;
+  height: 28px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.tabbar__glyph {
+  grid-area: 1 / 1;
+  width: 26px;
+  height: 26px;
+}
+
+.tabbar__glyph--fill,
+.tabbar__item.is-active .tabbar__glyph--line {
+  display: none;
+}
+
+.tabbar__item.is-active .tabbar__glyph--fill {
+  display: block;
 }
 
 .tabbar__item:active .tabbar__icon {
-  transform: scale(0.86);
-}
-
-.tabbar__item.is-active {
-  color: var(--accent);
-}
-
-.tabbar__item.is-active .tabbar__icon {
-  background: var(--accent-soft);
-  animation: tab-pop var(--dur-slow) var(--ease-spring);
-}
-
-.tabbar__item.is-active .tabbar__icon svg {
-  filter: drop-shadow(0 0 8px rgba(255, 106, 26, 0.45));
+  transform: scale(0.92);
 }
 
 .tabbar__label {
-  line-height: 1;
+  line-height: 12px;
 }
 
-.is-fullscreen .tabbar {
-  transform: translateY(110%);
+.is-fullscreen .tabbar,
+.is-pushed .tabbar {
+  transform: translateY(calc(100% + 24px));
   opacity: 0;
   pointer-events: none;
 }
 
-@keyframes tab-pop {
-  0% { transform: scale(0.8); }
-  55% { transform: scale(1.08); }
-  100% { transform: scale(1); }
+.is-fullscreen .tabbar__inner,
+.is-pushed .tabbar__inner {
+  pointer-events: none;
+}
+
+/* Pantallas empujadas: sin tab bar, el contenido y los botones fijos bajan hasta el indicador de inicio */
+body.is-pushed {
+  --tabbar-h: 0px;
 }
 
 /* ───── Raíces de overlays ───── */
@@ -399,12 +422,12 @@ html[data-nav='modal-out']::view-transition-new(view) {
   to { transform: translateX(-28%); filter: brightness(0.6); }
 }
 @keyframes vt-push-new {
-  from { transform: translateX(100%); box-shadow: -20px 0 40px rgba(0, 0, 0, 0.5); }
-  to { transform: translateX(0); box-shadow: -20px 0 40px rgba(0, 0, 0, 0); }
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 @keyframes vt-pop-old {
-  from { transform: translateX(0); box-shadow: -20px 0 40px rgba(0, 0, 0, 0.5); }
-  to { transform: translateX(100%); box-shadow: -20px 0 40px rgba(0, 0, 0, 0); }
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
 }
 @keyframes vt-pop-new {
   from { transform: translateX(-28%); filter: brightness(0.6); }
@@ -417,7 +440,7 @@ html[data-nav='modal-out']::view-transition-new(view) {
   from { opacity: 0; }
 }
 @keyframes vt-fade-scale-in {
-  from { opacity: 0; transform: scale(0.985); }
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
 }
 @keyframes vt-modal-in {
   from { transform: translateY(100%); }
@@ -429,45 +452,58 @@ html[data-nav='modal-out']::view-transition-new(view) {
   to { transform: translateY(100%); }
 }
 
-/* ───── Tipografía ───── */
+/* ───── Tipografía (escala iOS; SF Pro vía -apple-system) ───── */
 .large-title {
   font-size: var(--fs-large);
-  line-height: 41px;
-  font-weight: 800;
-  letter-spacing: -0.025em;
+  line-height: var(--lh-large);
+  font-weight: 700;
+  letter-spacing: -0.012em;
 }
 
-.title1 { font-size: var(--fs-title1); font-weight: 800; letter-spacing: -0.022em; line-height: 1.15; }
-.title2 { font-size: var(--fs-title2); font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
-.title3 { font-size: var(--fs-title3); font-weight: 700; letter-spacing: -0.018em; line-height: 1.25; }
-.headline { font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.015em; }
-.body { font-size: var(--fs-body); }
-.callout { font-size: 16px; }
-.subhead { font-size: var(--fs-sub); letter-spacing: -0.01em; }
-.footnote { font-size: var(--fs-footnote); letter-spacing: -0.005em; }
-.caption { font-size: var(--fs-caption); letter-spacing: 0; }
+.title1 { font-size: var(--fs-title1); line-height: var(--lh-title1); font-weight: 700; letter-spacing: -0.012em; }
+.title2 { font-size: var(--fs-title2); line-height: var(--lh-title2); font-weight: 700; letter-spacing: -0.01em; }
+.title3 { font-size: var(--fs-title3); line-height: var(--lh-title3); font-weight: 600; letter-spacing: -0.01em; }
+.headline { font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: 600; letter-spacing: -0.012em; }
+.body { font-size: var(--fs-body); line-height: var(--lh-body); }
+.callout { font-size: var(--fs-callout); line-height: var(--lh-callout); }
+.subhead { font-size: var(--fs-sub); line-height: var(--lh-sub); letter-spacing: -0.01em; }
+.footnote { font-size: var(--fs-footnote); line-height: var(--lh-footnote); letter-spacing: -0.005em; }
+.caption { font-size: var(--fs-caption); line-height: var(--lh-caption); letter-spacing: 0; }
 
+/* Cifras: SF Pro Display 700, tabulares */
 .num {
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--num-track);
 }
 
 .display-num {
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
-  font-weight: 800;
-  letter-spacing: -0.035em;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   line-height: 0.95;
 }
 
+/* Unidad junto a una cifra: gris y al 45 % (p. ej. <b class="num">8,3<span class="unit">km/h</span></b>) */
+.unit {
+  margin-left: 0.18em;
+  font-family: var(--font);
+  font-size: calc(var(--unit-scale) * 1em);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+
+/* Rótulo pequeño en mayúsculas (categoría, «HOY · TEMPO», encabezado dentro de tarjeta) */
 .eyebrow {
   font-size: var(--fs-caption);
-  font-weight: 700;
+  line-height: var(--lh-caption);
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-3);
+  letter-spacing: 0.05em;
+  color: var(--text-2);
 }
 
 .muted { color: var(--text-2); }
@@ -482,12 +518,11 @@ html[data-nav='modal-out']::view-transition-new(view) {
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabular { font-variant-numeric: tabular-nums; }
 
+/* v2: sin texto degradado. Se mantiene la clase (heredada) pero pinta en blanco sólido */
 .grad-text {
-  background: var(--accent-grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  color: var(--text);
+  background: none;
+  -webkit-text-fill-color: currentColor;
 }
 
 .sr-only {
@@ -500,9 +535,9 @@ html[data-nav='modal-out']::view-transition-new(view) {
   white-space: nowrap;
 }
 
-/* ───── Animaciones utilitarias ───── */
+/* ───── Animaciones utilitarias (opacidad + 8 px, 180–320 ms, ease-out; sin rebotes) ───── */
 .fade-in {
-  animation: fade-in var(--dur-slow) var(--ease-out) both;
+  animation: fade-in var(--dur) var(--ease-out) both;
 }
 
 .slide-up {
@@ -510,12 +545,12 @@ html[data-nav='modal-out']::view-transition-new(view) {
 }
 
 .pop-in {
-  animation: pop-in var(--dur-slow) var(--ease-spring) both;
+  animation: pop-in var(--dur) var(--ease-out) both;
 }
 
 .stagger > * {
-  animation: slide-up 520ms var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 45ms + 30ms);
+  animation: slide-up 280ms var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 /* Si la pantalla no pone --i, escalonamos los primeros hijos igualmente */
@@ -534,12 +569,13 @@ html[data-nav='modal-out']::view-transition-new(view) {
   animation: spin 900ms linear infinite;
 }
 
+/* Indicador vivo (punto «en directo»): solo opacidad, sin escala */
 .pulse {
   animation: pulse 1.6s var(--ease-in-out) infinite;
 }
 
 .shimmer {
-  background: linear-gradient(100deg, var(--surface) 30%, var(--surface-2) 50%, var(--surface) 70%);
+  background: linear-gradient(100deg, var(--surface-1) 30%, var(--surface-2) 50%, var(--surface-1) 70%);
   background-size: 300% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -549,13 +585,11 @@ html[data-nav='modal-out']::view-transition-new(view) {
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  from { opacity: 0; transform: translate3d(0, var(--rise, 8px), 0); }
 }
 
 @keyframes pop-in {
-  0% { opacity: 0; transform: scale(0.88); }
-  60% { opacity: 1; transform: scale(1.03); }
-  100% { opacity: 1; transform: scale(1); }
+  from { opacity: 0; transform: scale(0.98); }
 }
 
 @keyframes spin {
@@ -563,8 +597,8 @@ html[data-nav='modal-out']::view-transition-new(view) {
 }
 
 @keyframes pulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.08); opacity: 0.75; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 @keyframes shimmer {
@@ -572,9 +606,9 @@ html[data-nav='modal-out']::view-transition-new(view) {
   to { background-position: -50% 0; }
 }
 
+/* Heredado: v2 no tiene brillos; cualquier animación glow-pulse queda inmóvil */
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 31, 0.45); }
-  50% { box-shadow: 0 0 0 10px rgba(255, 90, 31, 0); }
+  0%, 100% { box-shadow: 0 0 #0000; }
 }
 
 /* ───── Movimiento reducido ───── */
@@ -615,60 +649,38 @@ html[data-nav='modal-out']::view-transition-new(view) {
 /* ───── iPhone en horizontal: barra de pestañas compacta y títulos más bajos ───── */
 @media (orientation: landscape) and (max-height: 560px) {
   :root {
-    --tabbar-h: 48px;
+    --tabbar-h: calc(48px + max(calc(var(--safe-b) - 8px), 8px) - var(--safe-b));
+  }
+
+  .tabbar {
+    --tb-cap: 48px;
+    --tb-gap: max(calc(var(--safe-b) - 8px), 8px);
   }
 
   .tabbar__inner {
-    max-width: 680px;
-    margin-inline: auto;
-    padding-inline: 8px;
-    gap: 4px;
+    width: auto;
+    max-width: 640px;
+    gap: 2px;
   }
 
   .tabbar__item {
-    flex: 1 1 0;
+    flex: 0 0 auto;
     flex-direction: row;
     gap: 6px;
-    align-self: center;
-    height: 36px;
-    padding: 0 10px;
-    border-radius: var(--r-pill);
+    padding: 0 16px;
     font-size: 13px;
+    font-weight: 600;
     letter-spacing: -0.01em;
-    transition:
-      color var(--dur-fast) ease,
-      background-color var(--dur) ease,
-      transform var(--dur) var(--ease-spring);
   }
 
   .tabbar__icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .tabbar__glyph {
     width: 22px;
     height: 22px;
-    border-radius: 0;
-  }
-
-  .tabbar__icon svg {
-    width: 21px;
-    height: 21px;
-  }
-
-  .tabbar__item:active {
-    transform: scale(0.94);
-  }
-
-  .tabbar__item:active .tabbar__icon {
-    transform: none;
-  }
-
-  /* La cápsula activa envuelve icono + texto */
-  .tabbar__item.is-active {
-    background: var(--accent-soft);
-    animation: tab-pop var(--dur-slow) var(--ease-spring);
-  }
-
-  .tabbar__item.is-active .tabbar__icon {
-    background: none;
-    animation: none;
   }
 
   .tabbar__label {

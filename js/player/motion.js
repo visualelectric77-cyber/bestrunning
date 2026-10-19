@@ -305,7 +305,8 @@ export function createMotion(root, refs = {}, opts = {}) {
     el.className = 'mo-title';
     el.setAttribute('aria-hidden', 'true');
     // Palabras (pueden partir línea) con letras sueltas: el «tracking» converge hacia el centro solo con transform
-    const words = String(title || '').toUpperCase().split(/\s+/).filter(Boolean);
+    // v2: el título tal cual (sin mayúsculas forzadas ni tracking de retransmisión), estilo Apple Fitness
+    const words = String(title || '').split(/\s+/).filter(Boolean);
     const count = words.reduce((a, w) => a + [...w].length, 0);
     const mid = (count - 1) / 2;
     let li = 0;
@@ -317,7 +318,7 @@ export function createMotion(root, refs = {}, opts = {}) {
       <span class="mo-title__kick">${escH(kicker)}</span>
       <span class="mo-title__name">${lt2}</span>
       <i class="mo-title__rule"></i>
-      <span class="mo-title__prof">${profileSvg(segments, { h: 64, cls: 'mo-title__svg' })}</span>
+      <span class="mo-title__prof">${profileSvg(segments, { h: 64, gap: 5, cls: 'mo-title__svg' })}</span>
       <span class="mo-title__meta num">${escH(meta)}</span>`;
     hud.appendChild(el);
     root.classList.add('mo-intro');

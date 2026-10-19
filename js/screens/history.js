@@ -3,7 +3,7 @@
 // pulso por velocidad) y la música que sonó en la sesión.
 import { getState, setState, subscribe } from '../core/store.js';
 import { navigate, back } from '../core/router.js';
-import { icon, navBar, enableCollapsingHeader, chip, stat, ring, profileChart, zoneBar, openSheet, toast, confirmDialog, actionSheet, categoryColor, celebrate } from '../ui/components.js';
+import { icon, navBar, enableCollapsingHeader, chip, stat, profileChart, zoneBar, zoneRibbon, effortBars, photo, openSheet, toast, confirmDialog, actionSheet, celebrate } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import { FEELINGS, hrLevelTrends } from '../training/progression.js';
 import { traceCursorSec, skippedRanges } from '../training/stats.js';
@@ -17,6 +17,12 @@ import { CATEGORIES } from '../training/templates.js';
 import { sessionMusicHtml, hydrateSessionMusic } from '../integrations/session-music.js';
 import { ZONES, LEVEL_KEYS, hrZones, hrMaxFromAge, zoneForSpeed } from '../training/levels.js';
 import { esc, fmt, todayKey, parseKey, capitalize, pad2, clamp, debounce } from '../core/utils.js';
+
+/** Nivel 1..5 de una sensación (su puesto en FEELINGS): la escala de esfuerzo del Resumen. */
+const feelLevel = (key) => {
+  const i = (Array.isArray(FEELINGS) ? FEELINGS : []).findIndex((x) => x.key === key);
+  return i >= 0 ? i + 1 : 0;
+};
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -34,9 +40,8 @@ const norm = (t) => String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toL
 const feelingMap = () => Object.fromEntries((Array.isArray(FEELINGS) ? FEELINGS : []).map((f) => [f.key, f]));
 
 const catOf = (key) => (CATEGORIES && CATEGORIES[key]) || null;
-const catColor = (key) => (catOf(key) ? safe(() => categoryColor(key), `var(--c-${key})`) : 'var(--accent)');
 
-const SEARCH_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>';
+const SEARCH_SVG = icon('search', 17);
 
 function timeOf(iso) {
   const d = new Date(iso);
@@ -288,20 +293,17 @@ function attachSwipe(listEl, { onDelete, onOpen, onLong }) {
 /* ───────────── lista ───────────── */
 
 function emptyList() {
-  return `<section class="card hs-empty">
-    <div class="hs-empty__art" aria-hidden="true">
-      <span class="hs-empty__ring"></span><span class="hs-empty__ring hs-empty__ring--2"></span>
-      <span class="hs-empty__icon">${icon('clock', 34)}</span>
-    </div>
+  return `<section class="hs-empty hs-empty--photo">
+    <div class="empty-photo" aria-hidden="true">${photo('empty', { cls: 'empty-photo__img' })}</div>
     <h2 class="hs-empty__title">Aún no hay entrenamientos</h2>
-    <p class="hs-empty__text">Aquí se irán guardando todas tus sesiones: tiempo, kilómetros, velocidades, cómo te sentiste… Tu diario de cinta, listo para llenarse.</p>
+    <p class="hs-empty__text">Aquí se irán guardando todas tus sesiones: tiempo, kilómetros, velocidades y cómo te sentiste.</p>
     <button type="button" class="btn btn--primary btn--lg btn--block" data-href="#/today">${icon('play', 20)}<span>Empezar la sesión de hoy</span></button>
   </section>`;
 }
 
 function noResults(q) {
   return `<div class="hs-noresults">
-    <span class="hs-noresults__icon">${SEARCH_SVG}</span>
+    <span class="hs-noresults__icon" aria-hidden="true">${icon('search', 40)}</span>
     <b>Sin resultados</b>
     <span class="muted">${q ? `Nada coincide con «${esc(q)}».` : 'No hay sesiones de esta categoría.'}</span>
   </div>`;
@@ -338,7 +340,7 @@ function rowHtml(h, feel, { extra = false, sameDay = false } = {}) {
   const pct = Math.round((Number(h.completionPct) || 0) * 100);
   const partial = !h.completed && pct > 0 && pct < 100;
   const meta = [cat?.name || (h.isTest ? 'Test' : ''), timeOf(h.startedAt), fmt.clock(h.elapsedSec || 0)].filter(Boolean).map(esc).join(' · ');
-  return `<div class="hs-row${sameDay ? ' hs-row--sameday' : ''}" data-id="${esc(h.id)}" style="--cc:${catColor(h.category)}">
+  return `<div class="hs-row${sameDay ? ' hs-row--sameday' : ''}" data-id="${esc(h.id)}">
     <div class="hs-row__actions">
       <button type="button" class="hs-row__del" data-del="${esc(h.id)}" aria-label="Borrar sesión">${icon('trash', 20)}<span>Borrar</span></button>
     </div>
@@ -346,13 +348,13 @@ function rowHtml(h, feel, { extra = false, sameDay = false } = {}) {
       <div class="hs-row__date"><span>${esc(fmt.weekdayAbbr(((d.getDay() + 6) % 7) + 1))}</span><b class="num">${d.getDate()}</b></div>
       <div class="hs-row__main">
         <div class="hs-row__title"><span class="hs-row__name">${esc(h.title || 'Entrenamiento')}</span>${h.isTest ? '<span class="hs-tag">VAM</span>' : ''}${extra ? '<span class="hs-tag hs-tag--extra">Extra</span>' : ''}</div>
-        <div class="hs-row__meta"><span class="hs-row__metatxt">${meta}</span>${h.hrAvg ? `<span class="whr-rowhr" aria-label="Pulso medio ${Number(h.hrAvg) || ''} ppm">${icon('heart', 11, { stroke: 2.6 })}${Number(h.hrAvg) || ''}</span>` : ''}</div>
+        <div class="hs-row__meta"><span class="hs-row__metatxt">${meta}</span>${h.hrAvg ? `<span class="whr-rowhr" aria-label="Pulso medio ${Number(h.hrAvg) || ''} ppm">${icon('heart', 11)}${Number(h.hrAvg) || ''}</span>` : ''}</div>
       </div>
       <div class="hs-row__side">
-        <div class="hs-row__km num">${fmt.km(h.distanceKm || 0)}<small>km</small></div>
-        <div class="hs-row__feel">${f ? `<span title="${esc(f.label)}">${f.emoji}</span>` : ''}${partial ? `<span class="hs-row__pct num">${pct}\u202F%</span>` : ''}</div>
+        <div class="hs-row__km"><b class="num">${fmt.km(h.distanceKm || 0)}</b><span class="unit">km</span></div>
+        <div class="hs-row__feel">${partial ? `<span class="hs-row__pct num">${pct}\u202F%</span>` : f ? `<span class="hs-row__feeltxt">${esc(f.label)}</span>` : ''}</div>
       </div>
-      <span class="hs-row__chev">${icon('chevron-right', 16, { stroke: 2.5 })}</span>
+      <span class="hs-row__chev">${icon('chevron-right', 14)}</span>
     </div>
   </div>`;
 }
@@ -406,12 +408,12 @@ function mountList(el) {
     const km = items.reduce((a, h) => a + (h.distanceKm || 0), 0);
     const sec = items.reduce((a, h) => a + (h.elapsedSec || 0), 0);
     if (sumEl) {
-      sumEl.innerHTML = `<div class="hs-summary">
-        <div><b class="num">${items.length}</b><span>${items.length === 1 ? 'sesión' : 'sesiones'}</span></div>
-        <div><b class="num">${fmt.dec1(km)}</b><span>km</span></div>
+      sumEl.innerHTML = `<div class="stat-grid hs-summary">
+        ${stat({ label: items.length === 1 ? 'Sesión' : 'Sesiones', value: String(items.length) })}
+        ${stat({ label: 'Distancia', value: fmt.dec1(km), unit: 'km' })}
         ${sec < 3600
-          ? `<div><b class="num">${fmt.int(Math.round(sec / 60))}</b><span>min</span></div>`
-          : `<div><b class="num">${fmt.dec1(sec / 3600)}</b><span>${Math.round(sec / 360) === 10 ? 'hora' : 'horas'}</span></div>`}
+          ? stat({ label: 'Tiempo', value: fmt.int(Math.round(sec / 60)), unit: 'min' })
+          : stat({ label: 'Tiempo', value: fmt.dec1(sec / 3600), unit: 'h' })}
       </div>`;
     }
     listEl.innerHTML = items.length ? listHtml(items, feel) : noResults(filter.q.trim());
@@ -434,7 +436,7 @@ function mountList(el) {
     const cats = Object.keys(CATEGORIES || {}).filter((k) => present.has(k));
     const chips = [
       chip('Todas', { active: filter.cat === 'all', attrs: 'data-cat="all" role="button" tabindex="0"' }),
-      ...cats.map((k) => chip(CATEGORIES[k].name, { color: catColor(k), active: filter.cat === k, attrs: `data-cat="${esc(k)}" role="button" tabindex="0"` })),
+      ...cats.map((k) => chip(CATEGORIES[k].name, { active: filter.cat === k, attrs: `data-cat="${esc(k)}" role="button" tabindex="0"` })),
     ].join('');
     const hadFocus = document.activeElement?.matches?.('.hs-search input');
     body.innerHTML = `
@@ -558,31 +560,29 @@ function detailHtml(ses, s, segments) {
   const f = feel[ses.feeling];
   const parts = [];
 
-  parts.push(`<section class="card hs-hero" style="--cc:${catColor(ses.category)}">
-    <div class="hs-hero__glow" aria-hidden="true"></div>
+  const done = pct >= 1 || ses.completed;
+  const eyebrow = [cat?.name, ses.isTest ? 'Test VAM' : ''].filter(Boolean).join(' · ');
+  parts.push(`<section class="hs-hero">
     <div class="hs-hero__top">
-      <div class="hs-hero__chips">
-        ${cat ? `<span class="hs-hero__chip">${icon(cat.icon || 'bolt', 14)}${esc(cat.name)}</span>` : ''}
-        ${ses.isTest ? '<span class="hs-hero__chip">Test VAM</span>' : ''}
-      </div>
+      ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
       <div class="hs-hero__date">${esc(capitalize(fmt.dateLong(key)))}${timeOf(ses.startedAt) ? ` · ${timeOf(ses.startedAt)}` : ''}</div>
     </div>
-    <div class="hs-hero__main">
-      <div class="hs-hero__ring">${ring({ value: pct, size: 88, stroke: 9, color: pct >= 1 ? 'var(--ok)' : 'var(--accent)', inner: pct >= 1 ? icon('check', 30, { stroke: 3 }) : `<span class="num hs-hero__pct">${Math.round(pct * 100)}<small>%</small></span>` })}</div>
-      <div class="hs-hero__big">
-        <div class="hs-hero__km num">${fmt.km(ses.distanceKm || 0)}<small>km</small></div>
-        <div class="hs-hero__status">${pct >= 1 ? '¡Sesión completada!' : ses.completed ? 'Completada' : `Completada al ${Math.round(pct * 100)}\u202F%`}${ses.plannedSec ? ` · plan ${esc(fmt.minutes(ses.plannedSec))}` : ''}</div>
-      </div>
-    </div>
+    <div class="hs-hero__km"><span class="num">${fmt.km(ses.distanceKm || 0)}</span><span class="unit">km</span></div>
+    <div class="hs-hero__status">${done
+      ? `<span class="hs-hero__ok">${icon('check', 14)}</span><span>Completada</span>`
+      : `<span>Completada al <b class="num">${Math.round(pct * 100)}\u202F%</b></span>`}${ses.plannedSec ? `<span class="hs-hero__plan">· plan ${esc(fmt.minutes(ses.plannedSec))}</span>` : ''}</div>
+    ${done ? '' : `<div class="hs-hero__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct * 100)}"><i style="width:${(pct * 100).toFixed(1)}%"></i></div>`}
   </section>`);
 
-  parts.push(`<section class="hs-stats">
-    ${stat({ label: 'Tiempo', value: fmt.clock(elapsed), size: 'md' })}
-    ${stat({ label: 'Vel. media', value: fmt.speed(avg), unit: 'km/h', size: 'md' })}
-    ${stat({ label: 'Ritmo', value: avg > 0 ? fmt.pace(avg) : '–:––', unit: '/km', size: 'md' })}
-    ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h', size: 'md' })}
-    ${stat({ label: 'Energía', value: fmt.int(ses.kcal || 0), unit: 'kcal', size: 'md' })}
-    ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)), size: 'md' })}
+  parts.push(`<section class="card hs-stats">
+    <div class="stat-grid">
+      ${stat({ label: 'Tiempo', value: fmt.clock(elapsed) })}
+      ${stat({ label: 'Vel. media', value: fmt.speed(avg), unit: 'km/h' })}
+      ${stat({ label: 'Ritmo', value: avg > 0 ? fmt.pace(avg) : '–:––', unit: '/km' })}
+      ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h' })}
+      ${stat({ label: 'Energía', value: fmt.int(ses.kcal || 0), unit: 'kcal' })}
+      ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)) })}
+    </div>
   </section>`);
 
   const trace = Array.isArray(ses.speedTrace) && ses.speedTrace.length ? ses.speedTrace : null;
@@ -598,7 +598,7 @@ function detailHtml(ses, s, segments) {
   const tiz = ses.timeInZone && Object.values(ses.timeInZone).some((v) => v > 0) ? ses.timeInZone : null;
   if (tiz) {
     parts.push(`<section class="card hs-card">
-      <div class="hs-card__head"><div class="eyebrow">Tiempo en cada zona</div></div>
+      <div class="hs-card__head"><div class="eyebrow">Tiempo en zonas</div></div>
       ${zoneBar(tiz, { showLegend: true })}
     </section>`);
   }
@@ -607,10 +607,10 @@ function detailHtml(ses, s, segments) {
     const t = ses.test;
     parts.push(`<section class="card hs-card hs-test">
       <div class="hs-card__head"><div class="eyebrow">Resultado del test</div></div>
-      <div class="hs-test__grid">
-        <div><b class="num">${fmt.speed(t.vam || 0)}</b><span>VAM km/h</span></div>
-        <div><b class="num">${fmt.speed(t.lastStageSpeed || 0)}</b><span>Último escalón</span></div>
-        <div><b class="num">${fmt.int(t.secondsInLastStage || 0)}″</b><span>En ese escalón</span></div>
+      <div class="stat-grid hs-test__grid">
+        ${stat({ label: 'VAM', value: fmt.speed(t.vam || 0), unit: 'km/h' })}
+        ${stat({ label: 'Último escalón', value: fmt.speed(t.lastStageSpeed || 0), unit: 'km/h' })}
+        ${stat({ label: 'En ese escalón', value: `${fmt.int(t.secondsInLastStage || 0)}`, unit: 's' })}
       </div>
     </section>`);
   }
@@ -622,19 +622,19 @@ function detailHtml(ses, s, segments) {
     <div class="card hs-card hs-feelcard">
       <div class="eyebrow">Sensación</div>
       ${f
-        ? `<div class="hs-feelcard__emoji">${f.emoji}</div><div class="hs-feelcard__label">${esc(f.label)}</div>${ses.rpe ? `<div class="muted">Esfuerzo ${ses.rpe}/10</div>` : ''}`
-        : `<button type="button" class="hs-add" data-hs="edit">${icon('plus', 18)}<span>Añadir</span></button>`}
+        ? `<div class="hs-feelcard__label">${effortBars(feelLevel(f.key))}${esc(f.label)}</div>${ses.rpe ? `<div class="hs-feelcard__rpe">Esfuerzo <b class="num">${ses.rpe}</b>/10</div>` : ''}`
+        : `<button type="button" class="hs-add" data-hs="edit">${icon('plus', 16)}<span>Añadir</span></button>`}
     </div>
     <div class="card hs-card hs-hrcard">
-      <div class="eyebrow">Pulso${series ? ' · Watch' : hasHr ? ' · a mano' : ''}</div>
+      <div class="eyebrow hs-hrcard__eyebrow">${icon('heart', 13)}Pulso${series ? ' · Watch' : hasHr ? ' · a mano' : ''}</div>
       ${hasHr
         ? `<div class="hs-hrcard__vals">
-             <div>${icon('heart', 16)}<b class="num">${ses.hrAvg || '–'}</b><span>media</span></div>
+             <div><b class="num">${ses.hrAvg || '–'}</b><span>media</span></div>
              <div><b class="num">${ses.hrMax || '–'}</b><span>máx.</span></div>
              ${ses.hrMin ? `<div><b class="num">${ses.hrMin}</b><span>mín.</span></div>` : ''}
            </div>
-           ${zAvg ? `<span class="hs-zone" style="--zc:${zAvg.color}">${esc(zAvg.name)}</span>` : ''}`
-        : `<button type="button" class="hs-add" data-hs="edit">${icon('watch', 18)}<span>Añadir FC</span></button>`}
+           ${zAvg ? `<span class="hs-zone"><i class="zdot" style="--zc:${zAvg.color}" aria-hidden="true"></i>${esc(zAvg.name)}</span>` : ''}`
+        : `<button type="button" class="hs-add" data-hs="edit">${icon('plus', 16)}<span>Añadir pulso</span></button>`}
     </div>
   </section>`);
 
@@ -647,11 +647,11 @@ function detailHtml(ses, s, segments) {
       <div class="hs-card__head"><div class="eyebrow">Cambios de velocidad</div></div>
       <div class="hs-changes">${changes.map((c) => {
         const up = (c.to || 0) > (c.from || 0);
-        return `<div class="hs-change" style="--zc:var(--z-${esc(c.level)})">
-          <span class="hs-change__dot"></span>
+        return `<div class="hs-change">
+          <span class="zdot" style="--zc:var(--z-${esc(c.level)})" aria-hidden="true"></span>
           <span class="hs-change__name">${esc(ZONES[c.level]?.name || c.level)}</span>
           <span class="hs-change__vals num">${fmt.speed(c.from || 0)} → <b>${fmt.speed(c.to || 0)}</b></span>
-          <span class="hs-change__arrow ${up ? 'is-up' : 'is-down'}">${icon(up ? 'arrow-up' : 'arrow-down', 14, { stroke: 3 })}</span>
+          <span class="hs-change__arrow ${up ? 'is-up' : 'is-down'}" aria-label="${up ? 'Sube' : 'Baja'}">${icon(up ? 'arrow-up' : 'arrow-down', 15)}</span>
         </div>`;
       }).join('')}</div>
     </section>`);
@@ -660,7 +660,7 @@ function detailHtml(ses, s, segments) {
   if (levels && LEVEL_KEYS.every((k) => typeof levels[k] === 'number')) {
     parts.push(`<section class="card hs-card">
       <div class="hs-card__head"><div class="eyebrow">Tus velocidades ese día</div></div>
-      <div class="hs-levels">${LEVEL_KEYS.map((k) => `<div style="--zc:var(--z-${k})"><span>${esc(ZONES[k]?.short || k)}</span><b class="num">${fmt.speed(levels[k])}</b></div>`).join('')}</div>
+      <div class="hs-levels">${LEVEL_KEYS.map((k) => `<div><span><i class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></i>${esc(ZONES[k]?.short || k)}</span><b class="num">${fmt.speed(levels[k])}</b></div>`).join('')}</div>
     </section>`);
   }
 
@@ -668,15 +668,15 @@ function detailHtml(ses, s, segments) {
   if (music) parts.push(music);
 
   parts.push(`<section class="card hs-card hs-notes">
-    <div class="hs-card__head"><div class="eyebrow">Notas</div><button type="button" class="btn btn--ghost hs-mini" data-hs="edit">${icon('edit', 15)}<span>Editar</span></button></div>
+    <div class="hs-card__head"><div class="eyebrow">Notas</div><button type="button" class="btn btn--ghost hs-mini" data-hs="edit"><span>Editar</span></button></div>
     ${ses.notes ? `<p class="hs-notes__text">${esc(ses.notes)}</p>` : '<p class="muted">Sin notas. Apunta cómo te fue, qué música llevabas o cualquier detalle que quieras recordar.</p>'}
   </section>`);
 
   parts.push(`<section class="hs-actions stack">
     ${ses.workoutId ? `<button type="button" class="btn btn--primary btn--lg btn--block" data-href="#/play/${esc(encodeURIComponent(ses.workoutId))}">${icon('repeat', 20)}<span>Repetir esta clase</span></button>` : ''}
     <div class="grid-2">
-      <button type="button" class="btn btn--secondary btn--block" data-hs="edit">${icon('edit', 18)}<span>Editar</span></button>
-      <button type="button" class="btn btn--danger btn--block" data-hs="delete">${icon('trash', 18)}<span>Borrar</span></button>
+      <button type="button" class="btn btn--secondary btn--lg btn--block" data-hs="edit"><span>Editar</span></button>
+      <button type="button" class="btn btn--danger btn--lg btn--block" data-hs="delete"><span>Borrar sesión</span></button>
     </div>
   </section>`);
 
@@ -688,24 +688,22 @@ function detailHtml(ses, s, segments) {
 /** Perfil con la línea de pulso superpuesta (misma escala de tiempo). */
 function profileHtml(ses, segs, levels) {
   const trace = Array.isArray(ses.speedTrace) && ses.speedTrace.length ? ses.speedTrace : null;
-  const chart = profileChart(segs, { height: 150, trace, levels, showLevels: true, progressSec: ses.isTest ? null : traceCursorSec(ses), gaps: skippedRanges(ses) });
-  return withHrOverlay(chart, ses, { segments: segs, height: 150 });
+  // Con traza «real»: el plan en gris y la zona de cada tramo en la cinta fina de debajo (igual que el Resumen)
+  const chart = profileChart(segs, { height: 150, trace, levels, showLevels: true, progressSec: ses.isTest ? null : traceCursorSec(ses), gaps: skippedRanges(ses), tone: trace ? 'mono' : 'full' });
+  return `${withHrOverlay(chart, ses, { segments: segs, height: 150 })}${trace ? zoneRibbon(segs) : ''}`;
 }
 
 function hrCtaHtml(s) {
   const ready = isWatchShortcutReady(s);
-  return `<section class="card hs-card whr-card whr-glow">
+  return `<section class="card hs-card whr-card hs-hrcta">
     <div class="whr-cta">
-      <div class="whr-cta__row">
-        <span class="whr-cta__icon" aria-hidden="true">${icon('watch', 24)}<i class="whr-beat">${icon('heart', 12, { stroke: 2.6 })}</i></span>
-        <div><b class="whr-cta__title">Pulso del Apple Watch</b>
-          <p class="whr-cta__text">Trae de Salud el pulso de esta sesión con un Atajo: lo verás sobre el perfil, por zonas y a cada velocidad.</p></div>
-      </div>
-      <button type="button" class="btn btn--secondary btn--lg btn--block whr-cta__btn" data-hs="hr-import">${icon('heart', 20)}<span>Importar pulso del Apple Watch</span></button>
+      <div class="eyebrow hs-hrcard__eyebrow">${icon('heart', 13)}Pulso del Apple Watch</div>
+      <p class="whr-cta__text">Trae de Salud el pulso de esta sesión con un Atajo: lo verás sobre el perfil, por zonas y a cada velocidad.</p>
+      <button type="button" class="btn btn--secondary btn--lg btn--block whr-cta__btn" data-hs="hr-import"><span>Importar pulso del Apple Watch</span></button>
       <div class="whr-cta__links">
-        <button type="button" class="btn btn--ghost whr-mini" data-hs="hr-paste">${icon('copy', 15)}<span>Ya lo he copiado</span></button>
-        <button type="button" class="btn btn--ghost whr-mini" data-hs="edit">${icon('edit', 15)}<span>Anotar a mano</span></button>
-        ${ready ? '' : `<button type="button" class="btn btn--ghost whr-mini" data-href="#/settings/watch">${icon('info', 15)}<span>Cómo crear el Atajo</span></button>`}
+        <button type="button" class="btn btn--ghost whr-mini" data-hs="hr-paste"><span>Ya lo he copiado</span></button>
+        <button type="button" class="btn btn--ghost whr-mini" data-hs="edit"><span>Anotar a mano</span></button>
+        ${ready ? '' : `<button type="button" class="btn btn--ghost whr-mini" data-href="#/settings/watch"><span>Cómo crear el Atajo</span></button>`}
       </div>
     </div>
   </section>`;
@@ -718,8 +716,8 @@ function hrAnalysisParts(ses, s) {
     `<section class="card hs-card whr-card">
       <div class="hs-card__head"><div class="eyebrow">Zonas de pulso</div>
         <span class="whr-src__acts">
-          <button type="button" class="btn btn--ghost whr-mini" data-hs="hr-import" aria-label="Volver a importar el pulso">${icon('refresh', 14)}<span>Reimportar</span></button>
-          <button type="button" class="btn btn--ghost whr-mini" data-hs="hr-remove" aria-label="Quitar el pulso de esta sesión">${icon('trash', 14)}<span>Quitar</span></button>
+          <button type="button" class="btn btn--ghost whr-mini" data-hs="hr-import" aria-label="Volver a importar el pulso"><span>Reimportar</span></button>
+          <button type="button" class="btn btn--ghost whr-mini whr-mini--danger" data-hs="hr-remove" aria-label="Quitar el pulso de esta sesión"><span>Quitar</span></button>
         </span></div>
       ${hrZonesHtml(zt, s.profile)}
       ${hrMaxHintHtml(ses, s.profile)}
@@ -734,11 +732,11 @@ function hrAnalysisParts(ses, s) {
 /* ───────────── música de la sesión (js/integrations/session-music.js) ───────────── */
 
 function notFoundHtml() {
-  return `<section class="card hs-empty">
-    <div class="hs-empty__art" aria-hidden="true"><span class="hs-empty__ring"></span><span class="hs-empty__icon">${icon('info', 34)}</span></div>
+  return `<section class="hs-empty">
+    <span class="hs-empty__icon" aria-hidden="true">${icon('info', 44)}</span>
     <h2 class="hs-empty__title">No encuentro esta sesión</h2>
     <p class="hs-empty__text">Puede que se haya borrado. Vuelve al historial para ver el resto de tus entrenamientos.</p>
-    <button type="button" class="btn btn--secondary btn--lg btn--block" data-href="#/history">${icon('list', 20)}<span>Ver historial</span></button>
+    <button type="button" class="btn btn--secondary btn--lg btn--block" data-href="#/history"><span>Ver historial</span></button>
   </section>`;
 }
 
@@ -761,8 +759,9 @@ function openEdit(id) {
   const feelings = Array.isArray(FEELINGS) ? FEELINGS : [];
   let feeling = ses.feeling || null;
   let sheetEl = null;
-  const faces = feelings.map((f) => `<button type="button" class="hs-face${f.key === feeling ? ' is-on' : ''}" data-feel="${esc(f.key)}" aria-pressed="${f.key === feeling}">
-      <span class="hs-face__emoji">${f.emoji}</span><span class="hs-face__label">${esc(f.label)}</span>
+  // La misma escala de esfuerzo que el Resumen (5 barras; la elegida en blanco con texto negro)
+  const faces = feelings.map((f, i) => `<button type="button" class="hs-face${f.key === feeling ? ' is-on' : ''}" data-feel="${esc(f.key)}" aria-pressed="${f.key === feeling}" aria-label="${esc(f.label)}">
+      ${effortBars(i + 1)}<span class="hs-face__label">${esc(f.label)}</span>
     </button>`).join('');
   openSheet({
     title: 'Editar sesión',
@@ -775,7 +774,7 @@ function openEdit(id) {
         <label class="hs-edit__field"><span class="field__label">FC media</span><input class="field" data-in="hrAvg" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="ppm" value="${ses.hrAvg || ''}"></label>
         <label class="hs-edit__field"><span class="field__label">FC máxima</span><input class="field" data-in="hrMax" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="ppm" value="${ses.hrMax || ''}"></label>
       </div>
-      <p class="hs-edit__hint">${icon('watch', 14)} Las encuentras en la app Fitness → Entrenos → tu sesión de cinta.</p>
+      <p class="hs-edit__hint">Las encuentras en la app Fitness → Entrenos → tu sesión de cinta.</p>
       <label class="hs-edit__field"><span class="field__label">Notas</span><textarea class="field hs-edit__notes" data-in="notes" rows="3" maxlength="600" placeholder="¿Algo que quieras recordar?">${esc(ses.notes || '')}</textarea></label>
     </div>`,
     onMount(el) {

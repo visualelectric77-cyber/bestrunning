@@ -20,6 +20,13 @@ import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, se
 import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
+import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
+
+/** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
+ *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
+const timerHaptic = (kind) => {
+  if (!isNative()) haptic(kind);
+};
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -30,7 +37,7 @@ const MIN_SAVE_SEC = 60;
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const zoneColor = (z) => ZONES[z]?.color || '#ff6a1a';
 const zoneName = (z) => ZONES[z]?.name || 'Correr';
-const VISUAL_DEFAULTS = { quality: 'auto', tvMode: false, strideBob: true, ghost: true, theme: 'aurora' };
+const VISUAL_DEFAULTS = { quality: 'auto', tvMode: false, strideBob: true, ghost: true, theme: AUTO_THEME };
 const FINISH_MS = 3200;       // plano final sobrio de la escena antes del resumen (un toque lo salta)
 const FINISH_2D_MS = 2800;
 const CTL_MS = 4000;          // un toque muestra los controles 4 s mientras corres
@@ -116,11 +123,13 @@ function tracksIndex(tracks) {
 }
 
 /**
- * Mini perfil de la clase para el lower third (tira de ~34 px): barras planas del color de su zona, las futuras
- * atenuadas y las ya corridas encendidas (clip que crece con el tiempo). viewBox 1000×H estirado al ancho del rótulo.
+ * Mini perfil de la clase para el lower third (tira de ~34 px): barras planas del color de su zona (sin brillo), las
+ * futuras apagadas, las ya corridas a media luz (clip que crece con el tiempo) y el tramo en curso, el más brillante.
+ * viewBox 1000×H estirado al ancho del rótulo.
  */
 function stripSvg(segments, uid) {
-  const segs = (Array.isArray(segments) ? segments : []).filter((s) => s && Number(s.sec) > 0);
+  const all = Array.isArray(segments) ? segments : [];
+  const segs = all.filter((s) => s && Number(s.sec) > 0);
   const W = 1000;
   const H = 36;
   const total = segs.reduce((a, s) => a + Number(s.sec), 0) || 1;
@@ -130,19 +139,24 @@ function stripSvg(segments, uid) {
   const base = Math.max(0, minS * 0.62);
   let t = 0;
   let bars = '';
-  for (const s of segs) {
+  let now = '';
+  all.forEach((s, i) => {
+    if (!s || !(Number(s.sec) > 0)) return;
     const x0 = (t / total) * W;
     const w0 = (Number(s.sec) / total) * W;
     t += Number(s.sec);
     const gap = Math.min(3, w0 * 0.3);
     const n = clamp(((Number(s.speed) || 0) - base) / Math.max(0.1, maxS - base), 0.12, 1);
     const h = 4 + (H - 4) * n;
-    bars += `<rect x="${(x0 + gap / 2).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(0.6, w0 - gap).toFixed(1)}" height="${h.toFixed(1)}" fill="${zoneColor(s.zone)}"/>`;
-  }
+    const rect = `x="${(x0 + gap / 2).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${Math.max(0.6, w0 - gap).toFixed(1)}" height="${h.toFixed(1)}" fill="${zoneColor(s.zone)}"`;
+    bars += `<rect ${rect}/>`;
+    now += `<rect data-strip-i="${i}" ${rect} opacity="0"/>`;
+  });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-<g opacity="0.42">${bars}</g>
+<g class="hud-strip__future" opacity="0.9">${bars}</g>
 <clipPath id="${uid}"><rect data-strip-clip x="0" y="0" width="0" height="${H}"/></clipPath>
-<g clip-path="url(#${uid})">${bars}</g>
+<g class="hud-strip__past" clip-path="url(#${uid})">${bars}</g>
+<g class="hud-strip__now">${now}</g>
 </svg><i class="hud-strip__cur" data-strip-cur></i>`;
 }
 
@@ -308,6 +322,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let sndHintOff = null;      // retira el aviso «Mantén pulsado ♪…» si la abres mientras se ve
   // Escena 3D
   const visuals = { ...VISUAL_DEFAULTS, ...(state.visuals || {}) };
+  let sessionTheme = null;    // escenario elegido en Preparación SOLO para esta clase ('auto' o un id; null = el de Perfil)
+  let sceneThemeId = null;    // escenario con el que se creó (o al que se cambió) la escena
   let scene = null;           // controlador de createScene3D (null = fondo 2D)
   let sceneP = null;          // creación en curso
   let sceneCanvas = null;
@@ -411,6 +427,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (Array.isArray(snap.musicTracks)) musicTracks.push(...snap.musicTracks.filter((x) => typeof x === 'string'));
     if (Array.isArray(snap.skips)) skips.push(...snap.skips.filter((g) => Array.isArray(g) && g.length >= 2));
     if (Array.isArray(snap.timeline)) timeline.push(...snap.timeline.filter((e) => Array.isArray(e) && e.length >= 2));
+    if (typeof snap.sceneTheme === 'string') sessionTheme = snap.sceneTheme;
     engine = restoreEngine(snap, workout, callbacks);
     nb.restore(snap.hrLive);
     const st = engine.getState();
@@ -460,9 +477,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function renderError(title, text) {
     el.innerHTML = `
       <div class="pl pl--error">
-        <div class="pl-bg" aria-hidden="true"><div class="pl-bg__glow pl-bg__glow--a"></div><div class="pl-bg__glow pl-bg__glow--b"></div></div>
-        <div class="pl-error pop-in">
-          <div class="pl-error__icon">${icon('info', 34)}</div>
+        <div class="pl-bg" aria-hidden="true"></div>
+        <div class="pl-error fade-in">
+          <div class="pl-error__icon">${icon('info', 44)}</div>
           <h1 class="pl-error__title">${esc(title)}</h1>
           <p class="pl-error__text">${esc(text)}</p>
           <button class="btn btn--primary btn--lg btn--block" data-href="#/today">Volver a Hoy</button>
@@ -483,11 +500,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // App nativa con el reloj instalado: el entreno del Watch lo abre la propia app al empezar
     const watchAuto = nb.watchManaged();
     const checks = [
-      { ic: 'gauge', html: `Sube a la cinta y ponla a <b class="num">${firstSpeed} km/h</b>` },
+      { ic: 'gauge', html: `Sube a la cinta y ponla a <b class="num">${firstSpeed}&nbsp;km/h</b>` },
       watchAuto
-        ? { ic: 'watch', html: 'El reloj se abre solo al empezar' }
-        : st.integrations?.watchReminder !== false
-          ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
+        ? { ic: 'watch', html: 'El reloj se abre solo al empezar y te manda el pulso en directo' }
+        : isNative()
+          ? { ic: 'watch', html: 'BestRunning en tu Apple Watch se conecta solo y manda tu pulso en directo' }
+          : st.integrations?.watchReminder !== false
+            ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
       // Con «Mi música» la sesión de audio debe mezclarse con Spotify (Ambient en iOS): la voz obedece al modo
       // silencio, también en la app nativa (WebKit lleva la sesión de la página; la app no la toca)
       appMusic
@@ -499,50 +518,54 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
     el.innerHTML = `
       <div class="pl pl--ready" style="--zc:${zoneColor(first?.zone)}">
-        <div class="pl-bg" aria-hidden="true">
-          <div class="pl-bg__glow pl-bg__glow--a"></div>
-          <div class="pl-bg__glow pl-bg__glow--b"></div>
-        </div>
+        <div class="pl-bg" aria-hidden="true"></div>
         <div class="pl-world" data-pre-world aria-hidden="true"></div>
         <header class="pl-top">
-          <button class="pl-iconbtn" data-act="close" aria-label="Cerrar">${icon('close', 20)}</button>
+          <button class="pl-iconbtn" data-act="close" aria-label="Cerrar">${icon('close', 17)}</button>
           <div class="pl-top__center"><div class="pl-top__title">Preparación</div></div>
           <span class="pl-top__spacer"></span>
         </header>
         <div class="pl-ready">
           <div class="pl-ready__body">
             <div class="pl-ready__col pl-ready__col--a stagger">
-            <div class="pl-ready__eyebrow" style="--i:0;color:var(--c-${esc(cat)}, var(--accent))">
-              ${esc((CAT_NAMES[cat] || 'Entrenamiento').toUpperCase())} · ${minutes} MIN
-            </div>
-            <h1 class="pl-ready__title" style="--i:1">${esc(workout.title || 'Entrenamiento')}</h1>
-            ${workout.subtitle ? `<p class="pl-ready__sub" style="--i:2">${esc(workout.subtitle)}</p>` : ''}
-            <div class="pl-ready__chart" style="--i:3">
+            <header class="pl-ready__head" style="--i:0">
+              <div class="pl-ready__eyebrow">${esc(CAT_NAMES[cat] || 'Entrenamiento')} · ${minutes} min</div>
+              <h1 class="pl-ready__title">${esc(workout.title || 'Entrenamiento')}</h1>
+              ${workout.subtitle ? `<p class="pl-ready__sub">${esc(workout.subtitle)}</p>` : ''}
+            </header>
+            <div class="pl-ready__chart" style="--i:1">
               ${profileChart(segs, { height: 150, showLevels: true, levels: st.levels })}
             </div>
             </div>
             <div class="pl-ready__col pl-ready__col--b stagger">
-            <div class="pl-ready__stats" style="--i:4">
-              ${readyStat('timer', 'Duración', String(minutes), 'min')}
-              ${readyStat('route', 'Distancia', fmt.dec1(workout.estDistanceKm || 0), 'km')}
-              ${readyStat('flame', 'Kcal', fmt.int(workout.estKcal || 0), '')}
-              ${readyStat('bolt', 'Vel. máx.', fmt.speed(workout.maxSpeed || 0), 'km/h')}
+            <div class="pl-ready__stats" style="--i:2">
+              ${readyStat('Duración', String(minutes), 'min')}
+              ${readyStat('Distancia', fmt.dec1(workout.estDistanceKm || 0), 'km')}
+              ${readyStat('Kcal', fmt.int(workout.estKcal || 0), '')}
+              ${readyStat('Vel. máx.', fmt.speed(workout.maxSpeed || 0), 'km/h')}
             </div>
-            <ul class="pl-check" style="--i:5">
-              ${checks.map((c) => `
-                <li><button class="pl-check__item" data-act="check" aria-pressed="false">
-                  <span class="pl-check__ic">${icon(c.ic, 18)}</span>
-                  <span class="pl-check__txt">${c.html}</span>
-                  <span class="pl-check__box">${icon('check', 14, { stroke: 3 })}</span>
-                </button></li>`).join('')}
-            </ul>
-            ${readyMusicHtml()}
+            ${readySceneHtml()}
+            <section class="pl-ready__group" style="--i:3">
+              <h2 class="list-header">Antes de empezar</h2>
+              <ul class="pl-check">
+                ${checks.map((c) => `
+                  <li><button class="pl-check__item" data-act="check" aria-pressed="false">
+                    <span class="pl-check__ic">${icon(c.ic, 22)}</span>
+                    <span class="pl-check__txt">${c.html}</span>
+                    <span class="pl-check__box">${icon('check', 14)}</span>
+                  </button></li>`).join('')}
+              </ul>
+            </section>
+            <section class="pl-ready__group" style="--i:4">
+              <h2 class="list-header">Sonido</h2>
+              ${readyMusicHtml()}
+            </section>
             ${readyHealthHtml()}
             </div>
           </div>
           <div class="pl-ready__cta">
             <button class="btn btn--primary btn--lg btn--block pl-start" data-act="start">
-              ${icon('play', 22)}<span>Empezar</span>
+              ${icon('play', 20)}<span>Empezar</span>
             </button>
           </div>
         </div>
@@ -563,6 +586,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
         // La hoja de Salud si aún sale; si ya se dijo que no, el iPhone abre Ajustes (lo decide la app nativa)
         haptic('medium');
         if (!nativePost('health.authorize', {})) toast('No se ha podido abrir el permiso de Salud', { kind: 'error' });
+      } else if (act === 'scene') {
+        const id = b.dataset.scene;
+        if (!id || b.getAttribute('aria-checked') === 'true') return;
+        sessionTheme = id;
+        haptic('selection');
+        const slot = root.querySelector('[data-slot="scene"]');
+        if (slot) slot.outerHTML = readySceneHtml();
+        applySceneTheme();
       } else if (act === 'music-ready') {
         // Solo para este entreno (Perfil → Música guarda la preferencia): nunca se apaga «para siempre» sin avisar
         musicOn = !musicOn;
@@ -570,6 +601,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
         b.outerHTML = readyMusicHtml();
       }
     });
+    // Borde de desplazamiento iOS (separador bajo «Preparación» en cuanto el contenido sube)
+    const rbody = root.querySelector('.pl-ready__body');
+    if (rbody) {
+      const onScroll = () => root.classList.toggle('is-scrolled', rbody.scrollTop > 2);
+      rbody.addEventListener('scroll', onScroll, { passive: true });
+    }
     // La escena 3D (renderer, escenario, shaders) se crea YA, oculta, mientras lees la preparación: así el trabajo
     // pesado del hilo principal no cae en la cuenta 3-2-1 ni en los primeros segundos de carrera
     later(initScene, 450);
@@ -615,28 +652,60 @@ export function mount(el, { params = {}, query = {} } = {}) {
       ? 'Toca para dar permiso: sin él, el reloj no lee tu pulso'
       : 'Toca para abrir Ajustes y luego: Apps › Salud › Acceso a datos y dispositivos › BestRunning › Activar todo';
     return `<div data-slot="health"><button type="button" class="mu-ready mu-ready--health" data-act="health" style="--i:7">
-        <span class="mu-ready__ic">${icon('heart', 18)}</span>
+        <span class="mu-ready__ic">${icon('heart', 22)}</span>
         <span class="mu-ready__txt"><b>Permite el pulso en Salud</b><small>${esc(small)}</small></span>
+        <span class="mu-ready__chev" aria-hidden="true">${icon('chevron-right', 14)}</span>
       </button></div>`;
+  }
+
+  /**
+   * Escenario de esta clase: «Automático» (el mundo que toca por el tipo de clase) y los cuatro mundos, en miniatura.
+   * Lo elegido aquí vale solo para esta clase; el predeterminado está en Perfil › Pantalla de entreno.
+   */
+  function readySceneHtml() {
+    if (visuals.quality === 'off') return '<div data-slot="scene" hidden></div>';
+    const pick = themePick();
+    const auto = resolveTheme(AUTO_THEME, workout);
+    const name = (id) => SCENE_NAMES[id] || id;
+    const thumb = (id) => `<img src="./assets/scenes/${encodeURIComponent(id)}.jpg" width="240" height="428" alt="" decoding="async">`;
+    const opt = (id, label, inner, on) => `<button type="button" class="pl-scn__opt${id === AUTO_THEME ? ' pl-scn__opt--auto' : ''}" role="radio" aria-checked="${on}" data-act="scene" data-scene="${id}">
+        <span class="pl-scn__thumb">${inner}</span>
+        <span class="pl-scn__name">${esc(label)}</span>
+      </button>`;
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const other = auto.id !== pick.id ? ` Con Automático, hoy tocaría ${esc(name(auto.id))}.` : '';
+    const note = pick.auto
+      ? `<b>${esc(name(pick.id))}</b> · ${esc(cap(pick.reason))}`
+      : sessionTheme
+        ? `<b>${esc(name(pick.id))}</b> solo en esta clase.${other}`
+        : `<b>${esc(name(pick.id))}</b> · el de tu perfil.${other}`;
+    return `<section class="pl-ready__group pl-scn" data-slot="scene" style="--i:3">
+        <h2 class="list-header">Escenario</h2>
+        <div class="pl-scn__row" role="radiogroup" aria-label="Escenario de esta clase">
+          ${opt(AUTO_THEME, 'Automático', `${thumb(auto.id)}<span class="pl-scn__auto" aria-hidden="true">Auto</span>`, pick.auto)}
+          ${SCENE_IDS.map((id) => opt(id, name(id), thumb(id), !pick.auto && pick.id === id)).join('')}
+        </div>
+        <p class="pl-scn__note" aria-live="polite">${note}</p>
+      </section>`;
   }
 
   function readyMusicHtml() {
     if (!appMusic) {
       return `<div class="mu-ready mu-ready--own" style="--i:6">
-        <span class="mu-ready__ic">${icon('music', 18)}</span>
+        <span class="mu-ready__ic">${icon('music', 22)}</span>
         <span class="mu-ready__txt"><b>Mi música</b><small>Pon tu Spotify o Apple Music: el coach hablará por encima</small></span>
       </div>`;
     }
     return `<button type="button" class="mu-ready${musicOn ? ' is-on' : ''}" data-act="music-ready" aria-pressed="${musicOn}" style="--i:6">
-      <span class="mu-ready__ic">${icon('music', 18)}</span>
+      <span class="mu-ready__ic">${icon('music', 22)}</span>
       <span class="mu-ready__txt"><b>Música DJ BestRunning</b><small>${musicOn ? 'Electrónica a tu ritmo, mezclada en cada cambio' : 'Apagada en este entreno · toca para activarla'}</small></span>
       <span class="mu-switch" aria-hidden="true"><span></span></span>
     </button>`;
   }
 
-  function readyStat(ic, label, value, unit) {
+  function readyStat(label, value, unit) {
     return `<div class="pl-rstat">
-      <span class="pl-rstat__lbl">${icon(ic, 14)}${esc(label)}</span>
+      <span class="pl-rstat__lbl">${esc(label)}</span>
       <span class="pl-rstat__val num">${esc(value)}${unit ? `<small>${esc(unit)}</small>` : ''}</span>
     </div>`;
   }
@@ -683,12 +752,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
               <div class="hud-state">${icon('pause', 11)}<span>En pausa</span></div>
               <div class="hud-zone" data-ref="zoneBox"><i class="hud-zone__dot"></i><span data-ref="zoneName"></span></div>
               <div class="hud-speed__row">
-                <button class="hud-adj hud-adj--minus" data-adj="-1" aria-label="Bajar 0,1 km/h">${icon('minus', 22, { stroke: 2.6 })}</button>
+                <button class="hud-adj hud-adj--minus" data-adj="-1" aria-label="Bajar 0,1 km/h">${icon('minus', 22, { stroke: 2.6 })}</button>
                 <span class="hud-speed__fig">
                   <span class="hud-speed__glow num" data-ref="speedGlow" aria-hidden="true">0,0</span>
                   <span class="hud-speed__num num" data-ref="speed">0,0</span>
                 </span>
-                <button class="hud-adj hud-adj--plus" data-adj="1" aria-label="Subir 0,1 km/h">${icon('plus', 22, { stroke: 2.6 })}</button>
+                <button class="hud-adj hud-adj--plus" data-adj="1" aria-label="Subir 0,1 km/h">${icon('plus', 22, { stroke: 2.6 })}</button>
               </div>
               <div class="hud-pace">
                 <span class="hud-u">km/h</span><i class="hud-dot" aria-hidden="true"></i>
@@ -842,6 +911,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       clip: refs.profile.querySelector('[data-strip-clip]'),
       cur: refs.profile.querySelector('[data-strip-cur]'),
       total: s.totalSec || 1,
+      idx: -1,
     };
     delete cache.stripPx;
     updateProfile(s);
@@ -850,6 +920,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function updateProfile(s) {
     if (!strip?.clip) return;
+    // El tramo en curso, a plena luz (el resto, en su color apagado)
+    const si = Number.isFinite(s.segIndex) ? s.segIndex : -1;
+    if (si !== strip.idx) {
+      refs.profile.querySelector(`[data-strip-i="${strip.idx}"]`)?.setAttribute('opacity', '0');
+      refs.profile.querySelector(`[data-strip-i="${si}"]`)?.setAttribute('opacity', '1');
+      strip.idx = si;
+    }
     const f = clamp(s.totalElapsed / strip.total, 0, 1);
     const px = Math.round(f * 10000) / 10; // 0..1000 (viewBox) con 0,1 de resolución
     if (cache.stripPx === px) return;
@@ -1199,7 +1276,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
           quality: visuals.quality,
           reducedMotion: reducedMotion(),
           tvMode: tvOn,
-          theme: typeof visuals.theme === 'string' && visuals.theme ? visuals.theme : undefined,
+          theme: (sceneThemeId = themePick().id),
           strideBob: visuals.strideBob !== false,
           treadmill: getState().treadmill || null,
           onError: () => sceneFail(),
@@ -1215,6 +1292,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
         }
         scene = ctl;
         debugScene();
+        // Se eligió otro escenario en Preparación mientras se creaba la escena: se cambia ya, aún oculta
+        applySceneTheme();
         attachScene();
       })
       .catch(() => { sceneP = null; sceneFail(); });
@@ -1278,6 +1357,19 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (!sceneCanvas?.dataset.lost) root.classList.add('has-3d');
       scheduleHudRects();
     }));
+  }
+
+  /** Escenario de esta clase: elección de Preparación › preferencia de Perfil ('auto' = según el tipo de clase). */
+  function themePick() {
+    return resolveTheme(visuals.theme, workout, sessionTheme);
+  }
+
+  /** Lleva la escena (si existe) al escenario elegido; la API setTheme es asíncrona y nunca lanza aquí. */
+  function applySceneTheme() {
+    const id = themePick().id;
+    if (!scene || id === sceneThemeId) return;
+    sceneThemeId = id;
+    try { Promise.resolve(scall('setTheme', id)).catch(() => {}); } catch { /* escena sin setTheme */ }
   }
 
   function sceneFail() {
@@ -1966,13 +2058,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (n > 0) {
         sceneEvent('countdown', { n });
         doBeep('tick');
-        haptic('light');
+        timerHaptic('light');
         n--;
         k++;
         later(step, Math.max(0, t0 + k * 1000 - performance.now()));
       } else {
         doBeep('go');
-        haptic('heavy');
+        timerHaptic('heavy');
         countingDown = false;
         onDone();
         later(() => {
@@ -2048,7 +2140,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       sweep();
       const prev = cache.segSpeed;
       const up = prev != null && s.currentSpeed > prev;
-      haptic(s.segment?.zone === 'sprint' || (up && s.currentSpeed - prev >= 1.5) ? 'heavy' : 'medium');
+      timerHaptic(s.segment?.zone === 'sprint' || (up && s.currentSpeed - prev >= 1.5) ? 'heavy' : 'medium');
       // Bug «SERIE 3/8» al empezar cada repetición (no en el arranque ni al restaurar)
       const rep = s.segment?.rep;
       if (rep?.n > 1 && info?.reason !== 'restart' && cache.repKey !== prevRep && !(workout.isTest && s.inTestStage)) {
@@ -2465,7 +2557,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     musicSeek(s);
     const vam = s.test?.vam;
     coachCall('say', 'testEnd', { vam: vam ? fmt.speed(vam) : '', speed: s.test?.lastStageSpeed ?? '', stage: s.test?.stage ?? '' });
-    haptic('heavy');
+    timerHaptic('heavy');
     doBeep('done');
     dropBugs(['stage']);
     if (vam) showBug({ lbl: 'VAM', val: fmt.speed(vam), sub: 'km/h', color: '#7D7AFF', kind: 'vam' });
@@ -2877,7 +2969,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       const start = t;
       t += sg.sec;
       const cls = i === cur ? 'is-current' : i < cur ? 'is-done' : '';
-      const rep = sg.rep?.n ? ` <small>${sg.rep.i}/${sg.rep.n}</small>` : '';
+      const rep = sg.rep?.n > 1 ? ` <small>${sg.rep.i}/${sg.rep.n}</small>` : '';
       return `<li class="pl-struct__row ${cls}" style="--zc:${zoneColor(sg.zone)}">
         <span class="pl-struct__bar"></span>
         <span class="pl-struct__time num">${fmt.clock(start)}</span>
@@ -3018,7 +3110,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     nb.finish(session, { saved });
     coachCall('say', 'finish', { km: fmt.km(session.distanceKm), min: Math.round(session.elapsedSec / 60), completed: !!session.completed });
     doBeep('done');
-    haptic('success');
+    timerHaptic('success');
     releaseWakeLock();
     clearNowPlaying();
     // Plano final sobrio de la escena (~3 s) mientras el rótulo final resume la sesión
@@ -3094,6 +3186,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       musicTracks: musicTracks.slice(),
       skips: skips.slice(),
       timeline: timeline.slice(),
+      sceneTheme: sessionTheme,
       hrLive: nb.samples(),
       title: workout.title || '',
       savedAt: Date.now(),

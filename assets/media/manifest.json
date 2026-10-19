@@ -1,0 +1,162 @@
+[
+  {
+    "file": "hero-woman.jpg",
+    "use": "Hero vertical (home / onboarding / class intro), woman runner",
+    "orientation": "vertical",
+    "width": 1290,
+    "height": 2311,
+    "bytes": 343297,
+    "focal": "Runner occupies the lower ~55% of the frame, slightly left of centre, facing right; top ~40% is near-black empty space for the title",
+    "tone": "low-key, deep blacks, faint ember rim on shoulder/arm, calm-determined"
+  },
+  {
+    "file": "hero-man.jpg",
+    "use": "Hero vertical (home / onboarding / class intro), man runner",
+    "orientation": "vertical",
+    "width": 1290,
+    "height": 2311,
+    "bytes": 349315,
+    "focal": "Runner in the lower ~50%, centre-right, facing left; top ~45% is empty black for the title",
+    "tone": "low-key, strongest ember rim light of the set, cinematic, focused"
+  },
+  {
+    "file": "treadmill-detail.jpg",
+    "use": "Detail / texture image (class detail, section divider)",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 109686,
+    "focal": "Side view at belt height: lower legs centre, shoes pointing RIGHT toward the motor hood and console uprights at the right edge (rear roller at the left); dark empty area top-left for text",
+    "tone": "low-key, motion, ember rim along calves"
+  },
+  {
+    "file": "cat-intervals.jpg",
+    "use": "Category header: Intervalos / sprint",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 239749,
+    "focal": "Sprinter on the right third, facing right; left half is dark gym space for the title",
+    "tone": "explosive, high contrast, ember rim on arm and back"
+  },
+  {
+    "file": "cat-endurance.jpg",
+    "use": "Category header: Resistencia / long run",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 223713,
+    "focal": "Runner on the left third, full body; right half is dark empty wall for text",
+    "tone": "steady, calm, cool greys with ember accent on the shoulder"
+  },
+  {
+    "file": "cat-recovery.jpg",
+    "use": "Category header: Recuperación / walk",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 214881,
+    "focal": "Man with towel on the right third; left half dark empty space",
+    "tone": "soft, calm, lower contrast"
+  },
+  {
+    "file": "cat-tempo.jpg",
+    "use": "Category header: Tempo",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 211848,
+    "focal": "Waist-up runner on the left-centre (face at ~45% x); right half dark empty space",
+    "tone": "focused, controlled, ember rim on jaw/shoulder"
+  },
+  {
+    "file": "empty.jpg",
+    "use": "Empty state (no classes / no history yet)",
+    "orientation": "horizontal",
+    "width": 1600,
+    "height": 900,
+    "bytes": 163952,
+    "focal": "Single treadmill right-of-centre; left 55% is empty dark space for the message",
+    "tone": "dim, quiet, single ember rim on the frame"
+  },
+  {
+    "file": "watch-wrist.jpg",
+    "use": "Apple Watch feature (Ultra 49 mm) with the REAL BestRunning «Clase» screen",
+    "orientation": "vertical",
+    "width": 1080,
+    "height": 1920,
+    "bytes": 334787,
+    "focal": "Watch at centre (~55% height); empty dark area in the top third for a headline",
+    "tone": "low-key, crisp UI, product-real"
+  },
+  {
+    "file": "watch-product.jpg",
+    "use": "Apple Watch product hero with the REAL BestRunning «Pulso» screen",
+    "orientation": "vertical",
+    "width": 1200,
+    "height": 1500,
+    "bytes": 205140,
+    "focal": "Watch centred in the lower 70%; top ~25% black for a headline",
+    "tone": "studio black, ember rim on titanium, premium"
+  },
+  {
+    "file": "hero-loop.mp4",
+    "use": "Animated vertical hero (5 s seamless loop, muted, autoplay) made from hero-woman.jpg",
+    "orientation": "vertical",
+    "width": 720,
+    "height": 1280,
+    "bytes": 1571370,
+    "focal": "Runner in the lower ~55%, left of centre; top ~40% empty black for the title",
+    "tone": "subtle motion: stride, belt, light flicker; locked camera"
+  },
+  {
+    "file": "hero-loop.jpg",
+    "use": "Poster for hero-loop.mp4 (first frame)",
+    "orientation": "vertical",
+    "width": 720,
+    "height": 1280,
+    "bytes": 70343,
+    "focal": "as hero-loop.mp4",
+    "tone": "as hero-loop.mp4"
+  },
+  {
+    "file": "detail-loop.mp4",
+    "use": "Animated treadmill close-up loop (5 s seamless, muted) made from treadmill-detail.jpg",
+    "orientation": "horizontal",
+    "width": 1280,
+    "height": 720,
+    "bytes": 1832411,
+    "focal": "Same framing as treadmill-detail.jpg: runner faces right toward the console uprights, belt moves right-to-left under the feet; top-left dark for text",
+    "tone": "motion, cadence, ember rim"
+  },
+  {
+    "file": "detail-loop.jpg",
+    "use": "Poster for detail-loop.mp4 (first frame)",
+    "orientation": "horizontal",
+    "width": 1280,
+    "height": 720,
+    "bytes": 64894,
+    "focal": "as detail-loop.mp4",
+    "tone": "as detail-loop.mp4"
+  },
+  {
+    "file": "watch-loop.mp4",
+    "use": "Animated Apple Watch loop with the REAL «Clase» screen (UI composited per frame, never AI-drawn)",
+    "orientation": "vertical",
+    "width": 720,
+    "height": 1280,
+    "bytes": 819468,
+    "focal": "Watch at centre-low (~55% height); top third dark for a headline",
+    "tone": "ambient light flicker only; UI static and pixel-crisp"
+  },
+  {
+    "file": "watch-loop.jpg",
+    "use": "Poster for watch-loop.mp4 (first frame)",
+    "orientation": "vertical",
+    "width": 720,
+    "height": 1280,
+    "bytes": 113564,
+    "focal": "as watch-loop.mp4",
+    "tone": "as watch-loop.mp4"
+  }
+]

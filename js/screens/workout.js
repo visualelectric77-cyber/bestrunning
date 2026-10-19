@@ -3,7 +3,7 @@ import { getState, setState, subscribe } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
-  icon, navBar, enableCollapsingHeader, intensityDots, chip, stat, segmented, profileChart, zoneBar, sectionHeader,
+  icon, navBar, enableCollapsingHeader, intensityDots, stat, segmented, profileChart, zoneBar, sectionHeader,
   emptyState, actionSheet, toast,
 } from '../ui/components.js';
 import { workoutFromId, parseWorkoutId, workoutId, groupSegments } from '../training/generator.js';
@@ -27,7 +27,6 @@ function safe(fn, fallback) {
   }
 }
 
-const ccStyle = (c) => `--cc:var(--c-${CATEGORIES[c] ? c : 'test'})`;
 const isKey = (k) => typeof k === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(k);
 const minutesOf = (w) => w.minutes || Math.round((w.totalSec || 0) / 60);
 
@@ -67,39 +66,38 @@ function axis(totalSec) {
 function heroBlock(w, state, ctx) {
   const c = CATEGORIES[w.category];
   const lv = state.levels || {};
-  const chips = [
-    chip(c?.name || 'Clase', { color: c?.color || null, active: true }),
-    w.focus ? chip(w.focus) : '',
-  ].join('');
   const intensity = Math.min(3, Math.max(1, w.intensity || 1));
   const legend = LEVEL_KEYS.map(
     (k) => `<span class="wk-legend__item" style="--zc:var(--z-${k})"><i aria-hidden="true"></i>${esc(ZONES[k].short)} <b class="num">${fmt.speed(lv[k] ?? 0)}</b></span>`
   ).join('');
   const plan = ctx.date
-    ? `<div class="wk-plan">${icon('calendar', 14)} Clase del plan · ${esc(dayLabel(ctx.date, ctx.today))}</div>`
+    ? `<span class="wk-plan">${icon('calendar', 13)} Clase del plan · ${esc(dayLabel(ctx.date, ctx.today))}</span>`
     : '';
-  return `<section class="wk-hero" style="${ccStyle(w.category)}">
-    <div class="wk-hero__glow" aria-hidden="true"></div>
+  const tags = [c?.name || 'Clase', w.focus || ''].filter(Boolean).map((t) => esc(t)).join(' · ');
+  return `<section class="wk-hero">
     ${plan}
-    <div class="wk-chips">${chips}<span class="wk-int" aria-label="Intensidad ${INTENSITY[intensity - 1].toLowerCase()}">${intensityDots(intensity, 'var(--cc)')}<span>${INTENSITY[intensity - 1]}</span></span></div>
-    ${w.subtitle ? `<p class="wk-sub">${esc(w.subtitle)}</p>` : ''}
-    <div class="wk-chart">
-      ${profileChart(w.segments || [], { height: 172, showLevels: true, levels: lv, radius: 4 })}
-      ${axis(w.totalSec)}
+    <div class="wk-tags">
+      <span class="eyebrow wk-tags__cat">${tags}</span>
+      <span class="wk-int" aria-label="Intensidad ${INTENSITY[intensity - 1].toLowerCase()}">${intensityDots(intensity)}<span>${INTENSITY[intensity - 1]}</span></span>
     </div>
-    <div class="wk-legend">${legend}</div>
+    ${w.subtitle ? `<p class="wk-sub">${esc(w.subtitle)}</p>` : ''}
+    <div class="card wk-chart">
+      ${profileChart(w.segments || [], { height: 172, showLevels: true, levels: lv, radius: 2 })}
+      ${axis(w.totalSec)}
+      <div class="wk-legend">${legend}</div>
+    </div>
   </section>`;
 }
 
 function statsBlock(w) {
-  return `<div class="card wk-stats">
+  return `<div class="card wk-stats"><div class="stat-grid stat-grid--2">
     ${w.isTest
-      ? stat({ label: 'Duración máx.', value: fmt.int(Math.round((w.totalSec || 0) / 60)), unit: 'min', icon: 'timer' })
-      : stat({ label: 'Duración', value: fmt.int(minutesOf(w)), unit: 'min', icon: 'timer' })}
-    ${stat({ label: 'Distancia est.', value: fmt.dec1(w.estDistanceKm || 0), unit: 'km', icon: 'route' })}
-    ${stat({ label: 'Energía est.', value: fmt.int(w.estKcal || 0), unit: 'kcal', icon: 'flame' })}
-    ${stat({ label: 'Vel. máx.', value: fmt.speed(w.maxSpeed || 0), unit: 'km/h', icon: 'bolt', color: 'var(--z-sprint)' })}
-  </div>`;
+      ? stat({ label: 'Duración máx.', value: fmt.int(Math.round((w.totalSec || 0) / 60)), unit: 'min' })
+      : stat({ label: 'Duración', value: fmt.int(minutesOf(w)), unit: 'min' })}
+    ${stat({ label: 'Distancia est.', value: fmt.dec1(w.estDistanceKm || 0), unit: 'km' })}
+    ${stat({ label: 'Energía est.', value: fmt.int(w.estKcal || 0), unit: 'kcal' })}
+    ${stat({ label: 'Velocidad máx.', value: fmt.speed(w.maxSpeed || 0), unit: 'km/h' })}
+  </div></div>`;
 }
 
 function durationBlock(w) {
@@ -111,7 +109,7 @@ function durationBlock(w) {
   ds = [...new Set(ds)].sort((a, b) => a - b);
   if (ds.length < 2) return '';
   return `<div class="wk-dur">
-    <span class="wk-dur__label">Duración</span>
+    <h2 class="list-header wk-dur__label">Duración</h2>
     ${segmented({ name: 'wk-dur', options: ds.map((d) => ({ value: d, label: `${d} min` })), value: cur })}
   </div>`;
 }
@@ -120,10 +118,10 @@ function segRow(s) {
   const z = ZONES[s.zone] ? s.zone : 'jog';
   const incl = s.incline ? `<span class="wk-seg__incl">${icon('mountain', 12)} ${fmt.dec1(s.incline)} %</span>` : '';
   return `<div class="wk-seg" style="--zc:var(--z-${z})">
-    <span class="wk-seg__bar" aria-hidden="true"></span>
+    <span class="zdot wk-seg__dot" aria-hidden="true"></span>
     <span class="wk-seg__label">${esc(s.label || ZONES[z].name)}${incl}</span>
     <span class="wk-seg__dur num">${fmt.clock(s.sec)}</span>
-    <span class="wk-seg__speed num">${fmt.speed(s.speed)}<small>km/h</small></span>
+    <span class="wk-seg__speed"><b class="num">${fmt.speed(s.speed)}</b><small>km/h</small></span>
   </div>`;
 }
 
@@ -160,10 +158,10 @@ function structureBlock(w) {
 function notesBlock(w, state) {
   const notes = Array.isArray(w.coachNotes) ? w.coachNotes.filter(Boolean) : [];
   const lead = state.treadmill?.announceLead || 10;
-  const items = notes.map((n) => `<li>${icon('sparkles', 16)}<span>${esc(n)}</span></li>`);
-  items.push(`<li class="wk-notes__tread">${icon('speaker', 16)}<span>Tu coach te avisará ${lead} segundos antes de cada cambio de velocidad: la cinta tarda unos segundos en ajustarse.</span></li>`);
+  const items = notes.map((n) => `<li><span>${esc(n)}</span></li>`);
+  items.push(`<li class="wk-notes__tread">${icon('speaker', 18)}<span>Tu coach te avisará ${lead} segundos antes de cada cambio de velocidad: la cinta tarda unos segundos en ajustarse.</span></li>`);
   return `<section class="wk-section">
-    ${sectionHeader('Consejos del coach')}
+    ${sectionHeader('Consejo del coach')}
     <ul class="card wk-notes">${items.join('')}</ul>
   </section>`;
 }
@@ -172,10 +170,10 @@ function warningsBlock(w, state) {
   const tpl = safe(() => getTemplate(w.templateId), null);
   const out = [];
   if (tpl?.requiresIncline && !state.treadmill?.hasIncline) {
-    out.push(`<div class="wk-warn">${icon('mountain', 18)}<span>Esta clase usa inclinación. Actívala en <b>Perfil → Cinta</b> si tu cinta la tiene.</span></div>`);
+    out.push(`<div class="card wk-warn">${icon('mountain', 20)}<span>Esta clase usa inclinación. Actívala en <b>Perfil → Cinta</b> si tu cinta la tiene.</span></div>`);
   }
   if (w.isTest) {
-    out.push(`<div class="wk-warn wk-warn--test">${icon('gauge', 18)}<span><b>Cómo funciona:</b> tras calentar, sube 0,5 km/h cada minuto. Aguanta todo lo que puedas y pulsa «No puedo más»: pasarás a la vuelta a la calma y calcularemos tu VAM y tus nuevas velocidades.</span></div>`);
+    out.push(`<div class="card wk-warn wk-warn--test">${icon('gauge', 20)}<span><b>Cómo funciona:</b> tras calentar, sube 0,5 km/h cada minuto. Aguanta todo lo que puedas y pulsa «No puedo más»: pasarás a la vuelta a la calma y calcularemos tu VAM y tus nuevas velocidades.</span></div>`);
   }
   return out.join('');
 }
@@ -187,14 +185,14 @@ function view(w, state, ctx) {
     ${statsBlock(w)}
     ${durationBlock(w)}
     <section class="wk-section">
-      ${sectionHeader('Tiempo por zona')}
+      ${sectionHeader('Tiempo en zonas')}
       <div class="card wk-zones">${zoneBar(w.timeInZone || {}, { showLegend: true })}</div>
     </section>
     ${w.description ? `<section class="wk-section"><p class="wk-desc">${esc(w.description)}</p></section>` : ''}
     ${structureBlock(w)}
     ${notesBlock(w, state)}
     <div class="wk-more">
-      <button type="button" class="btn btn--secondary btn--block btn--lg" data-schedule>${icon('calendar', 20)} Programar para…</button>
+      <button type="button" class="btn btn--secondary btn--block btn--lg" data-schedule>${icon('calendar-plus', 20)} Programar para…</button>
     </div>
     <div class="wk-spacer" aria-hidden="true"></div>`;
 }
@@ -202,7 +200,7 @@ function view(w, state, ctx) {
 function ctaHtml(w, ctx) {
   const play = `#/play/${encodeURIComponent(w.id)}${ctx.date ? `?date=${ctx.date}` : ''}`;
   return `<div class="wk-cta">
-    <button type="button" class="btn btn--primary btn--lg btn--block wk-go" data-href="${play}">${icon('play', 20)}<span>Empezar</span><span class="wk-go__min">${w.isTest ? `≤ ${Math.round((w.totalSec || 0) / 60)}` : minutesOf(w)} min</span></button>
+    <button type="button" class="btn btn--primary btn--lg btn--block wk-go" data-href="${play}">${icon('play', 18)}<span>Empezar</span><span class="wk-go__min">· ${w.isTest ? `≤ ${Math.round((w.totalSec || 0) / 60)}` : minutesOf(w)} min</span></button>
   </div>`;
 }
 

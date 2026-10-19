@@ -59,7 +59,7 @@ export function sessionMusicHtml(ses, { variant = 'history', index = null } = {}
   const style = index != null ? ` style="--i:${Number(index) || 0}"` : '';
   if (variant === 'summary') {
     return `<section class="card sm-card sm-music"${style}>
-      <div class="sm-card__head"><span class="sm-card__title">${icon('music', 16)} Sonó en tu sesión</span><span class="sm-opt">♫ ${countLabel(items.length)}</span></div>
+      <div class="sm-card__head"><span class="sm-card__title">Sonó en tu sesión</span><span class="sm-opt">${countLabel(items.length)}</span></div>
       <div class="whr-tracks" data-music>${musicRowsHtml(items)}</div>
     </section>`;
   }

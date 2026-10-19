@@ -135,14 +135,33 @@ const ALIASES = {
   alert: 'warning', help: 'question', reorder: 'drag', time: 'clock', distance: 'route', kcal: 'flame', speed: 'gauge',
 };
 
-export function icon(name, size = 22, { stroke = 2, cls = '' } = {}) {
+/**
+ * Grosor óptico (v2): un único estilo de línea. El trazo se ajusta al tamaño para que todos los iconos se vean
+ * con ≈ 1,6 px de línea (24 px → 1,6; 16 px → 2,4), y el `stroke` que pida una pantalla solo puede afinarlo,
+ * nunca engordarlo más de un pelo por encima de ese valor.
+ */
+function opticalStroke(size, stroke) {
+  const px = Math.max(8, Number(size) || 22);
+  const optical = clamp((1.6 * 24) / px, 1.4, 2.6);
+  const want = Number(stroke);
+  return r2(Number.isFinite(want) && want > 0 ? clamp(want, 1.2, optical + 0.2) : optical);
+}
+
+export function icon(name, size = 22, { stroke = null, cls = '' } = {}) {
   const key = ALIASES[name] || name;
   const body = ICONS[key] || ICONS.circle;
   const safe = String(key).replace(/[^a-z0-9-]/gi, '');
-  return `<svg class="icon icon--${safe}${cls ? ' ' + esc(cls) : ''}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+  return `<svg class="icon icon--${safe}${cls ? ' ' + esc(cls) : ''}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${opticalStroke(size, stroke)}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${body}</svg>`;
+}
+
+/** Icono de fila de lista (v2): monocromo gris, sin cuadrado de color. tone: 'danger' | 'accent' para excepciones con significado. */
+export function listIcon(name, { tone = '' } = {}) {
+  const t = tone === 'danger' || tone === 'accent' ? ` list__icon--${tone}` : '';
+  return `<span class="list__icon${t}" aria-hidden="true">${icon(name, 22)}</span>`;
 }
 
 /* ═════════════ Colores ═════════════ */
+// v2: las categorías no llevan color en la interfaz (rótulo gris). CATEGORY_META.color se conserva solo como dato.
 
 const CATEGORY_META = {
   intervals: { name: 'Intervalos', icon: 'bolt', color: '#FF375F' },
@@ -158,7 +177,13 @@ const CATEGORY_META = {
 const safeKey = (k) => String(k ?? '').replace(/[^a-z0-9_-]/gi, '');
 
 export function categoryColor(category) {
-  return CATEGORY_META[category] ? `var(--c-${category})` : 'var(--accent)';
+  // v2: --c-* es gris neutro (tokens.css); se mantiene la firma para no romper pantallas
+  return CATEGORY_META[category] ? `var(--c-${category})` : 'var(--cat)';
+}
+
+/** Nombre legible de una categoría («Intervalos», «Tempo»…), para el rótulo gris en mayúsculas. */
+export function categoryName(category) {
+  return CATEGORY_META[category]?.name || '';
 }
 
 export function zoneColor(zone) {
@@ -170,7 +195,7 @@ export function zoneColor(zone) {
 export function navBar({ title, large = true, back = false, backLabel = 'Atrás', right = '' } = {}) {
   const fallback = typeof back === 'string' ? ` data-fallback="${esc(back)}"` : '';
   const backBtn = back
-    ? `<button type="button" class="navbar__back" data-action="back"${fallback} aria-label="${esc(backLabel || 'Atrás')}">${icon('chevron-left', 26, { stroke: 2.4 })}<span>${esc(backLabel)}</span></button>`
+    ? `<button type="button" class="navbar__back" data-action="back"${fallback} aria-label="${esc(backLabel || 'Atrás')}">${icon('chevron-left', 28, { stroke: 1.9 })}<span>${esc(backLabel)}</span></button>`
     : '';
   return `<header class="navbar${large ? ' navbar--large' : ' navbar--inline'}">
   <div class="navbar__compact">
@@ -291,22 +316,32 @@ export function intensityDots(level, color = 'currentColor') {
   return `<span class="dots" style="--dot-color:${esc(color)}" role="img" aria-label="Intensidad ${n} de 3">${dots}</span>`;
 }
 
-export function chip(text, { color = null, active = false, attrs = '' } = {}) {
+/**
+ * Chip monocromo (v2). `color` ya no tiñe el chip (las categorías no tienen color); `dot` pinta un punto de 8 px
+ * con ese color, solo cuando el color significa algo (una zona).
+ */
+export function chip(text, { color = null, active = false, attrs = '', dot = false } = {}) {
   const tag = attrs && attrs.trim() ? 'button' : 'span';
   const type = tag === 'button' ? ' type="button"' : '';
-  const style = color ? ` style="--chip-color:${esc(color)}"` : '';
-  const cls = `chip${color ? ' chip--tinted' : ''}${active ? ' chip--active' : ''}`;
+  const cls = `chip${active ? ' chip--active' : ''}`;
+  const dotHtml = dot && color ? `<i class="chip__dot" style="--zc:${esc(color)}" aria-hidden="true"></i>` : '';
   // Con role="tab" (aria-selected) no se anuncia además «pulsado»: VoiceOver diría los dos estados
   const pressed = tag === 'button' && !/aria-selected/.test(attrs) ? ` aria-pressed="${active ? 'true' : 'false'}"` : '';
-  return `<${tag}${type} class="${cls}"${style}${pressed} ${attrs || ''}>${esc(text)}</${tag}>`;
+  return `<${tag}${type} class="${cls}"${pressed} ${attrs || ''}>${dotHtml}${esc(text)}</${tag}>`;
 }
 
-export function stat({ label, value, unit = '', icon: ic = null, color = null, size = 'md' } = {}) {
+/**
+ * Cifra con rótulo (v2: rótulo arriba, cifra blanca, unidad gris). `of` añade un denominador gris («0/6»);
+ * `valueHtml` (HTML ya escapado por quien llama) sustituye a `value` para cifras animadas (data-count…).
+ */
+export function stat({ label, value, unit = '', icon: ic = null, color = null, size = 'md', of = null, valueHtml = null, attrs = '' } = {}) {
   const sz = ['sm', 'md', 'lg'].includes(size) ? size : 'md';
   const style = color ? ` style="--stat-color:${esc(color)}"` : '';
-  return `<div class="stat stat--${sz}${color ? ' stat--colored' : ''}"${style}>
-  <div class="stat__label">${ic ? icon(ic, sz === 'lg' ? 16 : 14, { stroke: 2.2 }) : ''}<span>${esc(label)}</span></div>
-  <div class="stat__value">${esc(value ?? '–')}${unit ? `<span class="stat__unit">${esc(unit)}</span>` : ''}</div>
+  const val = valueHtml != null ? String(valueHtml) : esc(value ?? '–');
+  const den = of != null && of !== '' ? `<span class="stat__unit">/${esc(of)}</span>` : '';
+  return `<div class="stat stat--${sz}${color ? ' stat--colored' : ''}"${style}${attrs ? ` ${attrs}` : ''}>
+  <div class="stat__label">${ic ? icon(ic, sz === 'lg' ? 16 : 14) : ''}<span>${esc(label)}</span></div>
+  <div class="stat__value">${val}${den}${unit ? `<span class="stat__unit">${esc(unit)}</span>` : ''}</div>
 </div>`;
 }
 
@@ -315,14 +350,10 @@ export function ring({ value, size = 64, stroke = 7, color = 'var(--accent)', tr
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const cx = size / 2;
-  const grad = color === 'ember' || color === 'var(--accent-grad)';
-  const gid = grad ? nextId('rg') : '';
-  const strokeStyle = grad ? `url(#${gid})` : esc(color);
-  const defs = grad
-    ? `<defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF9500"/><stop offset=".5" stop-color="#FF5A1F"/><stop offset="1" stop-color="#FF2D55"/></linearGradient></defs>`
-    : '';
+  // v2: sin degradado; «ember» (heredado) es el acento sólido
+  const strokeStyle = color === 'ember' || color === 'var(--accent-grad)' ? 'var(--accent)' : esc(color);
   return `<div class="ring" style="width:${size}px;height:${size}px">
-  <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">${defs}
+  <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
     <circle cx="${cx}" cy="${cx}" r="${r2(r)}" fill="none" style="stroke:${esc(track)}" stroke-width="${stroke}"/>
     <circle class="ring__value" cx="${cx}" cy="${cx}" r="${r2(r)}" fill="none" style="stroke:${strokeStyle};--ring-c:${r2(c)}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${r2(c)}" stroke-dashoffset="${r2(c * (1 - v))}" transform="rotate(-90 ${cx} ${cx})"${v <= 0 ? ' stroke-opacity="0"' : ''}/>
   </svg>
@@ -351,9 +382,9 @@ export function stepper({ id, value, step = 0.1, min, max, unit = '', decimals =
     `data-decimals="${Number(decimals) || 0}"`,
   ].join(' ');
   return `<div class="stepper" data-stepper ${attrs} role="group">
-  <button type="button" class="stepper__btn" data-step-dir="-1" aria-label="Bajar"${v <= lo ? ' disabled' : ''}>${icon('minus', 20, { stroke: 2.6 })}</button>
+  <button type="button" class="stepper__btn" data-step-dir="-1" aria-label="Bajar"${v <= lo ? ' disabled' : ''}>${icon('minus', 20)}</button>
   <div class="stepper__value" role="spinbutton" aria-valuenow="${v}"${min != null ? ` aria-valuemin="${min}"` : ''}${max != null ? ` aria-valuemax="${max}"` : ''}><span class="num" data-stepper-value>${fmtDec(v, Number(decimals) || 0)}</span>${unit ? `<span class="stepper__unit">${esc(unit)}</span>` : ''}</div>
-  <button type="button" class="stepper__btn" data-step-dir="1" aria-label="Subir"${v >= hi ? ' disabled' : ''}>${icon('plus', 20, { stroke: 2.6 })}</button>
+  <button type="button" class="stepper__btn" data-step-dir="1" aria-label="Subir"${v >= hi ? ' disabled' : ''}>${icon('plus', 20)}</button>
 </div>`;
 }
 
@@ -370,35 +401,34 @@ export function segmented({ name, options = [], value } = {}) {
   return `<div class="segmented" role="radiogroup" data-segmented data-name="${esc(name)}" style="--count:${Math.max(1, opts.length)};--index:${idx}"><span class="segmented__thumb" aria-hidden="true"></span>${btns}</div>`;
 }
 
-export function emptyState({ icon: ic = 'sparkles', title = '', text = '', action = '' } = {}) {
+export function emptyState({ icon: ic = 'runner', title = '', text = '', action = '', photo: withPhoto = false } = {}) {
+  // v2: sin destellos decorativos; icono gris grande sin contenedor (ContentUnavailableView). Con `photo`, la cinta
+  // vacía de la campaña (assets/media/empty.jpg) en lugar del icono: para los «aún no hay nada» importantes.
+  const name = !ic || ic === 'sparkles' ? 'runner' : ic;
+  if (withPhoto) {
+    return `<div class="empty-state empty-state--photo fade-in">
+  <div class="empty-state__media">${photo('empty', { cls: 'empty-state__img' })}</div>
+  ${title ? `<h3 class="empty-state__title">${esc(title)}</h3>` : ''}
+  ${text ? `<p class="empty-state__text">${esc(text)}</p>` : ''}
+  ${action ? `<div class="empty-state__action">${action}</div>` : ''}
+</div>`;
+  }
   return `<div class="empty-state fade-in">
-  <div class="empty-state__icon">${icon(ic || 'sparkles', 34, { stroke: 1.8 })}</div>
+  <div class="empty-state__icon">${icon(name, 44)}</div>
   ${title ? `<h3 class="empty-state__title">${esc(title)}</h3>` : ''}
   ${text ? `<p class="empty-state__text">${esc(text)}</p>` : ''}
   ${action ? `<div class="empty-state__action">${action}</div>` : ''}
 </div>`;
 }
 
-export function sectionHeader(title, actionHtml = '') {
-  return `<div class="section-header"><h2 class="section-title">${esc(title)}</h2>${actionHtml ? `<div class="section-header__action">${actionHtml}</div>` : ''}</div>`;
+/** Encabezado de sección. Por defecto estilo iOS de lista agrupada (13 px, mayúsculas, gris); `large` = Title 2 blanco. */
+export function sectionHeader(title, actionHtml = '', { large = false } = {}) {
+  return `<div class="section-header${large ? ' section-header--lg' : ''}"><h2 class="section-title">${esc(title)}</h2>${actionHtml ? `<div class="section-header__action">${actionHtml}</div>` : ''}</div>`;
 }
 
 /* ═════════════ Gráfico de perfil de intensidad (insignia) ═════════════ */
 
-function hexToRgb(hex) {
-  const h = String(hex).replace('#', '');
-  const n = parseInt(h.length === 3 ? h.replace(/(.)/g, '$1$1') : h, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
-function mixHex(hex, withHex, t) {
-  const a = hexToRgb(hex);
-  const b = hexToRgb(withHex);
-  const c = a.map((v, i) => Math.round(v + (b[i] - v) * t));
-  return `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-}
-
-const zoneHex = (z) => (ZONES[z] ? ZONES[z].color : '#FF6A1A');
+const zoneHex = (z) => (ZONES[z] ? ZONES[z].color : '#8E8E93');
 
 /** Barra con esquinas superiores redondeadas. */
 function barPath(x, y, w, h, r) {
@@ -408,15 +438,21 @@ function barPath(x, y, w, h, r) {
   return `M${r2(x)} ${r2(b)}V${r2(y + rr)}Q${r2(x)} ${r2(y)} ${r2(x + rr)} ${r2(y)}H${r2(x + w - rr)}Q${r2(x + w)} ${r2(y)} ${r2(x + w)} ${r2(y + rr)}V${r2(b)}Z`;
 }
 
+/**
+ * Perfil de intensidad (v2): barras planas del color de zona (sin degradados ni brillos), 2 px de separación y
+ * radio 2. `tone`: 'full' (por defecto) · 'tint' (zonas al 38 %, p. ej. «plan» detrás de la traza «real») ·
+ * 'mono' (gris, para miniaturas discretas) · 'soft' (miniaturas de listas: gris y solo los tramos intensos
+ * —correr, rápido, sprint— en su color). `progressSec` atenúa lo que falta y dibuja el cursor.
+ */
 export function profileChart(
   segments,
-  { height = 120, compact = false, progressSec = null, trace = null, levels = null, showLevels = false, radius = 3, gaps = null } = {},
+  { height = 120, compact = false, progressSec = null, trace = null, levels = null, showLevels = false, radius = 2, gaps = null, tone = 'full' } = {},
 ) {
   const segs = Array.isArray(segments) ? segments.filter((s) => s && Number(s.sec) > 0) : [];
   const W = compact ? 200 : 360;
   const H = Math.max(24, Number(height) || 120);
   if (!segs.length) {
-    return `<div class="profile-chart profile-chart--empty${compact ? ' profile-chart--compact' : ''}" role="img" aria-label="Sin perfil"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><line x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}" stroke="rgba(255,255,255,.12)" stroke-width="2" stroke-dasharray="4 5"/></svg></div>`;
+    return `<div class="profile-chart profile-chart--empty${compact ? ' profile-chart--compact' : ''}" role="img" aria-label="Sin perfil"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><line x1="0" y1="${H - 1}" x2="${W}" y2="${H - 1}" stroke="rgba(235,235,245,.18)" stroke-width="1" stroke-dasharray="3 4"/></svg></div>`;
   }
 
   const total = segs.reduce((a, s) => a + Number(s.sec), 0);
@@ -434,7 +470,7 @@ export function profileChart(
   const base = Math.max(0, minS * 0.5); // las velocidades bajas siguen siendo visibles
   const top = maxS * 1.02;
 
-  const padT = compact ? 3 : drawLevels ? 10 : 8;
+  const padT = compact ? 3 : drawLevels ? 10 : 6;
   const padB = 0;
   const chartH = H - padT - padB;
   const xOf = (t) => (t / span) * W;
@@ -444,8 +480,13 @@ export function profileChart(
   };
 
   const id = nextId('pc');
-  const gap = compact ? 1 : 1.6;
-  const usedZones = new Set();
+  const gap = compact ? 1.6 : 2;
+  const mono = tone === 'mono';
+  const soft = tone === 'soft';
+  // 'soft': color solo en lo intenso; una clase sin tramos intensos (recuperación, rodaje) enseña su trote en color
+  const SOFT_ON = segs.some((s) => s.zone === 'run' || s.zone === 'fast' || s.zone === 'sprint')
+    ? { run: 1, fast: 1, sprint: 1 }
+    : { jog: 1, run: 1 };
   let bars = '';
   let t = 0;
   segs.forEach((s, i) => {
@@ -458,20 +499,14 @@ export function profileChart(
     const y = yOf(Number(s.speed) || 0);
     const h = H - padB - y;
     const zone = ZONES[s.zone] ? s.zone : 'jog';
-    usedZones.add(zone);
-    const delay = Math.min(i * 14, 420);
-    bars += `<path class="pc-bar" d="${barPath(x, y, w, h, compact ? Math.min(radius, 2) : radius)}" fill="url(#${id}-${zone})" style="--d:${delay}ms"/>`;
+    const delay = Math.min(i * 10, 300);
+    const fill = mono || (soft && !SOFT_ON[zone]) ? 'rgba(235,235,245,.30)' : zoneHex(zone);
+    bars += `<path class="pc-bar pc-bar--${zone}" d="${barPath(x, y, w, h, compact ? Math.min(radius, 1.5) : radius)}" fill="${fill}" style="--d:${delay}ms"/>`;
   });
-
-  const defs = [...usedZones]
-    .map((z) => {
-      const c = zoneHex(z);
-      return `<linearGradient id="${id}-${z}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${mixHex(c, '#ffffff', 0.28)}"/><stop offset="0.18" stop-color="${c}"/><stop offset="1" stop-color="${mixHex(c, '#08080a', 0.28)}"/></linearGradient>`;
-    })
-    .join('');
 
   const hasProgress = progressSec != null && isFinite(progressSec);
   const px = hasProgress ? clamp(xOf(Number(progressSec)), 0, W) : 0;
+  const baseOpacity = tone === 'tint' ? ' opacity="0.38"' : '';
 
   // Tramos saltados ([desde, hasta] en tiempo de clase): barras atenuadas y la línea «real» no los cruza
   const gapList = (Array.isArray(gaps) ? gaps : [])
@@ -492,27 +527,27 @@ export function profileChart(
 
   let body;
   if (runClip && !hasProgress) {
-    body = `${runClip}<g class="pc-bars pc-bars--skipped" opacity="0.26">${bars}</g><g class="pc-bars" clip-path="url(#${id}-run)">${bars}</g>`;
+    body = `${runClip}<g class="pc-bars pc-bars--skipped" opacity="0.22">${bars}</g><g class="pc-bars" clip-path="url(#${id}-run)"${baseOpacity}>${bars}</g>`;
   } else if (hasProgress) {
-    body = `<g class="pc-bars pc-bars--future" opacity="0.32">${bars}</g>
+    body = `<g class="pc-bars pc-bars--future" opacity="0.28">${bars}</g>
 <clipPath id="${id}-clip"><rect data-pc-clip x="0" y="0" width="${r2(px)}" height="${H}"/></clipPath>
 <g class="pc-bars pc-bars--played" clip-path="url(#${id}-clip)">${bars}</g>`;
   } else {
-    body = `<g class="pc-bars">${bars}</g>`;
+    body = `<g class="pc-bars"${baseOpacity}>${bars}</g>`;
   }
 
-  // Líneas de nivel punteadas con etiqueta
+  // Líneas de nivel punteadas con etiqueta (finas, al 45 %)
   let levelLines = '';
   if (drawLevels && !compact) {
     LEVEL_KEYS.forEach((k) => {
       if (!lv[k]) return;
       const y = r2(yOf(lv[k]));
       const c = zoneHex(k);
-      levelLines += `<g class="pc-level"><line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${c}" stroke-opacity="0.55" stroke-width="1" stroke-dasharray="3 4"/><text x="${W - 3}" y="${r2(y - 3)}" text-anchor="end" fill="${c}" class="pc-level__label">${esc(fmt.speed(lv[k]))}</text></g>`;
+      levelLines += `<g class="pc-level"><line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="${c}" stroke-opacity="0.45" stroke-width="1" stroke-dasharray="2 4"/><text x="${W - 3}" y="${r2(y - 3)}" text-anchor="end" fill="${c}" class="pc-level__label">${esc(fmt.speed(lv[k]))}</text></g>`;
     });
   }
 
-  // Traza de velocidad real (escalones)
+  // Traza de velocidad real (escalones): blanca, con un perfil negro fino para leerse sobre cualquier zona
   let traceSvg = '';
   if (traceArr.length > 1) {
     const pts = traceArr.slice().sort((a, b) => a[0] - b[0]);
@@ -524,28 +559,36 @@ export function profileChart(
     d += `H${r2(xOf(Math.min(endT, span)))}`;
     const clip = runClip ? ` clip-path="url(#${id}-run)"` : '';
     if (runClip && hasProgress) traceSvg = runClip;
-    traceSvg += `<g${clip}><path class="pc-trace-shadow" d="${d}" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="${compact ? 2.5 : 4}" stroke-linejoin="round" stroke-linecap="round"/><path class="pc-trace" d="${d}" fill="none" stroke="#fff" stroke-width="${compact ? 1.2 : 1.8}" stroke-linejoin="round" stroke-linecap="round"/></g>`;
+    traceSvg += `<g${clip}><path class="pc-trace-shadow" d="${d}" fill="none" stroke="rgba(0,0,0,.6)" stroke-width="${compact ? 2.4 : 3.6}" stroke-linejoin="round" stroke-linecap="round"/><path class="pc-trace" d="${d}" fill="none" stroke="#fff" stroke-width="${compact ? 1.2 : 1.6}" stroke-linejoin="round" stroke-linecap="round"/></g>`;
   }
 
-  // Cursor (playhead) con brillo
+  // Cursor (playhead): línea blanca de 2 px y punto, sin brillo
   let playhead = '';
   if (hasProgress) {
     const x = r2(px);
     playhead = `<g class="pc-playhead" data-pc-playhead transform="translate(${x} 0)">
-  <rect x="-3" y="${padT - 2}" width="6" height="${H - padT + 2}" rx="3" fill="#fff" opacity="0.18" filter="url(#${id}-glow)"/>
   <rect x="-1" y="${padT - 2}" width="2" height="${H - padT + 2}" rx="1" fill="#fff"/>
-  <circle cx="0" cy="${padT}" r="${compact ? 2.5 : 3.6}" fill="#fff" filter="url(#${id}-glow)"/>
+  <circle cx="0" cy="${padT}" r="${compact ? 2.4 : 3.2}" fill="#fff"/>
 </g>`;
   }
-
-  const glow = hasProgress
-    ? `<filter id="${id}-glow" x="-200%" y="-20%" width="500%" height="140%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>`
-    : '';
 
   const mins = Math.round(total / 60);
   const label = `Perfil de intensidad: ${mins} min, velocidad máxima ${fmt.speed(Math.max(...segs.map((s) => Number(s.speed) || 0)))} km/h`;
   const animated = !hasProgress ? ' is-animated' : '';
-  return `<div class="profile-chart${compact ? ' profile-chart--compact' : ''}${animated}" role="img" aria-label="${esc(label)}" data-total="${total}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false"><defs>${defs}${glow}</defs>${levelLines}${body}${traceSvg}${playhead}</svg></div>`;
+  return `<div class="profile-chart${compact ? ' profile-chart--compact' : ''}${animated}" role="img" aria-label="${esc(label)}" data-total="${total}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">${levelLines}${body}${traceSvg}${playhead}</svg></div>`;
+}
+
+/** Cinta de zonas (4 px) bajo un perfil monocromo («Plan vs real»): la zona de cada tramo, alineada con el tiempo. */
+export function zoneRibbon(segments) {
+  const list = (Array.isArray(segments) ? segments : []).filter((x) => x && Number(x.sec) > 0);
+  if (!list.length) return '';
+  return `<div class="zone-ribbon" aria-hidden="true">${list.map((x) => `<i style="flex:${Number(x.sec)} 1 0;background:${zoneHex(x.zone)}"></i>`).join('')}</div>`;
+}
+
+/** Escala de esfuerzo monocroma (5 barras crecientes; n encendidas). La misma en Resumen, Historial y su edición. */
+export function effortBars(n) {
+  const k0 = clamp(Math.round(Number(n) || 0), 0, 5);
+  return `<span class="effort sm-face__lvl" aria-hidden="true">${[1, 2, 3, 4, 5].map((k) => `<i${k <= k0 ? ' class="is-on"' : ''}></i>`).join('')}</span>`;
 }
 
 /* ═════════════ Barra de tiempo en zonas ═════════════ */
@@ -587,10 +630,14 @@ const STATUS = {
 function statusBadge(status) {
   const s = STATUS[status];
   if (!s || !s.label) return '';
-  return `<span class="wcard__status wcard__status--${status}">${s.icon ? icon(s.icon, 13, { stroke: 3 }) : ''}${esc(s.label)}</span>`;
+  return `<span class="wcard__status wcard__status--${status}">${s.icon ? icon(s.icon, 13) : ''}${esc(s.label)}</span>`;
 }
 
-export function workoutCard(workout, { variant = 'tile', href = null, status = null, dateLabel = '', cta = false } = {}) {
+/**
+ * Tarjeta de clase (v2): sin color de categoría. La categoría es un rótulo gris en mayúsculas; el único color es el
+ * del perfil de zonas. Variantes: 'hero' (destacada), 'tile' (miniatura de rejilla/carrusel) y 'row' (fila).
+ */
+export function workoutCard(workout, { variant = 'tile', href = null, status = null, dateLabel = '', cta = false, photo: withPhoto = false } = {}) {
   if (!workout) return '';
   const w = workout;
   const cat = CATEGORY_META[w.category] ? w.category : null;
@@ -604,58 +651,151 @@ export function workoutCard(workout, { variant = 'tile', href = null, status = n
   const title = esc(w.title || 'Clase');
   const aria = ` aria-label="${title}${minutes ? `, ${minutes} minutos` : ''}"`;
   const segs = Array.isArray(w.segments) ? w.segments : [];
+  const sep = '<span class="wcard__sep" aria-hidden="true">·</span>';
 
   if (variant === 'hero') {
     const ctaHref = typeof cta === 'string' ? cta : `#/play/${encodeURIComponent(w.id || '')}`;
-    return `<article class="wcard wcard--hero cc-${catKey}${href ? ' card--pressable' : ''}${st}"${link}${href ? aria : ''}>
-  <div class="wcard__glow" aria-hidden="true"></div>
-  <div class="wcard__top">
-    <span class="chip chip--tinted wcard__cat" style="--chip-color:var(--cc)">${icon(meta.icon, 14, { stroke: 2.4 })}${esc(meta.name)}</span>
+    const metaBits = [`<span>${minutes} min</span>`, km ? `<span>${km}</span>` : '', kcal ? `<span>${kcal}</span>` : ''].filter(Boolean).join(sep);
+    const head = `<div class="wcard__top">
+    <span class="wcard__cat">${esc(meta.name)}</span>
     <span class="spacer"></span>
     ${dateLabel ? `<span class="wcard__date">${esc(dateLabel)}</span>` : ''}
     ${statusBadge(status)}
   </div>
   <h2 class="wcard__title">${title}</h2>
-  ${w.subtitle || w.focus ? `<p class="wcard__sub">${esc(w.subtitle || w.focus)}</p>` : ''}
-  <div class="wcard__meta">
-    <span>${icon('clock', 15, { stroke: 2.2 })}${minutes} min</span>
-    ${km ? `<span>${icon('route', 15, { stroke: 2.2 })}${km}</span>` : ''}
-    ${kcal ? `<span>${icon('flame', 15, { stroke: 2.2 })}${kcal}</span>` : ''}
-    <span class="spacer"></span>
-    ${intensityDots(w.intensity || 1, 'var(--cc)')}
-  </div>
-  <div class="wcard__chart">${profileChart(segs, { height: 92 })}</div>
-  ${cta ? `<button type="button" class="btn btn--primary btn--lg btn--block wcard__cta" data-href="${esc(ctaHref)}">${icon('play', 20)}<span>Empezar</span></button>` : ''}
+  ${w.subtitle || w.focus ? `<p class="wcard__sub">${esc(w.subtitle || w.focus)}</p>` : ''}`;
+    // Con foto: la fotografía de su categoría arriba, el texto sobre el velo inferior y los datos debajo
+    return `<article class="wcard wcard--hero${withPhoto ? ' wcard--photo' : ''} cc-${catKey}${href ? ' card--pressable' : ''}${st}"${link}${href ? aria : ''}>
+  ${withPhoto ? `<div class="wcard__media">${photo(categoryPhotoName(cat), { cls: 'wcard__img' })}<div class="wcard__over">${head}</div></div>` : head}
+  <div class="wcard__meta">${metaBits}<span class="spacer"></span>${intensityDots(w.intensity || 1)}</div>
+  <div class="wcard__chart">${profileChart(segs, { height: 64, tone: withPhoto ? 'soft' : 'full' })}</div>
+  ${cta ? `<button type="button" class="btn btn--primary btn--lg btn--block wcard__cta" data-href="${esc(ctaHref)}">${icon('play', 18)}<span>Empezar</span></button>` : ''}
 </article>`;
   }
 
   if (variant === 'row') {
     return `<article class="wcard wcard--row cc-${catKey}${href ? ' card--pressable' : ''}${st}"${link}${href ? aria : ''}>
-  <span class="wcard__bar" aria-hidden="true"></span>
-  <span class="wcard__icon" aria-hidden="true">${icon(meta.icon, 18, { stroke: 2.2 })}</span>
+  <span class="wcard__mini" aria-hidden="true">${profileChart(segs, { height: 140, compact: true, radius: 1, tone: 'soft' })}</span>
   <div class="wcard__body">
     ${dateLabel ? `<div class="wcard__eyebrow">${esc(dateLabel)}</div>` : ''}
     <div class="wcard__title">${title}</div>
-    <div class="wcard__meta"><span>${minutes} min</span><span class="wcard__sep">·</span><span>${esc(meta.name)}</span>${intensityDots(w.intensity || 1, 'var(--cc)')}</div>
+    <div class="wcard__meta"><span>${minutes} min</span>${sep}<span>${esc(meta.name)}</span>${intensityDots(w.intensity || 1)}</div>
   </div>
   ${statusBadge(status)}
-  ${href ? `<span class="list__chev" aria-hidden="true">${icon('chevron-right', 18, { stroke: 2.4 })}</span>` : ''}
+  ${href ? `<span class="list__chev" aria-hidden="true">${icon('chevron-right', 14)}</span>` : ''}
 </article>`;
   }
 
   // tile
   return `<article class="wcard wcard--tile cc-${catKey}${href ? ' card--pressable' : ''}${st}"${link}${href ? aria : ''}>
   <div class="wcard__thumb">
-    <span class="wcard__dur">${minutes} min</span>
-    ${statusBadge(status) || `<span class="wcard__caticon" aria-hidden="true">${icon(meta.icon, 15, { stroke: 2.4 })}</span>`}
-    <div class="wcard__chart">${profileChart(segs, { height: 56, compact: true })}</div>
+    <span class="wcard__dur">${minutes}<small>min</small></span>
+    ${statusBadge(status)}
+    <div class="wcard__chart">${profileChart(segs, { height: 80, compact: true, tone: 'soft' })}</div>
   </div>
   <div class="wcard__body">
     <div class="wcard__title">${title}</div>
     ${w.focus || w.subtitle ? `<div class="wcard__focus">${esc(w.focus || w.subtitle)}</div>` : ''}
-    <div class="wcard__meta">${intensityDots(w.intensity || 1, 'var(--cc)')}${km ? `<span>${km}</span>` : `<span>${esc(meta.name)}</span>`}</div>
+    <div class="wcard__meta">${intensityDots(w.intensity || 1)}${km ? `<span>${km}</span>` : `<span>${esc(meta.name)}</span>`}</div>
   </div>
 </article>`;
+}
+
+/* ═════════════ Fotografía y vídeo de campaña (assets/media) ═════════════ */
+// Fotos generadas con una misma dirección de arte (negro, luz de borde ember). Se usan poco y con velo: cabecera de la
+// clase de hoy, destacada y categorías en Clases, Apple Watch y estados vacíos. Nunca en el precache del service
+// worker (se guardan al verlas). treadmill-detail/detail-loop NO se usan (se están regenerando).
+const MEDIA_DIR = './assets/media/';
+// Tamaño real (sin saltos de maquetación) y encuadre: dónde cae la persona; `flip` la pasa a la derecha para que el
+// texto, alineado a la izquierda, quede siempre sobre el lado vacío.
+const PHOTOS = {
+  'cat-intervals': { w: 1600, h: 900, pos: '60% 38%' },
+  'cat-endurance': { w: 1600, h: 900, pos: '35% 45%', flip: true },
+  'cat-recovery': { w: 1600, h: 900, pos: '72% 32%' },
+  'cat-tempo': { w: 1600, h: 900, pos: '42% 30%', flip: true },
+  'hero-man': { w: 1290, h: 2311, pos: '58% 64%' },
+  'hero-woman': { w: 1290, h: 2311, pos: '40% 64%' },
+  empty: { w: 1600, h: 900, pos: '62% 50%' },
+  'watch-product': { w: 1200, h: 1500, pos: '50% 62%' },
+  'watch-wrist': { w: 1080, h: 1920, pos: '50% 56%' },
+};
+const CATEGORY_PHOTO = {
+  intervals: 'cat-intervals', fartlek: 'cat-intervals', challenge: 'cat-intervals',
+  endurance: 'cat-endurance', recovery: 'cat-recovery', tempo: 'cat-tempo', hills: 'cat-tempo', test: 'cat-tempo',
+};
+
+/** Foto de campaña de una categoría de clase (hero-man si no hay una propia). */
+export function categoryPhotoName(category) {
+  return CATEGORY_PHOTO[category] || 'hero-man';
+}
+
+/** <img> de campaña: perezosa, decodificación asíncrona y tamaño intrínseco (sin saltos al cargar). */
+export function photo(name, { cls = '', alt = '', eager = false, pos = null } = {}) {
+  const p = PHOTOS[name] || { w: 1600, h: 900, pos: '50% 50%' };
+  const load = eager ? 'fetchpriority="high"' : 'loading="lazy"';
+  return `<img class="photo${p.flip ? ' photo--flip' : ''}${cls ? ` ${cls}` : ''}" src="${MEDIA_DIR}${encodeURIComponent(name)}.jpg" width="${p.w}" height="${p.h}" alt="${esc(alt)}" ${load} decoding="async" style="object-position:${esc(pos || p.pos)}">`;
+}
+
+/**
+ * Vídeo de fondo en bucle (mudo, en línea). No lleva autoplay: lo arranca el observador de abajo solo mientras se ve
+ * y nunca con «Reducir movimiento» (queda el póster). preload="metadata" para no descargarlo entero de entrada.
+ */
+export function bgVideo(name, { cls = '', poster = name } = {}) {
+  return `<video class="bg-video${cls ? ` ${cls}` : ''}" muted playsinline loop preload="metadata" disablepictureinpicture disableremoteplayback poster="${MEDIA_DIR}${encodeURIComponent(poster)}.jpg" data-bg-video aria-hidden="true" tabindex="-1"><source src="${MEDIA_DIR}${encodeURIComponent(name)}.mp4" type="video/mp4"></video>`;
+}
+
+const prefersReducedMotion = () => {
+  try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
+};
+
+/** Reproduce/pausa un vídeo de fondo según se vea (data-hold="1" lo deja en pausa aunque esté en pantalla). */
+function syncBgVideo(v, visible) {
+  try {
+    if (visible && !prefersReducedMotion() && v.dataset.hold !== '1' && document.visibilityState !== 'hidden') {
+      v.muted = true;
+      const p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } else if (!v.paused) v.pause();
+  } catch { /* sin vídeo */ }
+}
+
+if (hasDOM && typeof IntersectionObserver === 'function' && typeof MutationObserver === 'function') {
+  const seen = new WeakMap();
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      seen.set(e.target, e.isIntersecting);
+      syncBgVideo(e.target, e.isIntersecting);
+    }
+  }, { threshold: 0.12 });
+  const scan = (node) => {
+    if (!node || node.nodeType !== 1) return;
+    const list = node.matches?.('video[data-bg-video]') ? [node] : node.querySelectorAll?.('video[data-bg-video]') || [];
+    for (const v of list) {
+      if (v.dataset.io) continue;
+      v.dataset.io = '1';
+      v.muted = true;
+      io.observe(v);
+    }
+  };
+  const mo = new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) scan(n);
+  });
+  const start = () => {
+    mo.observe(document.body, { childList: true, subtree: true });
+    scan(document.body);
+  };
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
+  document.addEventListener('visibilitychange', () => {
+    document.querySelectorAll('video[data-bg-video]').forEach((v) => syncBgVideo(v, seen.get(v) === true));
+  });
+}
+
+/** Retiene o suelta un vídeo de fondo (p. ej. al salir de la bienvenida, aunque siga en el DOM). */
+export function holdBgVideo(v, hold) {
+  if (!v) return;
+  v.dataset.hold = hold ? '1' : '';
+  syncBgVideo(v, !hold);
 }
 
 /* ═════════════ Overlays: pila, foco y cierre ═════════════ */
@@ -739,7 +879,7 @@ export function openSheet({ title = '', html = '', onMount = null, actions = [],
 
   const acts = Array.isArray(actions) ? actions : [];
   sheet.innerHTML = `${dismissible ? '<div class="sheet__grabber" aria-hidden="true"></div>' : ''}
-  ${title || dismissible ? `<div class="sheet__header">${title ? `<h2 class="sheet__title" id="${titleId}">${esc(title)}</h2>` : '<span></span>'}${dismissible ? `<button type="button" class="sheet__close" aria-label="Cerrar">${icon('close', 15, { stroke: 2.8 })}</button>` : ''}</div>` : ''}
+  ${title || dismissible ? `<div class="sheet__header">${title ? `<h2 class="sheet__title" id="${titleId}">${esc(title)}</h2>` : '<span></span>'}${dismissible ? `<button type="button" class="sheet__close" aria-label="Cerrar">${icon('close', 14)}</button>` : ''}</div>` : ''}
   <div class="sheet__body">${html || ''}</div>
   ${acts.length ? `<div class="sheet__actions">${acts.map((a, i) => `<button type="button" class="${ACTION_CLS[a.kind] || ACTION_CLS.secondary}" data-sheet-action="${i}">${esc(a.label)}</button>`).join('')}</div>` : ''}`;
 
@@ -883,7 +1023,7 @@ export function openSheet({ title = '', html = '', onMount = null, actions = [],
     backdrop.classList.add('is-open');
     sheet.classList.add('is-open');
   });
-  haptic('light');
+  // HIG: abrir una hoja no lleva háptica
 
   try {
     onMount?.(sheet, close);
@@ -911,7 +1051,9 @@ export function toast(message, { icon: ic = null, kind = 'info', duration = 2600
   const k = TOAST_ICON[kind] ? kind : 'info';
   el.className = `toast toast--${k}${onClick ? ' toast--action' : ''}`;
   el.setAttribute('role', k === 'error' ? 'alert' : 'status');
-  el.innerHTML = `<span class="toast__icon">${icon(ic || TOAST_ICON[k], 20, { stroke: 2.3 })}</span><span class="toast__msg">${esc(message)}</span>${onClick ? `<span class="toast__chev">${icon('chevron-right', 16, { stroke: 2.6 })}</span>` : ''}`;
+  // v2: sin destellos; un aviso con icono 'sparkles' usa el de información
+  const tIcon = ic && ic !== 'sparkles' ? ic : TOAST_ICON[k];
+  el.innerHTML = `<span class="toast__icon">${icon(tIcon, 20)}</span><span class="toast__msg">${esc(message)}</span>${onClick ? `<span class="toast__chev">${icon('chevron-right', 14)}</span>` : ''}`;
 
   // Máximo 3 a la vez
   const existing = root.querySelectorAll('.toast:not(.is-out)');
@@ -962,7 +1104,6 @@ export function toast(message, { icon: ic = null, kind = 'info', duration = 2600
 
   el.addEventListener('click', () => {
     if (onClick) {
-      haptic('light');
       try { onClick(); } catch (err) { setTimeout(() => { throw err; }); }
     }
     dismiss();
@@ -1021,7 +1162,7 @@ export function confirmDialog({ title = '', message = '', confirmText = 'Aceptar
 
     wrap.getBoundingClientRect();
     requestAnimationFrame(() => wrap.classList.add('is-open'));
-    haptic(destructive ? 'warning' : 'light');
+    if (destructive) haptic('warning');
     setTimeout(() => !done && wrap.querySelector('[data-v="1"]').focus({ preventScroll: true }), 50);
   });
 }
@@ -1041,7 +1182,7 @@ export function actionSheet({ title = '', options = [] } = {}) {
     ${opts
       .map(
         (o, i) =>
-          `<button type="button" class="asheet__opt${o.destructive ? ' asheet__opt--destructive' : ''}" data-i="${i}">${o.icon ? icon(o.icon, 20, { stroke: 2.1 }) : ''}<span>${esc(o.label)}</span></button>`,
+          `<button type="button" class="asheet__opt${o.destructive ? ' asheet__opt--destructive' : ''}" data-i="${i}">${o.icon ? icon(o.icon, 20) : ''}<span>${esc(o.label)}</span></button>`,
       )
       .join('')}
   </div>
@@ -1087,17 +1228,14 @@ export function actionSheet({ title = '', options = [] } = {}) {
 
     wrap.getBoundingClientRect();
     requestAnimationFrame(() => wrap.classList.add('is-open'));
-    haptic('light');
     setTimeout(() => !done && panel.focus({ preventScroll: true }), 50);
   });
 }
 
 /* ═════════════ Confeti ═════════════ */
 
-const CONFETTI_COLORS = [
-  ...Object.values(ZONES).filter((z) => z.key !== 'walk').map((z) => z.color),
-  '#FF9500', '#FF5A1F', '#FF2D55', '#FFFFFF',
-];
+// v2: confeti sobrio (solo para un récord de verdad): blanco, ember y grises, menos piezas
+const CONFETTI_COLORS = ['#FFFFFF', '#FFFFFF', '#FF5A1F', '#FF5A1F', '#8E8E93', '#D1D1D6'];
 
 export function celebrate({ intensity = 1 } = {}) {
   if (!hasDOM) return;
@@ -1133,23 +1271,23 @@ export function celebrate({ intensity = 1 } = {}) {
         x, y,
         vx: Math.cos(a) * v,
         vy: Math.sin(a) * v,
-        w: rand(6, 11),
-        h: rand(9, 16),
+        w: rand(5, 8),
+        h: rand(8, 12),
         rot: rand(0, Math.PI * 2),
         vr: rand(-0.25, 0.25),
         tilt: rand(0, Math.PI * 2),
         vt: rand(0.05, 0.16),
-        shape: Math.random() < 0.18 ? 'circle' : Math.random() < 0.3 ? 'ribbon' : 'rect',
+        shape: Math.random() < 0.3 ? 'ribbon' : 'rect',
         color: CONFETTI_COLORS[(Math.random() * CONFETTI_COLORS.length) | 0],
         drag: rand(0.982, 0.992),
       });
     }
   };
-  const n = Math.round(110 * k);
+  const n = Math.round(60 * k);
   const power = Math.min(W, 520) * 0.052 + 10;
   spawn(n, -10, H * 0.78, -Math.PI / 3.1, 0.42, power);
   spawn(n, W + 10, H * 0.78, -Math.PI + Math.PI / 3.1, 0.42, power);
-  if (k > 1.2) setTimeout(() => spawn(Math.round(60 * k), W / 2, -20, Math.PI / 2, 1.2, 6), 260);
+  if (k > 1.2) setTimeout(() => spawn(Math.round(30 * k), W / 2, -20, Math.PI / 2, 1.2, 6), 260);
 
   const start = performance.now();
   let last = start;

@@ -34,3 +34,7 @@ tools/capture/out/
 
 # App nativa de iPhone + Apple Watch (proyecto Xcode, repositorio git propio; no se publica en GitHub Pages)
 native/
+
+# Campaña (assets/media): la hoja de revisión y los "._*" de macOS nunca se publican
+assets/media/_sheet.jpg
+assets/media/._*

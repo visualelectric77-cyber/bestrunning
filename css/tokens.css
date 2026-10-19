@@ -1,41 +1,64 @@
-/* BestRunning · design tokens. Tema oscuro único (app de entrenamiento). */
+/* BestRunning · design tokens v2 («serio, elegante, iOS»). Tema oscuro único.
+   Fuente de verdad: docs/design/ui-v2.md. Negro puro, tipografía, un único acento sólido (ember) y color
+   solo cuando significa algo (zonas dentro de los gráficos). Sin degradados, sin brillos, sin sombras. */
 :root {
   color-scheme: dark;
 
-  /* Superficies */
-  --bg: #08080a;
-  --bg-elev: #111115;
-  --surface: #18181d;
-  --surface-2: #222229;
-  --surface-3: #2e2e37;
-  --glass: rgba(24, 24, 29, 0.72);
-  --glass-strong: rgba(14, 14, 18, 0.86);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.14);
+  /* ───── Superficies ───── */
+  --bg: #000000;
+  --surface-1: #111113; /* tarjetas y listas agrupadas */
+  --surface-2: #1c1c1e; /* campos, botones secundarios, filas seleccionadas */
+  --surface-3: #2c2c2e; /* pulsado / dentro de hojas */
+  --surface-4: #3a3a3c; /* pulsado dentro de hojas */
+  /* Alias heredados (no usar en código nuevo) */
+  --surface: var(--surface-1);
+  --bg-elev: var(--surface-1);
 
-  /* Texto */
-  --text: #f5f5f7;
-  --text-2: rgba(235, 235, 245, 0.66);
-  /* ≈ 4,6:1 sobre --bg/--surface/--surface-2 (WCAG AA para leyendas de 11–13 px) */
-  --text-3: rgba(235, 235, 245, 0.56);
-  /* Solo decorativo o deshabilitado (no informativo) */
-  --text-4: rgba(235, 235, 245, 0.32);
-  --text-inverse: #0b0b0d;
+  /* Materiales (desenfoque real tipo iOS: solo tab bar, barra compacta y paneles del HUD) */
+  --material: rgba(0, 0, 0, 0.86);
+  --material-filter: blur(24px) saturate(120%); /* poco saturado: el color de los gráficos no tiñe la barra */
+  --glass: var(--material);
+  --glass-strong: rgba(0, 0, 0, 0.84);
+  --fill: rgba(118, 118, 128, 0.24); /* relleno neutro iOS: botones redondos de barra, búsqueda, segmentado */
+  --fill-2: rgba(118, 118, 128, 0.32);
 
-  /* Marca: "ember" naranja → rojo */
-  --accent: #ff6a1a;
-  --accent-2: #ff2d55;
-  --accent-soft: rgba(255, 106, 26, 0.16);
-  --accent-grad: linear-gradient(135deg, #ff9500 0%, #ff5a1f 45%, #ff2d55 100%);
-  --accent-glow: 0 10px 30px -8px rgba(255, 90, 31, 0.55);
+  /* ───── Separadores ───── */
+  --sep: rgba(84, 84, 88, 0.45);
+  --hairline: 0.5px;
+  --line: rgba(255, 255, 255, 0.06); /* borde casi invisible (heredado); en v2 las tarjetas no llevan borde */
+  --line-strong: var(--sep);
 
-  /* Estados */
-  --ok: #30d158;
+  /* ───── Texto ───── */
+  --text: #ffffff;
+  --text-2: rgba(235, 235, 245, 0.62); /* secundario: ≈ 6:1 sobre negro y surface-1 */
+  --text-3: rgba(235, 235, 245, 0.55); /* leyendas pequeñas informativas: ≥ 4,6:1 sobre surface-2 (AA) */
+  --text-4: rgba(235, 235, 245, 0.38); /* terciario: SOLO decorativo (chevrones, deshabilitado, placeholder) */
+  --text-inverse: #000000;
+
+  /* ───── Marca: un único acento, sólido ───── */
+  --accent: #ff5a1f; /* ember */
+  --accent-pressed: #e04a12;
+  --accent-soft: rgba(255, 90, 31, 0.14); /* solo selección de texto / foco; nunca fondos de tarjetas */
+  --on-accent: #ffffff;
+
+  /* CTA principal (Nike): blanco con texto negro. Para pasarlo a ember: --cta-bg: var(--accent); --cta-fg: #fff */
+  --cta-bg: #ffffff;
+  --cta-fg: #000000;
+  --cta-bg-pressed: #d1d1d6;
+
+  /* Heredados neutralizados: cualquier pantalla que aún los use queda plana (sólido, sin brillo) */
+  --accent-2: var(--accent);
+  --accent-grad: var(--accent);
+  --accent-glow: 0 0 #0000;
+
+  /* ───── Estados ───── */
+  --ok: #30d158; /* solo marcas pequeñas de completado */
   --warn: #ffd60a;
   --danger: #ff453a;
   --info: #64d2ff;
+  --switch-on: #30d158; /* interruptor iOS encendido (cambiar a var(--accent) si se quiere de marca) */
 
-  /* Zonas de segmento (mismos valores que ZONES en js/training/levels.js) */
+  /* ───── Zonas de segmento: SOLO dentro de visualización de datos (mismos valores que ZONES en levels.js) ───── */
   --z-warmup: #64d2ff;
   --z-walk: #aeaeb2;
   --z-jog: #30d158;
@@ -44,25 +67,30 @@
   --z-sprint: #ff375f;
   --z-cooldown: #7d7aff;
 
-  /* Categorías de clase (mismos valores que CATEGORIES en js/training/templates.js) */
-  --c-intervals: #ff375f;
-  --c-tempo: #ff9f0a;
-  --c-endurance: #30d158;
-  --c-fartlek: #bf5af2;
-  --c-hills: #c79a6b;
-  --c-recovery: #64d2ff;
-  --c-challenge: #ffd60a;
-  --c-test: #7d7aff;
+  /* ───── Categorías de clase: en v2 NO tienen color (rótulo gris en mayúsculas).
+     Neutralizadas a gris para que cualquier resto de --cc/--c-* se vea monocromo. ───── */
+  --cat: #8e8e93;
+  --c-intervals: var(--cat);
+  --c-tempo: var(--cat);
+  --c-endurance: var(--cat);
+  --c-fartlek: var(--cat);
+  --c-hills: var(--cat);
+  --c-recovery: var(--cat);
+  --c-challenge: var(--cat);
+  --c-test: var(--cat);
 
-  /* Radios */
-  --r-xs: 8px;
-  --r-sm: 12px;
-  --r-md: 16px;
-  --r-lg: 22px;
-  --r-xl: 28px;
+  /* ───── Radios ───── */
+  --r-xs: 6px;
+  --r-sm: 10px; /* campos, búsqueda, miniaturas pequeñas */
+  --r-md: 12px; /* miniaturas, botones pequeños */
+  --r-btn: 999px; /* botones: cápsula (iOS 26) */
+  --r-card: 22px; /* tarjetas y listas agrupadas (radios concéntricos iOS 26) */
+  --r-lg: 20px;
+  --r-xl: 20px;
+  --r-sheet: 36px;
   --r-pill: 999px;
 
-  /* Espaciado (múltiplos de 4) */
+  /* ───── Espaciado: rejilla de 8 pt (4 para ajustes finos) ───── */
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
@@ -71,43 +99,70 @@
   --s-6: 24px;
   --s-8: 32px;
   --s-10: 40px;
+  --s-12: 48px;
   --gutter: 16px;
+  --section-gap: 32px; /* entre secciones de una pantalla */
 
-  /* Tipografía: SF Pro en iOS; SF Pro Rounded para cifras grandes */
+  /* ───── Tipografía: SF Pro (texto) y SF Pro Display (cifras) ───── */
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
-  --font-display: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --fs-caption: 12px;
-  --fs-footnote: 13px;
-  --fs-sub: 15px;
-  --fs-body: 17px;
-  --fs-title3: 20px;
-  --fs-title2: 22px;
-  --fs-title1: 28px;
-  --fs-large: 34px;
+  /* Escala iOS (tamaño / interlineado) */
+  --fs-large: 34px;   --lh-large: 41px;
+  --fs-title1: 28px;  --lh-title1: 34px;
+  --fs-title2: 22px;  --lh-title2: 28px;
+  --fs-title3: 20px;  --lh-title3: 25px;
+  --fs-headline: 17px; --lh-headline: 22px;
+  --fs-body: 17px;    --lh-body: 22px;
+  --fs-callout: 16px; --lh-callout: 21px;
+  --fs-sub: 15px;     --lh-sub: 20px;
+  --fs-footnote: 13px; --lh-footnote: 18px;
+  --fs-caption: 12px; --lh-caption: 16px;
+  --fs-caption2: 11px;
+  /* Cifras */
+  --num-track: -0.02em;
+  --unit-scale: 0.45; /* unidad = 45 % del tamaño de la cifra */
 
-  /* Elevación */
-  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
-  --shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 20px 50px -20px rgba(0, 0, 0, 0.8);
+  /* ───── Elevación: v2 no usa sombras (heredados en cero) ───── */
+  --shadow-1: 0 0 #0000;
+  --shadow-2: 0 0 #0000;
 
-  /* Movimiento */
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ease-spring: cubic-bezier(0.2, 0.9, 0.25, 1.12);
+  /* ───── Movimiento: sutil y rápido ───── */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.25, 1, 0.5, 1); /* sin rebote (heredado) */
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1); /* hojas y navegación */
   --dur-fast: 160ms;
-  --dur: 280ms;
-  --dur-slow: 480ms;
+  --dur: 220ms;
+  --dur-slow: 320ms;
+  --rise: 8px; /* desplazamiento de entrada */
 
-  /* Áreas seguras (Dynamic Island / home indicator) */
+  /* ───── Áreas seguras (Dynamic Island / home indicator) ───── */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
   --safe-r: env(safe-area-inset-right, 0px);
 
-  /* Layout */
-  --tabbar-h: 58px;
+  /* ───── Layout ───── */
+  /* Alto que ocupa la tab bar flotante por encima del área segura (cápsula 62 + separación al borde) */
+  --tabbar-h: calc(62px + max(calc(var(--safe-b) - 13px), 12px) - var(--safe-b));
   --navbar-h: 44px;
   --content-max: 720px;
+}
+
+/* iPhone Pro Max / Plus: márgenes de 20 pt como las apps del sistema */
+@media (min-width: 414px) {
+  :root {
+    --gutter: 20px;
+  }
+}
+
+/* Pantallas de densidad 1: las líneas de 0,5 px desaparecerían */
+@media (max-resolution: 1.5dppx) {
+  :root {
+    --hairline: 1px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -115,5 +170,6 @@
     --dur-fast: 0ms;
     --dur: 0ms;
     --dur-slow: 0ms;
+    --rise: 0px;
   }
 }

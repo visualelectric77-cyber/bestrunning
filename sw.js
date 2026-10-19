@@ -2,11 +2,12 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.4.9';
-const BUILD = '528c4a7c6b';
+const VERSION = '1.5.0';
+const BUILD = '97b6d435f7';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
+const MEDIA_CACHE = 'br-media'; // vídeos de campaña (assets/media/*.mp4): al verlos, con rangos como pide <video> en Safari
 const MEDIA_RE = /\.(m4a|mp4|aac|mp3|wav|ogg|oga|opus|flac|webm)$/i;
 const JSON_TIMEOUT_MS = 4000;
 const NAV_TIMEOUT_MS = 2500;    // navegaciones que no son el shell: con red lenta, a los 2,5 s la copia guardada
@@ -51,6 +52,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/media-session.js',
   './js/player/motion.js',
   './js/player/music-debug.js',
+  './js/player/scene-pick.js',
   './js/player/scene3d.js',
   './js/player/scene3d/audio.js',
   './js/player/scene3d/director.js',
@@ -268,11 +270,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Campaña: los vídeos con rangos (Safari no reproduce <video> sin 206); las fotos, cache-first en su propia caché
+  // (no se re-descargan en cada versión del shell)
+  if (path.startsWith('assets/media/')) {
+    if (MEDIA_RE.test(path)) respondMedia(event, MEDIA_CACHE);
+    else event.respondWith(cacheFirst(req, MEDIA_CACHE));
+    return;
+  }
+
   // Shell y demás recursos propios: cache-first (se renuevan al cambiar de versión).
   event.respondWith(cacheFirst(req, SHELL_CACHE));
 });
 
-const OFFLINE_HTML = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>BestRunning</title><body style="background:#08080a;color:#f5f5f7;font-family:-apple-system,system-ui;display:grid;place-items:center;height:100vh;margin:0;padding:24px;box-sizing:border-box;text-align:center"><p>Sin conexión. Abre BestRunning cuando tengas red una vez para usarla offline.</p></body>';
+const OFFLINE_HTML = '<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000"><meta name="color-scheme" content="dark"><title>BestRunning</title>' +
+  '<body style="margin:0;min-height:100vh;min-height:100dvh;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,\'SF Pro Text\',system-ui,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;box-sizing:border-box;text-align:center">' +
+  '<h1 style="margin:0;font-size:22px;line-height:28px;font-weight:700;letter-spacing:-0.02em">Sin conexión</h1>' +
+  '<p style="margin:0 0 12px;max-width:300px;font-size:15px;line-height:20px;color:rgba(235,235,245,.62)">Abre BestRunning una vez con red y después podrás usarla sin conexión.</p>' +
+  '<button type="button" onclick="location.reload()" style="-webkit-appearance:none;appearance:none;border:0;min-height:50px;min-width:180px;padding:0 28px;border-radius:999px;background:#fff;color:#000;font:600 17px/1 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;letter-spacing:-0.01em">Reintentar</button>' +
+  '</body></html>';
 
 function timeout(ms) {
   return new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms));
@@ -409,6 +424,7 @@ const inflight = new Map();
 function mediaType(path, res) {
   const t = res?.headers?.get('Content-Type');
   if (t && !/octet-stream/i.test(t)) return t;
+  if (/^assets\/media\/.*\.mp4$/i.test(path)) return 'video/mp4';
   if (/\.(m4a|mp4|aac)$/i.test(path)) return 'audio/mp4';
   if (/\.mp3$/i.test(path)) return 'audio/mpeg';
   if (/\.wav$/i.test(path)) return 'audio/wav';

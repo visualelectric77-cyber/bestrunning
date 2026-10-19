@@ -105,6 +105,7 @@ const SCHEMA = {
     proto: opt('int'), app: opt('str'),
     watch: { paired: 'bool', installed: 'bool', reachable: 'bool', link: 'str', workout: 'str', run: opt('str') },
     health: { auth: 'str', hr: opt('str') }, backup: opt({ savedAt: 'num', sessions: 'int', bytes: 'int' }),
+    caps: opt(arr('str')), // build 6: lo que sabe hacer la app (solo en native.hello)
   },
   backup: { savedAt: 'num', sessions: 'int', json: 'str' },
   'backup.get': {},
@@ -112,10 +113,12 @@ const SCHEMA = {
   'health.authorize': {},
   'audio.session': { type: 'str' },
   'audio.kick': { reason: 'str' },
+  haptic: { style: opt('str') }, // build 6: vibración de iOS (js/core/haptics.js → BRNative.post)
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',
-  'backup', 'backup.get', 'health.authorize', 'audio.session'];
+  'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic'];
+const HAPTIC_STYLES = ['light', 'medium', 'heavy', 'soft', 'rigid', 'selection', 'success', 'warning', 'error'];
 const ID_REQUIRED = new Set(['cmd', 'workout.summary', 'backup.get']);
 // Decimales máximos (§3.1): km/h 1 · km 3 · left/elapsed/remaining 1 · volumen 2
 const DECIMALS = {
@@ -299,10 +302,13 @@ function baseState() {
 function makeHandler(posted) {
   return { postMessage: (s) => { if (typeof s !== 'string') throw new Error('postMessage sin texto'); posted.push(s); } };
 }
-function installWindow(handler) {
+function installWindow(handler, { events = false } = {}) {
+  const et = events ? new EventTarget() : null;
   globalThis.window = {
     webkit: { messageHandlers: { bestrunning: handler } },
-    addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; },
+    addEventListener: et ? et.addEventListener.bind(et) : () => {},
+    removeEventListener: et ? et.removeEventListener.bind(et) : () => {},
+    dispatchEvent: et ? et.dispatchEvent.bind(et) : () => true,
   };
 }
 
@@ -1323,7 +1329,9 @@ await section('Fixtures', async () => {
 
 await section('Instancia por defecto', async () => {
   const posted = [];
-  installWindow(makeHandler(posted));
+  installWindow(makeHandler(posted), { events: true });
+  // haptics.js escucha br:native-status desde que se carga (como en la app: lo importa router.js antes del puente)
+  const HP = await import('../js/core/haptics.js');
   ok(NB.post('state', { status: 'idle' }) === true, 'app nativa: post() antes de iniciar se acepta');
   const okInit = await NB.initNativeBridge({ navigate: () => {}, app: '9.9.9' });
   ok(okInit === true, 'initNativeBridge arranca en la app nativa');
@@ -1334,6 +1342,31 @@ await section('Instancia por defecto', async () => {
   ok(BR && Object.isFrozen(BR) && typeof BR.receive === 'function' && typeof BR.post === 'function', 'window.BRNative = { receive, post } congelado');
   BR.receive(JSON.stringify({ v: 1, type: 'native.hello', seq: 1, boot: 'p4k8m2', at: now(), data: { proto: 1, app: '1.0 (1)', watch: { paired: false, installed: false, reachable: false, link: 'none', workout: 'idle' }, health: { auth: 'unknown' } } }));
   ok(NB.nativeStatus()?.app === '1.0 (1)', 'nativeStatus() tras native.hello');
+
+  // Vibración (build 6): solo por el puente si native.hello trae caps: ['haptic']; si no, como en Safari
+  const pause = () => new Promise((r) => setTimeout(r, 45));
+  const haptics = () => posted.map((x) => JSON.parse(x)).filter((m) => m.type === 'haptic');
+  HP.haptic('success');
+  ok(haptics().length === 0, 'haptic: app sin caps (builds 1–5) → no se manda por el puente');
+  const helloCaps = { proto: 1, app: '1.0 (6)', caps: ['haptic'], watch: { paired: false, installed: false, reachable: false, link: 'none', workout: 'idle' }, health: { auth: 'unknown' } };
+  BR.receive(JSON.stringify({ v: 1, type: 'native.hello', seq: 2, boot: 'p4k8m2', at: now(), data: helloCaps }));
+  await pause();
+  HP.haptic('success');
+  HP.haptic('light'); // < 35 ms: se descarta (ráfaga)
+  let hs = haptics();
+  ok(hs.length === 1 && hs[0].data.style === 'success', `haptic: con caps → BRNative.post('haptic', { style }) (${JSON.stringify(hs.map((m) => m.data))})`);
+  ok(hs.length === 1 && !envErrors(hs[0]).length, `haptic cumple Wire.swift: ${hs[0] ? envErrors(hs[0]).join(' · ') : 'sin mensaje'}`);
+  BR.receive(JSON.stringify({ v: 1, type: 'native.status', seq: 3, boot: 'p4k8m2', at: now(), data: { watch: helloCaps.watch, health: { auth: 'granted' } } }));
+  for (const [kind, style] of [['countdown', 'rigid'], ['select', 'selection'], ['segment', 'medium'], ['record', 'success'], ['heavy', 'heavy'], ['nada', 'light']]) {
+    await pause();
+    const n = haptics().length;
+    HP.haptic(kind);
+    hs = haptics();
+    ok(hs.length === n + 1 && hs[n].data.style === style, `haptic('${kind}') → ${style} (también tras native.status sin caps): ${JSON.stringify(hs[n]?.data)}`);
+  }
+  ok(hs.every((m) => HAPTIC_STYLES.includes(m.data.style)), 'haptic: solo estilos de Wire.hapticStyles');
+  ok(['light', 'selection', 'medium', 'heavy', 'soft', 'rigid', 'success', 'warning', 'error', 'tap', 'toggle', 'sheet', 'go', 'sprint', 'done', 'destructive', 'fail']
+    .every((k) => HAPTIC_STYLES.includes(HP.hapticStyle(k))), 'hapticStyle(): todos los nombres dan un estilo de iOS');
   ok((await NB.initNativeBridge({})) === true, 'initNativeBridge dos veces: sin efecto');
   ok(posted.filter((s) => s.includes('"type":"hello"')).length === 1, 'un solo hello por carga');
   delete globalThis.window;

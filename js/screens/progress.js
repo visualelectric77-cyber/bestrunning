@@ -1,7 +1,7 @@
 // BestRunning · Pantalla «Progreso»: KPIs, semanas, velocidades, VO₂máx, constancia, récords y logros.
 import { getState, setState, subscribe } from '../core/store.js';
-import { icon, navBar, enableCollapsingHeader, segmented, sectionHeader, ring, openSheet, celebrate } from '../ui/components.js';
-import { lineChart, barChart, heatmapCalendar, gauge, sparkline } from '../ui/charts.js';
+import { icon, listIcon, navBar, enableCollapsingHeader, segmented, sectionHeader, ring, openSheet, photo } from '../ui/components.js';
+import { lineChart, barChart, heatmapCalendar, gauge } from '../ui/charts.js';
 import { haptic } from '../core/haptics.js';
 import { totals, weeklyBuckets, streakWeeks, dayValues, records, weekProgress } from '../training/stats.js';
 import { ACHIEVEMENTS } from '../training/achievements.js';
@@ -154,10 +154,16 @@ function refLevels(series, today) {
 }
 
 function deltaChip(d, unit = '') {
-  if (!d || Math.abs(d) < 0.05) return `<span class="pg-delta pg-delta--flat">=</span>`;
+  if (!d || Math.abs(d) < 0.05) return '';
   const up = d > 0;
-  return `<span class="pg-delta ${up ? 'pg-delta--up' : 'pg-delta--down'}">${icon(up ? 'arrow-up' : 'arrow-down', 11, { stroke: 3 })}${fmt.dec1(Math.abs(d))}${unit}</span>`;
+  return `<span class="pg-delta ${up ? 'pg-delta--up' : 'pg-delta--down'}" aria-label="${up ? 'Sube' : 'Baja'} ${fmt.dec1(Math.abs(d))}${unit}">${up ? '+' : '−'}${fmt.dec1(Math.abs(d))}${unit}</span>`;
 }
+
+/** Métrica tipográfica (misma anatomía que stat() de components.js, pero admite HTML en la cifra). */
+const statHtml = (label, valueHtml, unit = '', extra = '') => `<div class="stat">
+  <div class="stat__label"><span>${esc(label)}</span></div>
+  <div class="stat__value">${valueHtml}${unit ? `<span class="stat__unit">${esc(unit)}</span>` : ''}</div>${extra}
+</div>`;
 
 /** Cuenta ascendente de las cifras con [data-count]. Devuelve función para cancelar. */
 function countUp(root) {
@@ -182,34 +188,13 @@ function countUp(root) {
 /* ───────────── bloques de la pantalla ───────────── */
 
 function emptyHero() {
-  const bars = [
-    ['jog', 34], ['run', 52], ['jog', 40], ['fast', 70], ['jog', 44], ['sprint', 92], ['run', 58], ['fast', 76], ['jog', 46],
-  ];
-  const w = 18;
-  const gap = 8;
-  const svgBars = bars
-    .map(([z, h], i) => `<rect class="pg-empty__bar" style="--i:${i}" x="${20 + i * (w + gap)}" y="${120 - h}" width="${w}" height="${h}" rx="5" fill="var(--z-${z})"/>`)
-    .join('');
-  return `<section class="card pg-empty">
-    <div class="pg-empty__art" aria-hidden="true">
-      <svg viewBox="0 0 270 140" width="100%" height="140">
-        <defs>
-          <radialGradient id="pgEmptyGlow" cx="50%" cy="80%" r="60%">
-            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.45"/>
-            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
-          </radialGradient>
-        </defs>
-        <ellipse cx="135" cy="118" rx="130" ry="60" fill="url(#pgEmptyGlow)"/>
-        ${svgBars}
-        <line x1="12" y1="121" x2="258" y2="121" stroke="var(--line-strong)" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-      <span class="pg-empty__badge">${icon('trophy', 22)}</span>
-    </div>
+  return `<section class="pg-empty">
+    <div class="empty-photo" aria-hidden="true">${photo('empty', { cls: 'empty-photo__img' })}</div>
     <div class="eyebrow">Tu progreso</div>
     <h2 class="pg-empty__title">Tu historia empieza hoy</h2>
     <p class="pg-empty__text">Cada sesión suma: aquí verás tus kilómetros, tus rachas, cómo suben tus velocidades y las medallas que vas ganando.</p>
     <button type="button" class="btn btn--primary btn--lg btn--block" data-href="#/today">${icon('play', 20)}<span>Empezar la sesión de hoy</span></button>
-    <p class="pg-empty__hint">${icon('flame', 14)} Completa 4 sesiones en una semana y estrenarás tu primera racha.</p>
+    <p class="pg-empty__hint">Completa 4 sesiones en una semana y estrenarás tu primera racha.</p>
   </section>`;
 }
 
@@ -239,15 +224,18 @@ function weekCard(s, today) {
         ? `Semana cerrada: ${done} de ${planned}. La próxima, ¡a por todas!`
         : 'El lunes empieza una semana nueva. ¡A por ella!';
   return `<section class="card pg-week${complete ? ' is-complete' : ''}">
-    <div class="pg-week__ring">${ring({ value: pct, size: 92, stroke: 10, color: 'var(--accent)', inner: `<span class="pg-week__pct num">${Math.round(pct * 100)}<small>%</small></span>` })}</div>
-    <div class="pg-week__info">
-      <div class="eyebrow">Esta semana</div>
-      <div class="pg-week__title">${esc(title)}</div>
-      <div class="pg-week__sub">${esc(sub)}</div>
-      <div class="pg-week__meta">
-        <span>${icon('timer', 14)}<b class="num">${fmt.int(min)}</b>${pMin ? `<i>/${fmt.int(pMin)}</i>` : ''} min</span>
-        <span>${icon('route', 14)}<b class="num">${fmt.dec1(wp.km || 0)}</b> km</span>
+    <div class="pg-week__top">
+      <div class="pg-week__info">
+        <div class="eyebrow">Esta semana</div>
+        <div class="pg-week__title">${esc(title)}</div>
+        <div class="pg-week__sub">${esc(sub)}</div>
       </div>
+      <div class="pg-week__ring" role="img" aria-label="${Math.round(pct * 100)} % de la semana">${ring({ value: pct, size: 68, stroke: 7, color: complete ? 'var(--ok)' : 'var(--accent)', inner: `<span class="pg-week__pct num">${Math.round(pct * 100)}<small>%</small></span>` })}</div>
+    </div>
+    <div class="stat-grid pg-week__stats">
+      ${statHtml('Sesiones', `<span class="num">${fmt.int(done)}</span>`, planned ? `/${planned}` : '')}
+      ${statHtml('Minutos', `<span class="num">${fmt.int(min)}</span>`, pMin ? `/${fmt.int(pMin)}` : '')}
+      ${statHtml('Distancia', `<span class="num">${fmt.dec1(wp.km || 0)}</span>`, 'km')}
     </div>
   </section>`;
 }
@@ -255,26 +243,28 @@ function weekCard(s, today) {
 function kpiGrid(s, history, animate) {
   const t = safe(() => totals(history), null) || localTotals(history);
   const streak = Number(safe(() => streakWeeks(s, new Date()), 0)) || 0;
-  const items = [
-    { label: 'Kilómetros', value: t.km || 0, dec: 1, unit: 'km', ic: 'route', color: 'var(--accent)' },
-    { label: 'Horas corriendo', value: (t.sec || 0) / 3600, dec: 1, unit: 'h', ic: 'timer', color: 'var(--z-run)' },
-    { label: 'Sesiones', value: t.sessions || history.length, dec: 0, unit: '', ic: 'flame', color: 'var(--z-sprint)' },
-    { label: 'Racha', value: streak, dec: 0, unit: streak === 1 ? 'semana' : 'semanas', ic: 'bolt', color: 'var(--z-jog)' },
-  ];
-  const tiles = items
-    .map((k) => `<div class="pg-kpi" style="--kc:${k.color}">
-      <span class="pg-kpi__icon">${icon(k.ic, 18)}</span>
-      <div class="pg-kpi__value stat__value"><span data-count="${k.value}" data-dec="${k.dec}">${animate ? '0' : fmtNum(k.value, k.dec)}</span>${k.unit ? `<span class="stat__unit">${esc(k.unit)}</span>` : ''}</div>
-      <div class="stat__label">${esc(k.label)}</div>
-    </div>`)
-    .join('');
-  return `<section class="pg-kpis">${tiles}</section>`;
+  const count = (value, dec) => `<span class="num" data-count="${value}" data-dec="${dec}">${animate ? '0' : fmtNum(value, dec)}</span>`;
+  const km = t.km || 0;
+  return `<section class="pg-kpis">
+    ${sectionHeader('Desde el primer día')}
+    <div class="card pg-totals">
+      <div class="pg-totals__hero">
+        <span class="pg-totals__label">Kilómetros</span>
+        <div class="pg-totals__big">${count(km, 1)}<span class="unit">km</span></div>
+      </div>
+      <div class="stat-grid pg-totals__grid">
+        ${statHtml('Tiempo', count((t.sec || 0) / 3600, 1), 'h')}
+        ${statHtml('Sesiones', count(t.sessions || history.length, 0))}
+        ${statHtml('Racha', count(streak, 0), streak === 1 ? 'semana' : 'semanas')}
+      </div>
+    </div>
+  </section>`;
 }
 
 function insightCard(text) {
-  return `<section class="card card--glass pg-insight">
-    <span class="pg-insight__icon">${icon('sparkles', 18)}</span>
-    <div><div class="eyebrow">El coach dice</div><p class="pg-insight__text">${esc(text)}</p></div>
+  return `<section class="card pg-insight">
+    <div class="eyebrow">Consejo del coach</div>
+    <p class="pg-insight__text">${esc(text)}</p>
   </section>`;
 }
 
@@ -288,12 +278,12 @@ function weeklyHead(buckets, metric) {
   if (avgPrev > 0) {
     const pct = Math.round(((avg - avgPrev) / avgPrev) * 100);
     const cls = pct > 0 ? 'pg-delta--up' : pct < 0 ? 'pg-delta--down' : 'pg-delta--flat';
-    delta = `<span class="pg-delta ${cls}">${pct ? icon(pct > 0 ? 'arrow-up' : 'arrow-down', 11, { stroke: 3 }) : ''}${Math.abs(pct)} %</span><span class="pg-week-head__vs">vs. las 4 anteriores</span>`;
+    delta = `<span class="pg-delta ${cls}">${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)} %</span><span class="pg-week-head__vs">frente a las 4 anteriores</span>`;
   } else if (avg > 0) {
-    delta = `<span class="pg-week-head__vs">¡Buen arranque!</span>`;
+    delta = `<span class="pg-week-head__vs">Media de las últimas 4 semanas</span>`;
   }
   const big = metric === 'min' ? fmt.int(avg) : fmt.dec1(avg);
-  return `<div class="pg-big num">${big}<small>${metric === 'min' ? 'min' : 'km'}/semana</small></div>
+  return `<div class="pg-big num">${big}<span class="unit">${metric === 'min' ? 'min' : 'km'}/semana</span></div>
     <div class="pg-week-head__delta">${delta}</div>`;
 }
 
@@ -328,7 +318,7 @@ function weeklyCard(history, today, metric) {
   if (!Array.isArray(buckets) || !buckets.length) buckets = localWeekly(history, 12, today);
   return `<section class="card pg-card pg-weekly">
     <div class="pg-card__head">
-      <div class="eyebrow">Últimas 12 semanas</div>
+      <div class="eyebrow">Por semana</div>
       ${segmented({ name: 'pg-metric', options: [{ value: 'km', label: 'Km' }, { value: 'min', label: 'Minutos' }], value: m })}
     </div>
     <div class="pg-week-head" data-weekly-head>${weeklyHead(buckets, m)}</div>
@@ -344,25 +334,24 @@ function speedsSection(s, today) {
     const z = ZONES[k];
     const cur = levels[k] || 0;
     const d = round1(cur - (ref?.[k] ?? cur));
-    const vals = series.map((p) => p.levels?.[k]).filter((v) => typeof v === 'number');
-    const spark = vals.length > 1 && new Set(vals).size > 1 ? `<div class="pg-level__spark">${sparkline(vals, { color: `var(--z-${k})`, height: 26 })}</div>` : '';
-    return `<div class="pg-level" style="--zc:var(--z-${k})">
-      <div class="pg-level__name">${esc(z?.name || k)}</div>
-      <div class="pg-level__value num">${fmt.speed(cur)}<small>km/h</small></div>
-      <div class="pg-level__meta"><span>${fmt.pace(cur)} /km</span>${deltaChip(d)}</div>
-      ${spark}
+    return `<div class="list__row pg-level">
+      <span class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></span>
+      <span class="pg-level__main"><span class="list__title">${esc(z?.name || k)}</span><span class="pg-level__pace num">${fmt.pace(cur)} /km</span></span>
+      ${deltaChip(d)}
+      <span class="pg-level__value"><b class="num">${fmt.speed(cur)}</b><span class="unit">km/h</span></span>
     </div>`;
   }).join('');
 
   let chart = '';
-  if (series.length >= 2) {
+  // Con menos de una semana de historia las líneas son planas y las fechas del eje se repiten: no aporta
+  if (series.length >= 2 && daysBetween(series[0].date, series[series.length - 1].date) >= 7) {
     const first = series[0].date;
     const lows = series.map((p) => p.levels.jog).filter((v) => typeof v === 'number');
     const highs = series.map((p) => p.levels.sprint).filter((v) => typeof v === 'number');
     const yMin = Math.floor(Math.min(...lows) - 0.5);
     const yMax = Math.ceil(Math.max(...highs) + 0.5);
     chart = `<div class="card pg-card">
-      <div class="pg-card__head"><div class="eyebrow">Evolución</div><span class="pg-card__hint">desde ${esc(shortDate(first))}</span></div>
+      <div class="pg-card__head"><div class="eyebrow">Evolución de tus velocidades</div><span class="pg-card__hint">desde ${esc(shortDate(first))}</span></div>
       <div class="pg-chart">${lineChart(
         LEVEL_KEYS.map((k) => ({
           name: ZONES[k]?.name || k,
@@ -376,7 +365,7 @@ function speedsSection(s, today) {
 
   return `<section class="pg-section stack">
     ${sectionHeader('Tus velocidades', `<button type="button" class="btn btn--ghost pg-link" data-href="#/settings/speeds">Ajustar</button>`)}
-    <div class="pg-levels">${tiles}</div>
+    <div class="list pg-levels">${tiles}</div>
     ${chart}
     ${vo2Card(s)}
   </section>`;
@@ -415,13 +404,13 @@ function vo2Card(s) {
       <button type="button" class="pg-info-btn" data-pg="vo2" aria-label="Qué es el VO₂máx">${icon('info', 18)}</button>
     </div>
     <div class="pg-vo2__gauge">${gauge({ value: d.vo2, min: d.min, max: d.max, label: 'ml/kg/min', color: d.color })}</div>
-    <div class="pg-vo2__cat"><span class="pg-pill" style="--pc:${d.color}">${esc(d.cat.label)}</span><span class="muted">para ${d.sex === 'f' ? 'mujeres' : 'hombres'} ${esc(ageBand(d.age))}</span></div>
+    <div class="pg-vo2__cat"><span class="zdot" style="--zc:${d.color}" aria-hidden="true"></span><b class="pg-pill">${esc(d.cat.label)}</b><span class="muted">para ${d.sex === 'f' ? 'mujeres' : 'hombres'} ${esc(ageBand(d.age))}</span></div>
     ${vo2Scale(d)}
-    <div class="pg-vo2__facts">
-      <div><span class="eyebrow">VAM actual</span><b class="num">${fmt.speed(d.vam)}<small>km/h</small></b><span class="muted">${testKey ? `Último test: ${esc(shortDate(testKey))}` : 'Estimada por tus velocidades'}</span></div>
-      <div><span class="eyebrow">Edad de forma</span><b class="num">${d.fitAge <= 25 ? '≤' : '≈'} ${d.fitAge}<small>años</small></b><span class="muted">${esc(fitTxt)}</span></div>
+    <div class="stat-grid stat-grid--2 pg-vo2__facts">
+      ${statHtml('VAM actual', `<span class="num">${fmt.speed(d.vam)}</span>`, 'km/h', `<span class="pg-vo2__note">${testKey ? `Último test: ${esc(shortDate(testKey))}` : 'Estimada por tus velocidades'}</span>`)}
+      ${statHtml('Edad de forma', `<span class="num">${d.fitAge <= 25 ? '≤' : '≈'}${'\u2009'}${d.fitAge}</span>`, 'años', `<span class="pg-vo2__note">${esc(fitTxt)}</span>`)}
     </div>
-    <button type="button" class="btn btn--secondary btn--block pg-vo2__more" data-pg="vo2">${icon('info', 18)}<span>¿Qué significa y cómo subirlo?</span></button>
+    <button type="button" class="btn btn--secondary btn--block pg-vo2__more" data-pg="vo2"><span>Qué significa y cómo subirlo</span></button>
   </div>`;
 }
 
@@ -474,9 +463,9 @@ function heartSection(s, today) {
     return `<section class="pg-section stack">
       ${sectionHeader(music ? 'Tu corazón y tu música' : 'Tu corazón')}
       <div class="card pg-card pg-heart pg-heart--empty">
-        <div class="pg-heart__icon" aria-hidden="true">${icon('heart', 22)}</div>
+        <div class="eyebrow pg-heart__eyebrow">${icon('heart', 13)}Pulso del Apple Watch</div>
         <p class="pg-heart__lead">Con el pulso del Apple Watch verás cómo tu corazón se adapta: a la misma velocidad, cada vez menos pulsaciones.</p>
-        <button type="button" class="btn btn--secondary btn--block" data-href="#/settings/watch">${icon('watch', 18)}<span>Importa el pulso de tu próximo entreno</span></button>
+        <button type="button" class="btn btn--secondary btn--block" data-href="#/settings/watch"><span>Importa el pulso de tu próximo entreno</span></button>
         ${music}
       </div>
     </section>`;
@@ -495,7 +484,7 @@ function heartSection(s, today) {
       : d === 0 ? ` · igual que hace ${weeks} semanas`
         : ` · <span class="pg-heart__d ${d < 0 ? 'is-good' : 'is-up'}">${d < 0 ? '−' : '+'}${Math.abs(d)}</span> en ${weeks} ${weeks === 1 ? 'semana' : 'semanas'}`;
     line = `<p class="pg-heart__line">A <b class="num">${fmt.speed(last.speed)}</b> km/h: <b class="num">${fmt.int(last.avg)}</b> ppm${trend}</p>`;
-    if (pts.length >= 2) {
+    if (pts.length >= 2 && daysBetween(pts[0].date, pts[pts.length - 1].date) >= 7) {
       const first = pts[0].date;
       const vals = pts.map((p) => p.avg);
       chart = `<div class="pg-chart">${lineChart(
@@ -513,9 +502,9 @@ function heartSection(s, today) {
   return `<section class="pg-section stack">
     ${sectionHeader(music ? 'Tu corazón y tu música' : 'Tu corazón')}
     <div class="card pg-card pg-heart">
-      <div class="pg-card__head"><div class="eyebrow">${eyebrow}</div><span class="pg-card__hint">${n} ${n === 1 ? 'sesión' : 'sesiones'} con pulso</span></div>
+      <div class="pg-card__head"><div class="eyebrow pg-heart__eyebrow">${icon('heart', 13)}${eyebrow}</div><span class="pg-card__hint">${n} ${n === 1 ? 'sesión' : 'sesiones'} con pulso</span></div>
       ${line}
-      ${chart || (pts.length ? '<p class="pg-heart__hint">Importa el pulso de unas cuantas sesiones más para ver la tendencia.</p>' : '')}
+      ${chart || (pts.length ? '<p class="pg-heart__hint">Importa el pulso de unas cuantas sesiones más (al menos una semana) para ver la tendencia.</p>' : '')}
       ${music}
     </div>
   </section>`;
@@ -530,7 +519,7 @@ function heatSection(history, today) {
     ${sectionHeader('Constancia')}
     <div class="card pg-card pg-heat">
       <div class="pg-card__head">
-        <div class="pg-heat__count"><b class="num">${active}</b> ${active === 1 ? 'día activo' : 'días activos'}</div>
+        <div class="pg-heat__count"><b class="num">${active}</b><span>${active === 1 ? 'día activo' : 'días activos'}</span></div>
         <span class="pg-card__hint">últimas 16 semanas</span>
       </div>
       <div class="pg-heat__map">${heatmapCalendar(values, { weeks: 16, endKey: today, color: 'var(--accent)' })}</div>
@@ -560,17 +549,16 @@ function recordsSection(history) {
     const attrs = ses ? `data-href="#/history/${esc(encodeURIComponent(ses.id))}"` : '';
     const tag = ses ? 'button type="button"' : 'div';
     const end = ses ? 'button' : 'div';
-    return `<${tag} class="pg-record${ses ? ' card--pressable' : ''}" style="--rc:${def.color}" ${attrs}>
-      <span class="pg-record__icon">${icon(def.ic, 16)}</span>
-      <span class="pg-record__label">${esc(def.label)}</span>
-      <span class="pg-record__value num">${esc(v)}<small>${esc(unit)}</small></span>
-      <span class="pg-record__date">${ses?.dayKey ? `${esc(shortDate(ses.dayKey))}${icon('chevron-right', 12, { stroke: 2.5 })}` : '&nbsp;'}</span>
+    return `<${tag} class="list__row pg-record" ${attrs}>
+      <span class="pg-record__main"><span class="list__title">${esc(def.label)}</span>${ses?.dayKey ? `<span class="pg-record__date">${esc(shortDate(ses.dayKey))}</span>` : ''}</span>
+      <span class="pg-record__value"><b class="num">${esc(v)}</b><span class="unit">${esc(unit)}</span></span>
+      ${ses ? `<span class="list__chev">${icon('chevron-right', 14)}</span>` : ''}
     </${end}>`;
   }).filter(Boolean);
   if (!cards.length) return '';
   return `<section class="pg-section stack">
     ${sectionHeader('Récords personales')}
-    <div class="pg-records">${cards.join('')}</div>
+    <div class="list pg-records">${cards.join('')}</div>
   </section>`;
 }
 
@@ -580,7 +568,7 @@ function medalHtml(a, iso, i, big = false) {
   const days = unlocked ? daysBetween(isoToKey(iso) || todayKey(), todayKey()) : null;
   const fresh = unlocked && days != null && days <= 7;
   const cls = `pg-medal pg-medal--${tier}${unlocked ? '' : ' is-locked'}${big ? ' pg-medal--xl' : ''}`;
-  const disc = `<span class="pg-medal__disc">${icon(a.icon || 'medal', big ? 44 : 26, { stroke: 2.2 })}${unlocked ? '' : `<span class="pg-medal__lock">${icon('lock', big ? 16 : 11, { stroke: 2.6 })}</span>`}</span>`;
+  const disc = `<span class="pg-medal__disc">${icon(a.icon || 'medal', big ? 44 : 24)}${unlocked ? '' : `<span class="pg-medal__lock">${icon('lock', big ? 15 : 10)}</span>`}</span>`;
   if (big) return `<div class="${cls}">${disc}</div>`;
   return `<button type="button" class="${cls}" data-ach="${esc(a.id)}" style="--d:${((i * 0.37) % 4).toFixed(2)}s" aria-label="${esc(a.title)}${unlocked ? '' : ', bloqueado'}">
     ${disc}${fresh ? '<span class="pg-medal__new">Nuevo</span>' : ''}
@@ -600,21 +588,39 @@ function achievementsSection(s) {
       ? '¡Colección completa! Eres una leyenda de la cinta.'
       : `Llevas ${n} ${n === 1 ? 'medalla' : 'medallas'}. Te ${list.length - n === 1 ? 'falta 1' : `faltan ${list.length - n}`}: ¡a por ellas!`;
   return `<section class="pg-section stack">
-    ${sectionHeader('Logros', `<span class="pg-count-badge num">${n}/${list.length}</span>`)}
+    ${sectionHeader('Logros', `<span class="pg-count-badge"><b class="num">${n}</b> de ${list.length}</span>`)}
     <div class="card pg-card pg-ach">
       <div class="pg-ach__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
       <p class="pg-ach__text">${esc(text)}</p>
-      <div class="pg-medals">${list.map((a, i) => medalHtml(a, got[a.id], i)).join('')}</div>
+      ${medalsGrid(list, got)}
     </div>
   </section>`;
 }
 
+/** Las ganadas y las 8 siguientes a la vista; el resto, plegado tras «Ver las N medallas» (sin una pared de discos grises). */
+function medalsGrid(list, got) {
+  const won = list.filter((a) => got[a.id]);
+  const next = list.filter((a) => !got[a.id]);
+  const shown = [...won, ...next.slice(0, Math.max(0, 12 - won.length) || 4)];
+  const rest = list.filter((a) => !shown.includes(a));
+  const grid = (arr, off = 0) => `<div class="pg-medals">${arr.map((a, i) => medalHtml(a, got[a.id], i + off)).join('')}</div>`;
+  if (!rest.length) return grid(list);
+  return `${grid(shown)}
+      <details class="pg-moremedals">
+        <summary><span>Ver las ${list.length} medallas</span>${icon('chevron-right', 14)}</summary>
+        ${grid(rest, shown.length)}
+      </details>`;
+}
+
 function historyLink(count) {
-  return `<button type="button" class="card card--pressable pg-history-link" data-href="#/history">
-    <span class="pg-history-link__icon">${icon('list', 20)}</span>
-    <span class="pg-history-link__text"><b>Historial completo</b><span class="muted">${count} ${count === 1 ? 'sesión registrada' : 'sesiones registradas'}</span></span>
-    ${icon('chevron-right', 18)}
-  </button>`;
+  return `<div class="list pg-history-link">
+    <button type="button" class="list__row" data-href="#/history">
+      ${listIcon('list')}
+      <span class="list__title">Historial completo</span>
+      <span class="list__value">${count} ${count === 1 ? 'sesión' : 'sesiones'}</span>
+      <span class="list__chev">${icon('chevron-right', 14)}</span>
+    </button>
+  </div>`;
 }
 
 function view(s, animate) {
@@ -655,13 +661,12 @@ function openMedal(id) {
   const ago = key ? daysBetween(key, todayKey()) : null;
   const agoTxt = ago == null ? '' : ago === 0 ? 'hoy' : ago === 1 ? 'ayer' : `hace ${ago} días`;
   const status = iso
-    ? `<div class="pg-msheet__status is-done">${icon('check', 16, { stroke: 3 })}<span>Conseguida el ${esc(key ? fmt.dateLong(key) : '')}${agoTxt ? ` · ${esc(agoTxt)}` : ''}</span></div>`
-    : `<div class="pg-msheet__status">${icon('lock', 16)}<span>Aún bloqueada. ¡Tú puedes conseguirla!</span></div>`;
+    ? `<div class="pg-msheet__status is-done">${icon('check', 15)}<span>Conseguida el ${esc(key ? fmt.dateLong(key) : '')}${agoTxt ? ` · ${esc(agoTxt)}` : ''}</span></div>`
+    : `<div class="pg-msheet__status">${icon('lock', 15)}<span>Aún bloqueada</span></div>`;
   haptic(iso ? 'success' : 'light');
   openSheet({
     title: '',
     html: `<div class="pg-msheet pg-msheet--${tier}${iso ? '' : ' is-locked'}">
-      <div class="pg-msheet__halo" aria-hidden="true"></div>
       ${medalHtml(a, iso, 0, true)}
       <div class="pg-msheet__tier">Medalla de ${esc((TIER_NAME[tier] || '').toLowerCase())}</div>
       <h3 class="pg-msheet__title">${esc(a.title)}</h3>
@@ -670,7 +675,8 @@ function openMedal(id) {
     </div>`,
     actions: [{ label: iso ? '¡Genial!' : 'Entendido', kind: 'primary', onClick: (close) => close() }],
   });
-  if (iso && ago != null && ago <= 7 && !reducedMotion()) safe(() => celebrate({ intensity: tier === 'gold' ? 0.7 : 0.45 }));
+  // v2: abrir una medalla ya ganada no lanza confeti (solo un récord personal real lo merece); basta el toque háptico
+  void ago;
 }
 
 function openVo2Sheet() {
@@ -681,8 +687,8 @@ function openVo2Sheet() {
     const lo = edges[i];
     const hi = edges[i + 1];
     const range = lo == null ? `< ${hi}` : hi == null ? `≥ ${lo}` : `${lo}–${hi}`;
-    return `<div class="pg-vtable__row${i === d.cat.tier ? ' is-current' : ''}" style="--pc:${VO2_COLORS[i]}">
-      <span class="pg-vtable__dot"></span><span class="pg-vtable__name">${l}</span>
+    return `<div class="list__row pg-vtable__row${i === d.cat.tier ? ' is-current' : ''}" style="--zc:${VO2_COLORS[i]}">
+      <span class="zdot" aria-hidden="true"></span><span class="pg-vtable__name">${l}</span>
       <span class="pg-vtable__range num">${range}</span>${i === d.cat.tier ? '<span class="pg-vtable__you">Tú</span>' : ''}
     </div>`;
   }).join('');
@@ -691,12 +697,12 @@ function openVo2Sheet() {
     large: true,
     html: `<div class="pg-vsheet stack">
       <div class="pg-vsheet__hero" style="--tc:${d.color}">
-        <b class="num">${fmt.dec1(d.vo2)}</b><span>ml/kg/min · <em>${esc(d.cat.label)}</em></span>
+        <b class="num">${fmt.dec1(d.vo2)}</b><span>ml/kg/min</span><em><i class="zdot" style="--zc:${d.color}" aria-hidden="true"></i>${esc(d.cat.label)}</em>
       </div>
       <p>El <b>VO₂máx</b> es el máximo oxígeno que tu cuerpo puede usar por minuto y por kilo. Es el mejor indicador de tu forma cardiovascular y uno de los que más se relacionan con la salud a largo plazo.</p>
       <p><b>Cómo lo calculamos:</b> a partir de tu VAM (velocidad aeróbica máxima, ${fmt.speed(d.vam)} km/h) con la fórmula de Léger: VO₂máx ≈ 3,5 × VAM. Es una estimación orientativa; un test de laboratorio sería más preciso.</p>
       <div class="eyebrow">Referencia ${esc(d.sex === 'f' ? 'para mujeres' : 'para hombres')} ${esc(ageBand(d.age))}</div>
-      <div class="pg-vtable">${rows}</div>
+      <div class="list pg-vtable">${rows}</div>
       <p><b>Edad de forma ${d.fitAge <= 25 ? '≤' : '≈'} ${d.fitAge} años:</b> la edad a la que tu VO₂máx sería lo típico. Si es menor que tu edad real, tu motor va por delante del calendario.</p>
       <div class="pg-vsheet__tips">
         <div class="eyebrow">Cómo subirlo</div>
@@ -718,7 +724,7 @@ export function mount(el) {
   el.innerHTML = `${navBar({
     title: 'Progreso',
     large: true,
-    right: `<button type="button" class="btn-icon pg-nav-btn" data-href="#/history" aria-label="Historial completo">${icon('list', 20)}</button>`,
+    right: `<button type="button" class="btn-icon pg-nav-btn" data-href="#/history" aria-label="Historial completo">${icon('clock', 20)}</button>`,
   })}<div class="container stack-lg pg-body" data-body></div>`;
   const body = el.querySelector('[data-body]');
   const offHeader = safe(() => enableCollapsingHeader(el), null);

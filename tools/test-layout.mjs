@@ -67,7 +67,7 @@ const main = stripComments(read('css/screens-main.css'));
 const more = stripComments(read('css/screens-more.css'));
 const LAND = /@media \(orientation: landscape\) and \(max-height: 560px\)/;
 const WIDE = /@media \(orientation: landscape\) and \(min-width: 640px\)/;
-ok(LAND.test(base) && /--tabbar-h:\s*48px/.test(base), 'base.css: tab bar compacta de 48 px en horizontal');
+ok(LAND.test(base) && /--tb-cap:\s*48px/.test(base) && /--tabbar-h:\s*calc\(48px/.test(base), 'base.css: tab bar compacta (cápsula de 48 px) en horizontal');
 ok(/\.tabbar__item\s*\{[^}]*flex-direction:\s*row/.test(base), 'base.css: icono y etiqueta en línea en horizontal');
 ok(/\.large-title\s*\{[^}]*font-size:\s*28px/.test(base), 'base.css: large title más pequeño en horizontal');
 ok(/--pad-l:\s*max\(var\(--gutter\),\s*var\(--safe-l\)/.test(base), 'base.css: margen lateral max(--gutter, --safe-l)');

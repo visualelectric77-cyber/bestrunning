@@ -22,16 +22,17 @@
 import { ZONES } from '../js/training/levels.js';
 
 const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif';
-const FONT_NUM = 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
+// v2: cifras en SF Pro Display (no Rounded), peso 700, sin halo; placas casi negras con filo fino (como el HUD real)
+const FONT_NUM = '-apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif';
 const C = {
-  plate: 'rgba(11, 13, 18, 0.84)',
-  edge: 'rgba(255, 255, 255, 0.08)',
+  plate: 'rgba(10, 10, 12, 0.8)',
+  edge: 'rgba(84, 84, 88, 0.45)',
   lbl: 'rgba(235, 235, 245, 0.6)',
   ink2: 'rgba(235, 235, 245, 0.8)',
   white: '#ffffff',
   track: 'rgba(255, 255, 255, 0.12)',
 };
-const PLATE_R = 12;
+const PLATE_R = 14;
 const SAFE = {
   portrait: { t: 62, b: 34, l: 0, r: 0 },
   landscape: { t: 0, b: 21, l: 62, r: 62 },
@@ -274,7 +275,7 @@ function drawSpeed(ctx, m, d) {
   const cx = m.speedCx;
   let y = m.coreY;
   if (d.paused) {
-    font(ctx, 800, 10.5);
+    font(ctx, 700, 10.5);
     const tw = spacedWidth(ctx, 'EN PAUSA', 1.47);
     const bw = 1 + 11 + 11 + 6 + tw + 11 + 1;
     const bx = cx - bw / 2;
@@ -286,7 +287,7 @@ function drawSpeed(ctx, m, d) {
     y += 24.5 + 14;
   }
   // Etiqueta de zona (color exacto de la zona) con punto
-  font(ctx, 800, 15);
+  font(ctx, 700, 15);
   const label = String(d.zoneLabel || ZONES[d.zone]?.name || '').toUpperCase();
   const lw = spacedWidth(ctx, label, 2.4);
   const full = 8 + 9 + lw;
@@ -306,11 +307,11 @@ function drawSpeed(ctx, m, d) {
   // Cifra gigante: halo muy sutil del color de la zona + blanco nítido con sombra suave
   const sp = typeof d.speed === 'number' ? nf1(d.speed) : String(d.speed ?? '0,0');
   const fs = m.speedFs;
-  font(ctx, 800, fs, true);
+  font(ctx, 700, fs, true);
   const spacing = -0.045 * fs;
   const ny = y + (fs * 0.9) / 2;
   ctx.save();
-  ctx.globalAlpha = clamp(0.26 + 0.3 * (Number(d.glow) || 0), 0, 1);
+  ctx.globalAlpha = 0; // v2: sin halo de color detrás de la cifra
   ctx.shadowColor = d.record ? 'rgba(255, 214, 10, 0.75)' : zc;
   ctx.shadowBlur = 30;
   text(ctx, sp, cx, ny, { spacing, align: 'center', color: 'rgba(0, 0, 0, 0.01)', tab: true });
@@ -364,7 +365,7 @@ function drawSpeed(ctx, m, d) {
     const lbl = even ? 'TU RÉCORD' : 'VS RÉCORD';
     const ahead = !even && !/^[−-]/.test(g);
     const col = even ? '#ffffff' : ahead ? '#ffd60a' : '#bcd8ff';
-    font(ctx, 800, 10);
+    font(ctx, 700, 10);
     const gl = spacedWidth(ctx, lbl, 1.2);
     font(ctx, 700, 13, true);
     const vw = ctx.measureText(g).width;
@@ -378,7 +379,7 @@ function drawSpeed(ctx, m, d) {
     font(ctx, 700, 13, true);
     text(ctx, g, gx2, y + 12.5, { color: col });
     gx2 += vw + 6;
-    font(ctx, 800, 10);
+    font(ctx, 700, 10);
     text(ctx, lbl, gx2, y + 12.5, { spacing: 1.2, color: C.lbl });
   }
 }
@@ -417,7 +418,7 @@ function drawLowerThird(ctx, m, d) {
   text(ctx, 'QUEDA', ix, hy + 5.75, { spacing: 1.05, color: C.lbl });
   const left = asClock(d.segRemaining ?? 0);
   const final = typeof d.segRemaining === 'number' && d.segRemaining <= 3 && !!(nxt || d.nextLabel);
-  font(ctx, 800, m.cdFs, true);
+  font(ctx, 700, m.cdFs, true);
   const timeY = hy + 11.5 + 7 + (m.cdFs * 0.86) / 2;
   const tW = text(ctx, left, ix, timeY, { spacing: -0.035 * m.cdFs, color: final ? nc : C.white, tab: true });
   // Siguiente
@@ -543,7 +544,7 @@ function drawInfo(ctx, m, d) {
   const widths = items.map((it) => {
     font(ctx, 700, 10.5);
     let w = spacedWidth(ctx, it.lbl, 1.05) + 6;
-    if (it.chip) { font(ctx, 800, 10, true); w += spacedWidth(ctx, it.chip, 0.2, true) + 10 + 6; }
+    if (it.chip) { font(ctx, 700, 10, true); w += spacedWidth(ctx, it.chip, 0.2, true) + 10 + 6; }
     font(ctx, 700, 17, true);
     w += spacedWidth(ctx, it.val, -0.17, true);
     if (it.unit) { font(ctx, 600, 11); w += 4 + ctx.measureText(it.unit).width; }
@@ -558,7 +559,7 @@ function drawInfo(ctx, m, d) {
     font(ctx, 700, 10.5);
     x += text(ctx, it.lbl, x, mb, { spacing: 1.05, color: C.lbl, baseline: true }) + 6;
     if (it.chip) {
-      font(ctx, 800, 10, true);
+      font(ctx, 700, 10, true);
       const cw = spacedWidth(ctx, it.chip, 0.2, true) + 10;
       rrect(ctx, x, my - 7, cw, 15.5, 4);
       ctx.fillStyle = zc;
@@ -599,10 +600,10 @@ function drawInfo(ctx, m, d) {
 
 function drawBug(ctx, m, b, zc) {
   if (!b) return;
-  font(ctx, 800, 11);
+  font(ctx, 700, 11);
   const lbl = String(b.lbl || '').toUpperCase();
   const lw = spacedWidth(ctx, lbl, 1.54);
-  font(ctx, 800, 22, true);
+  font(ctx, 700, 22, true);
   const val = String(b.val ?? '');
   const vw = spacedWidth(ctx, val, -0.22, true);
   font(ctx, 700, 13, true);
@@ -618,11 +619,11 @@ function drawBug(ctx, m, b, zc) {
   ctx.fillStyle = b.color || zc;
   ctx.fillRect(x, y, 3, h);
   ctx.restore();
-  font(ctx, 800, 22, true);
+  font(ctx, 700, 22, true);
   const bb = baseOf(ctx, y + h / 2);
-  font(ctx, 800, 11);
+  font(ctx, 700, 11);
   text(ctx, lbl, x + 18, bb, { spacing: 1.54, color: C.lbl, baseline: true });
-  font(ctx, 800, 22, true);
+  font(ctx, 700, 22, true);
   text(ctx, val, x + 18 + lw + 9, bb, { baseline: true, spacing: -0.22, tab: true });
   if (b.sub) {
     font(ctx, 700, 13, true);
@@ -679,7 +680,7 @@ export function drawDone(ctx, w, h, done = {}, orientation = (w > h ? 'landscape
     if (cur) out.push(cur);
     return out;
   };
-  font(ctx, 800, 18);
+  font(ctx, 700, 18);
   const titleLines = wrap(done.title || '¡Entrenamiento completado!', -0.18);
   font(ctx, 600, 14, true);
   const statLines = wrap(done.stats || '');
@@ -719,7 +720,7 @@ export function drawDone(ctx, w, h, done = {}, orientation = (w > h ? 'landscape
     font(ctx, 700, 10.5);
     text(ctx, String(done.label || '').toUpperCase(), tx, y + 6, { spacing: 1.05, color: C.lbl, maxW: tw });
     y += 12 + 5;
-    font(ctx, 800, 18);
+    font(ctx, 700, 18);
     for (const ln of titleLines) { text(ctx, ln, tx, y + 10.35, { spacing: -0.18 }); y += 20.7; }
     y += 5;
     font(ctx, 600, 14, true);
@@ -768,10 +769,10 @@ function drawDeck(ctx, m, k) {
     font(ctx, 600, 11);
     const uw = text(ctx, 'km/h', rx, cy + 1, { align: 'right', color: C.ink2 });
     rx -= uw + 4;
-    font(ctx, 800, 18, true);
+    font(ctx, 700, 18, true);
     const sw = text(ctx, String(k.speed ?? ''), rx, cy, { align: 'right', tab: true, spacing: -0.18 });
     rx -= sw + 8;
-    font(ctx, 800, 12.5);
+    font(ctx, 700, 12.5);
     text(ctx, String(k.name || '').toUpperCase(), cx, cy, { spacing: 1.5, color: dc, maxW: Math.max(10, rx - cx) });
     // temporizador propio (2 px abajo)
     ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';

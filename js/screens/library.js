@@ -1,14 +1,14 @@
 // BestRunning · «Clases»: buscador, categorías, duración, carruseles por categoría y rejilla.
 import { getState, setState, subscribe } from '../core/store.js';
 import { haptic } from '../core/haptics.js';
-import { icon, navBar, enableCollapsingHeader, workoutCard, chip, segmented, emptyState } from '../ui/components.js';
+import { icon, navBar, enableCollapsingHeader, workoutCard, chip, segmented, emptyState, photo } from '../ui/components.js';
 import { CATEGORIES, TEMPLATES, templatesFor } from '../training/templates.js';
 import { buildWorkout, workoutId } from '../training/generator.js';
 import { todayKey, esc, hashStr, debounce } from '../core/utils.js';
 
 const DURATIONS = [20, 30, 45, 60];
 const SEARCH_SVG =
-  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>';
+  '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>';
 
 // Caché de clases construidas (se invalida sola al cambiar niveles/cinta porque forman parte de la clave).
 const cache = new Map();
@@ -26,7 +26,6 @@ function safe(fn, fallback) {
 
 const reducedMotion = () => safe(() => matchMedia('(prefers-reduced-motion: reduce)').matches, false);
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-const ccStyle = (c) => `--cc:var(--c-${CATEGORIES[c] ? c : 'test'})`;
 const hrefFor = (w) => `#/workout/${encodeURIComponent(w.id)}?from=library`;
 
 function visibleCats(state) {
@@ -101,7 +100,6 @@ function chipsHtml(state, category) {
     cats
       .map((k) =>
         chip(CATEGORIES[k].name, {
-          color: CATEGORIES[k].color,
           active: category === k,
           attrs: `data-cat="${k}" role="tab" aria-selected="${category === k}"`,
         })
@@ -112,15 +110,31 @@ function chipsHtml(state, category) {
 
 const tile = (w) => `<div class="lb-cell">${workoutCard(w, { variant: 'tile', href: hrefFor(w) })}</div>`;
 
+// Foto de cada categoría en su cabecera: una distinta por sección (nunca la misma dos veces seguidas en el catálogo)
+const BANNER = {
+  intervals: ['cat-intervals', '62% 34%'],
+  tempo: ['cat-tempo', '42% 28%'],
+  endurance: ['cat-endurance', '35% 40%'],
+  fartlek: ['hero-woman', '40% 44%'],
+  hills: ['cat-endurance', '35% 60%'],
+  recovery: ['cat-recovery', '72% 30%'],
+  challenge: ['hero-man', '58% 55%'],
+  test: ['cat-tempo', '42% 28%'],
+};
+const bannerImg = (k) => {
+  const [name, pos] = BANNER[k] || ['hero-man', '58% 55%'];
+  return photo(name, { cls: 'lb-banner__img', pos });
+};
+
 function featured(state, minutes) {
   const pool = listFor('all', minutes, state).filter((t) => t.category !== 'test');
   if (!pool.length) return '';
   const t = pool[hashStr(`feat-${todayKey()}`) % pool.length];
   const w = buildFor(t, minutes, state);
   if (!w) return '';
-  return `<section class="lb-featured">
-    <div class="lb-featured__label">${icon('star', 14)} Destacada de hoy</div>
-    ${workoutCard(w, { variant: 'hero', href: hrefFor(w) })}
+  return `<section class="lb-featured" aria-label="Destacada de hoy">
+    <h2 class="list-header lb-featured__label">Destacada de hoy</h2>
+    ${workoutCard(w, { variant: 'hero', href: hrefFor(w), photo: true })}
   </section>`;
 }
 
@@ -130,15 +144,15 @@ function allView(state, minutes) {
       const ws = listFor(k, minutes, state).map((t) => buildFor(t, minutes, state)).filter(Boolean);
       if (!ws.length) return '';
       const c = CATEGORIES[k];
-      return `<section class="lb-section" style="${ccStyle(k)}" aria-label="${esc(c.name)}">
-        <div class="lb-section__head">
-          <span class="lb-section__icon" aria-hidden="true">${icon(c.icon, 16)}</span>
-          <div class="lb-section__titles">
-            <h2 class="lb-section__title">${esc(c.name)} <span class="lb-section__count">${ws.length}</span></h2>
-            ${c.description ? `<p class="lb-section__desc">${esc(c.description)}</p>` : ''}
+      return `<section class="lb-section" aria-label="${esc(c.name)}">
+        <div class="lb-banner" data-cat="${k}">
+          ${bannerImg(k)}
+          <div class="lb-banner__text">
+            <h2 class="lb-section__title">${esc(c.name)}<span class="lb-section__count num">${ws.length}</span></h2>
+            <button type="button" class="lb-more" data-cat="${k}">Ver todo${icon('chevron-right', 14)}</button>
           </div>
-          <button type="button" class="lb-more" data-cat="${k}">Ver todo</button>
         </div>
+        ${c.description ? `<p class="lb-section__desc">${esc(c.description)}</p>` : ''}
         <div class="hscroll lb-carousel">${ws.map(tile).join('')}</div>
       </section>`;
     })
@@ -152,13 +166,13 @@ function allView(state, minutes) {
 function categoryView(state, cat, minutes) {
   const c = CATEGORIES[cat];
   const ws = listFor(cat, minutes, state).map((t) => buildFor(t, minutes, state)).filter(Boolean);
-  const head = `<div class="lb-cathead" style="${ccStyle(cat)}">
-    <span class="lb-cathead__icon" aria-hidden="true">${icon(c.icon, 26)}</span>
+  const head = `<div class="lb-cathead lb-cathead--photo">
+    ${bannerImg(cat)}
     <div class="lb-cathead__text">
       <h2 class="lb-cathead__title">${esc(c.name)}</h2>
       ${c.description ? `<p class="lb-cathead__desc">${esc(c.description)}</p>` : ''}
     </div>
-    <span class="lb-count num">${ws.length}</span>
+    <span class="lb-count"><b class="num">${ws.length}</b>${ws.length === 1 ? 'clase' : 'clases'}</span>
   </div>`;
   if (!ws.length) {
     const ds = durationsOf(cat, state).filter((d) => d !== minutes);
@@ -227,7 +241,7 @@ export function mount(el) {
       <div class="lb-tools">
         <label class="lb-search">
           <span class="lb-search__icon">${SEARCH_SVG}</span>
-          <input type="search" class="lb-search__input" placeholder="Buscar: sprint, pirámide, fondo…" enterkeyhint="search"
+          <input type="search" class="lb-search__input" placeholder="Buscar clases" enterkeyhint="search"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Buscar clases">
           <button type="button" class="lb-search__clear" aria-label="Borrar búsqueda" hidden>${icon('close', 12, { stroke: 3 })}</button>
         </label>
@@ -254,6 +268,11 @@ export function mount(el) {
     const active = chipsEl.querySelector(`[data-cat="${category}"]`);
     if (active && !first) {
       safe(() => active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' }), null);
+    } else if (active && category !== 'all') {
+      // Primera visita con una categoría recordada: el chip elegido a la vista (sin mover la página)
+      requestAnimationFrame(() => safe(() => {
+        chipsEl.scrollLeft = Math.max(0, active.offsetLeft - chipsEl.clientWidth / 2 + active.offsetWidth / 2);
+      }, null));
     }
   }
 
@@ -316,7 +335,7 @@ export function mount(el) {
     const c = e.target.closest('[data-cat]');
     if (c && root.contains(c)) {
       e.preventDefault();
-      setCategory(c.dataset.cat, { scrollTop: c.classList.contains('lb-more') });
+      setCategory(c.dataset.cat, { scrollTop: c.classList.contains('lb-more') || c.classList.contains('lb-banner') });
       return;
     }
     const d = e.target.closest('[data-dur]');

@@ -2,7 +2,7 @@
 import { getState, setState, importState } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
-import { icon, stepper, segmented, toggle, toast, celebrate } from '../ui/components.js';
+import { icon, listIcon, stepper, segmented, toggle, toast, bgVideo, holdBgVideo } from '../ui/components.js';
 import { planWeek } from '../training/planner.js';
 import { CATEGORIES } from '../training/templates.js';
 import {
@@ -63,8 +63,6 @@ function hm(min) {
 // Mismo símbolo que assets/icons/icon.svg (chevron + líneas de velocidad + cinta sobre degradado ember).
 // Los trazos de velocidad van dibujados de derecha a izquierda para que «salgan» del chevron al animarse.
 const LOGO = `<div class="ob-logo" aria-hidden="true">
-  <div class="ob-logo__halo"></div>
-  <div class="ob-lines"><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <svg class="ob-logo__mark" viewBox="0 0 1024 1024" width="128" height="128">
     <defs>
       <linearGradient id="obEmber" x1="0" y1="0" x2="1" y2="1">
@@ -106,10 +104,11 @@ const LOGO = `<div class="ob-logo" aria-hidden="true">
   </svg>
 </div>`;
 
+// Fondo: negro puro con la cinta en perspectiva, en líneas grises muy tenues (sin brillos de color)
+// Bienvenida: la campaña a sangre (vídeo en bucle, mudo; con «Reducir movimiento», solo su póster) bajo un velo negro
 const BG = `<div class="ob-bg" aria-hidden="true">
-  <div class="ob-bg__glow"></div>
-  <div class="ob-bg__glow ob-bg__glow--b"></div>
-  <div class="ob-bg__floor"><div class="ob-bg__belt"></div></div>
+  ${bgVideo('hero-loop', { cls: 'ob-bg__video' })}
+  <div class="ob-bg__scrim"></div>
 </div>`;
 
 /* ───────────── Pantalla ───────────── */
@@ -186,9 +185,9 @@ export function mount(el) {
         <p class="ob-tagline">Tu entrenador personal de cinta</p>
       </div>
       <ul class="ob-features">
-        <li style="--i:0"><span class="ob-features__icon">${icon('speaker', 20)}</span><span><b>Coach de voz</b> que te avisa antes de cada cambio de velocidad</span></li>
-        <li style="--i:1"><span class="ob-features__icon">${icon('calendar', 20)}</span><span><b>Plan semanal</b> variado que se adapta a ti</span></li>
-        <li style="--i:2"><span class="ob-features__icon">${icon('arrow-up', 20)}</span><span><b>Más rápido y más tiempo</b>, semana a semana</span></li>
+        <li style="--i:0"><span class="ob-features__icon">${icon('speaker', 24)}</span><span><b>Coach de voz</b> que te avisa antes de cada cambio de velocidad</span></li>
+        <li style="--i:1"><span class="ob-features__icon">${icon('calendar', 24)}</span><span><b>Plan semanal</b> variado que se adapta a ti</span></li>
+        <li style="--i:2"><span class="ob-features__icon">${icon('chart', 24)}</span><span><b>Más rápido y más tiempo</b>, semana a semana</span></li>
       </ul>
       ${isNative() ? `<div class="ob-native" data-ob-native>${nativeDataHtml()}</div>` : ''}
     </div>`;
@@ -250,7 +249,7 @@ export function mount(el) {
   function zonesHtml() {
     const zs = safe(() => hrZones(draft.profile.hrMax, draft.profile.hrRest), []);
     return zs
-      .map((z) => `<div class="ob-hrz__z" style="--c:${z.color}"><span class="ob-hrz__bar"></span><b>Z${z.zone}</b><span class="num">${z.min}–${z.max}</span></div>`)
+      .map((z) => `<div class="ob-hrz__z" style="--c:${z.color}"><span class="ob-hrz__bar"></span><b class="num">Z${z.zone}</b><span class="num">${z.min}–${z.max}</span></div>`)
       .join('');
   }
 
@@ -330,7 +329,7 @@ export function mount(el) {
       </div>
       <div class="ob-body">
         <div class="ob-speeds">${rows}</div>
-        <div class="ob-callout">${icon('sparkles', 18)}<span><b>Las iremos subiendo contigo.</b> Cuando una sesión te resulte cómoda, subimos 0,1 km/h. VAM estimada: <b class="num" data-vam>${fmt.speed(vamFromLevels(lv))}</b> km/h.</span></div>
+        <div class="ob-callout">${icon('arrow-up', 18)}<span><b>Las iremos subiendo contigo.</b> Cuando una sesión te resulte cómoda, subimos 0,1 km/h. VAM estimada: <b class="num" data-vam>${fmt.speed(vamFromLevels(lv))}</b> km/h.</span></div>
       </div>
     </div>`;
   }
@@ -360,14 +359,14 @@ export function mount(el) {
         n++;
       }
       const h = Math.min(1, min / 60).toFixed(3);
-      return `<div class="ob-wk__day${rest ? ' is-rest' : ''}" style="${cat ? `--cc:var(--c-${cat})` : ''};--i:${i};--h:${h}">
+      return `<div class="ob-wk__day${rest ? ' is-rest' : ''}" style="--i:${i};--h:${h}">
         <span class="ob-wk__barwrap">${rest ? `<span class="ob-wk__rest">${icon('moon', 14)}</span>` : `<span class="ob-wk__bar"></span><span class="ob-wk__min num">${min}′</span>`}</span>
         <span class="ob-wk__wd">${fmt.weekdayShort(i + 1)}</span>
       </div>`;
     }).join('');
     const legend = cats
-      .map((c) => `<span class="ob-wk__leg" style="--cc:var(--c-${c})"><i></i>${esc(CATEGORIES[c]?.name || c)}</span>`)
-      .join('');
+      .map((c) => `<span class="ob-wk__leg">${esc(CATEGORIES[c]?.name || c)}</span>`)
+      .join('<span class="ob-wk__sep" aria-hidden="true">·</span>');
     return `<div class="ob-wk">${cols}</div>
       <div class="ob-wk__legend">${legend}</div>
       <p class="ob-wk__total">${n} sesiones · ${hm(total)} a la semana</p>`;
@@ -388,26 +387,26 @@ export function mount(el) {
       </div>
       <div class="ob-body">
         <div class="ob-group">
-          <div class="ob-group__head">${icon('bolt', 18)}<b>Lunes, martes, miércoles y viernes</b></div>
+          <div class="ob-group__head"><b>Lunes, martes, miércoles y viernes</b></div>
           ${segmented({ name: 'ob-wd', options: minsOpt([20, 25, 30], sc.weekdayMinutes), value: sc.weekdayMinutes })}
         </div>
         <div class="ob-group">
-          <div class="ob-group__head">${icon('route', 18)}<b>Jueves</b><span>Sesión larga</span></div>
+          <div class="ob-group__head"><b>Jueves</b><span>Sesión larga</span></div>
           ${segmented({ name: 'ob-thu', options: minsOpt([45, 50, 55, 60], sc.thursdayMinutes), value: sc.thursdayMinutes })}
         </div>
         <div class="ob-group">
-          <div class="ob-group__head">${icon('sun', 18)}<b>Fin de semana</b><span>Un día largo, el otro descansas</span></div>
+          <div class="ob-group__head"><b>Fin de semana</b><span>Un día largo, el otro descansas</span></div>
           ${segmented({ name: 'ob-wkday', options: [{ value: 6, label: 'Sábado' }, { value: 7, label: 'Domingo' }], value: sc.weekendDay === 7 ? 7 : 6 })}
           ${segmented({ name: 'ob-wkmin', options: minsOpt([45, 50, 55, 60], sc.weekendMinutes), value: sc.weekendMinutes })}
         </div>
         <div class="list ob-list">
           <div class="list__row">
-            <span class="list__icon" style="background:var(--c-hills)">${icon('mountain', 18)}</span>
+            ${listIcon('mountain')}
             <span class="list__title">¿Tu cinta tiene inclinación?<span class="list__sub">Activa las clases de cuestas</span></span>
             <span class="spacer"></span>${toggle({ id: 'ob-incline', checked: !!draft.treadmill.hasIncline, attrs: 'aria-label="Mi cinta tiene inclinación"' })}
           </div>
           <label class="list__row">
-            <span class="list__icon" style="background:var(--info)">${icon('clock', 18)}</span>
+            ${listIcon('clock')}
             <span class="list__title">Hora habitual<span class="list__sub">Para avisos y calendario</span></span>
             <span class="spacer"></span>
             <input id="ob-time" class="ob-time" type="time" value="${esc(sc.reminderTime || '07:00')}" aria-label="Hora habitual de entrenamiento">
@@ -430,7 +429,7 @@ export function mount(el) {
         <span class="list__title">${esc(title)}<span class="list__sub">${esc(sub)}</span></span>
         <span class="spacer"></span>
         ${badge ? `<span class="badge ob-voice__badge">${esc(badge)}</span>` : ''}
-        <span class="ob-voice__check" aria-hidden="true">${icon('check', 18, { stroke: 3 })}</span>
+        <span class="ob-voice__check" aria-hidden="true">${icon('check', 18)}</span>
       </button>`;
     // Fase 2: la voz grabada (Eva Dorado) va primero; las del sistema quedan como alternativa y respaldo
     const pack = draft.audio.packId === PACK_ID;
@@ -452,7 +451,7 @@ export function mount(el) {
         <h1 class="ob-h1" tabindex="-1">Tu coach de voz</h1>
         <p class="ob-lead">Te avisará ${draft.treadmill.announceLead || 10} segundos antes de cada cambio para que la cinta llegue a tiempo, y te animará cuando más lo necesites.</p>
         <button type="button" class="ob-test" data-voice-test aria-label="Probar voz. Sube el volumen y toca aquí">
-          <span class="ob-test__orb" aria-hidden="true">${icon('speaker', 30)}<i></i><i></i></span>
+          <span class="ob-test__orb" aria-hidden="true">${icon('speaker', 24)}<i></i><i></i></span>
           <span class="ob-test__text"><b>Probar voz</b><small>Sube el volumen y toca aquí</small></span>
         </button>
       </div>
@@ -463,7 +462,7 @@ export function mount(el) {
         ${segmented({ name: 'ob-chat', options: [{ value: 'minimal', label: 'Mínimo' }, { value: 'normal', label: 'Normal' }, { value: 'coach', label: 'Coach' }], value: a.chattiness || 'normal' })}
         <p class="ob-note" data-chat-desc>${esc(CHAT_DESC[a.chattiness] || CHAT_DESC.normal)}</p>
         <div class="card ob-watch">
-          <div class="ob-watch__head"><span class="ob-watch__icon">${icon('watch', 22)}</span><b>Tu Apple Watch también cuenta</b></div>
+          <div class="ob-watch__head"><span class="ob-watch__icon">${icon('watch', 24)}</span><b>Tu Apple Watch también cuenta</b></div>
           <p>${isNative()
             ? 'El reloj se abre solo al empezar la clase y te pasa el pulso en directo.'
             : 'Al empezar cada clase, inicia en el reloj el entrenamiento <b>«Cinta de correr»</b>. Una web no puede leer el pulso en directo, así que al terminar lo importamos del Watch con un Atajo y verás tu pulso sobre el gráfico de la clase.'}</p>
@@ -525,6 +524,8 @@ export function mount(el) {
     nextBtn.setAttribute('aria-label', step === 0 || step === STEPS.length - 1 ? label : `Siguiente: paso ${step + 2} de ${STEPS.length}`);
     footNote.textContent = step === 0 ? 'Lo dejamos listo en un minuto' : step === STEPS.length - 1 ? 'Podrás cambiar todo en Perfil' : '';
     nextBtn.classList.toggle('ob-next--final', step === STEPS.length - 1);
+    // El vídeo de la bienvenida solo corre en la bienvenida (en los demás pasos el fondo se funde a negro)
+    holdBgVideo(ob.querySelector('.ob-bg__video'), step !== 0);
   }
 
   function afterStep(panel) {
@@ -702,7 +703,7 @@ export function mount(el) {
       const changed = LEVEL_KEYS.some((k) => fixed[k] !== draft.levels[k]);
       draft.levels = fixed;
       if (changed) {
-        toast('He separado tus velocidades al menos 0,8 km/h entre sí', { icon: 'info' });
+        toast('He separado tus velocidades al menos 0,8 km/h entre sí', { icon: 'info' });
       }
     }
     if (step < STEPS.length - 1) {
@@ -739,11 +740,10 @@ export function mount(el) {
       d.createdAt = d.createdAt || new Date().toISOString();
     });
     haptic('success');
-    safe(() => celebrate({ intensity: 1.2 }), null);
     nextBtn.classList.add('is-done');
     const doneText = `¡Plan creado${firstName(draft.profile.name) ? `, ${firstName(draft.profile.name)}` : ''}!`;
     nextBtn.setAttribute('aria-label', doneText);
-    nextBtn.innerHTML = `${icon('check', 22, { stroke: 3 })}<span>${esc(doneText)}</span>`;
+    nextBtn.innerHTML = `${icon('check', 20)}<span>${esc(doneText)}</span>`;
     later(() => navigate('#/today', { replace: true }), reducedMotion() ? 300 : 1100);
   }
 

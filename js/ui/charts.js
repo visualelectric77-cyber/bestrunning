@@ -1,8 +1,7 @@
-// BestRunning · gráficos SVG (responsive con viewBox, tipografía del sistema, animación de entrada por CSS).
+// BestRunning · gráficos SVG v2 (responsive con viewBox, tipografía del sistema, animación de entrada por CSS).
+// Sin degradados ni brillos: rellenos planos, barras finas, el acento sólido solo en el dato destacado.
 import { esc, fmt, clamp, todayKey, addDays, mondayOf, parseKey } from '../core/utils.js';
 
-let uidN = 0;
-const nextId = (p) => `${p}${++uidN}`;
 const r2 = (n) => Math.round(n * 100) / 100;
 
 /** Formato numérico es-ES por defecto (los llamadores pueden pasar el suyo). */
@@ -105,7 +104,6 @@ export function lineChart(series, { height = 180, yFormat = String, xFormat = St
   const X = (x) => padL + ((x - x0) / (x1 - x0)) * (W - padL - padR);
   const Y = (y) => padT + (1 - (y - yLo) / ((yHi - yLo) || 1)) * (H - padT - padB);
 
-  const id = nextId('lc');
   let grid = '';
   ticks
     .filter((v) => v >= yLo - 1e-9 && v <= yHi + 1e-9)
@@ -123,23 +121,21 @@ export function lineChart(series, { height = 180, yFormat = String, xFormat = St
     xl += `<text class="chart__xlabel" x="${r2(X(v))}" y="${H - 6}" text-anchor="${anchor}">${esc(fx(v))}</text>`;
   }
 
-  let defs = '';
   let lines = '';
   list.forEach((s, si) => {
     const pts = s.points.map((p) => [X(p.x), Y(p.y)]);
     const d = monotonePath(pts);
     const color = esc(s.color);
     if (area && pts.length > 1) {
-      const gid = `${id}-a${si}`;
-      defs += `<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${color};stop-opacity:.32"/><stop offset="1" style="stop-color:${color};stop-opacity:0"/></linearGradient>`;
+      // Relleno plano muy tenue (sin degradado)
       const baseY = r2(H - padB);
-      lines += `<path class="chart__area" d="${d}L${r2(pts[pts.length - 1][0])} ${baseY}L${r2(pts[0][0])} ${baseY}Z" fill="url(#${gid})"/>`;
+      lines += `<path class="chart__area" d="${d}L${r2(pts[pts.length - 1][0])} ${baseY}L${r2(pts[0][0])} ${baseY}Z" style="fill:${color}" fill-opacity=".1"/>`;
     }
     if (pts.length > 1) {
-      lines += `<path class="chart__line" d="${d}" pathLength="1" fill="none" style="stroke:${color};--i:${si}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      lines += `<path class="chart__line" d="${d}" pathLength="1" fill="none" style="stroke:${color};--i:${si}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
     const [lx, ly] = pts[pts.length - 1];
-    lines += `<circle class="chart__halo" cx="${r2(lx)}" cy="${r2(ly)}" r="6.5" style="fill:${color}" opacity=".22"/><circle class="chart__dot" cx="${r2(lx)}" cy="${r2(ly)}" r="3.4" style="fill:${color}" stroke="#08080a" stroke-width="1.5"/>`;
+    lines += `<circle class="chart__dot" cx="${r2(lx)}" cy="${r2(ly)}" r="3.2" style="fill:${color}" stroke="#000" stroke-width="1.5"/>`;
   });
 
   const legend =
@@ -147,7 +143,7 @@ export function lineChart(series, { height = 180, yFormat = String, xFormat = St
       ? `<div class="chart__legend">${list.map((s) => `<span class="chart__key"><i style="background:${esc(s.color)}"></i>${esc(s.name)}</span>`).join('')}</div>`
       : '';
 
-  return `<div class="chart chart--line"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de líneas"><defs>${defs}</defs>${grid}${lines}${xl}</svg>${legend}</div>`;
+  return `<div class="chart chart--line"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de líneas">${grid}${lines}${xl}</svg>${legend}</div>`;
 }
 
 /* ═════════════ Barras ═════════════ */
@@ -158,6 +154,10 @@ function topRoundedBar(x, y, w, h, r) {
   return `M${r2(x)} ${r2(b)}V${r2(y + rr)}Q${r2(x)} ${r2(y)} ${r2(x + rr)} ${r2(y)}H${r2(x + w - rr)}Q${r2(x + w)} ${r2(y)} ${r2(x + w)} ${r2(y + rr)}V${r2(b)}Z`;
 }
 
+/**
+ * Barras finas (v2). Sin color propio: la barra destacada va en acento sólido y el resto en gris; si no hay ninguna
+ * destacada, todas en gris claro. Con color propio, las no destacadas se atenúan.
+ */
 export function barChart(bars, { height = 160, valueFormat = String } = {}) {
   const list = (Array.isArray(bars) ? bars : []).map((b) => ({
     label: b?.label ?? '',
@@ -173,11 +173,10 @@ export function barChart(bars, { height = 160, valueFormat = String } = {}) {
   const padB = 22;
   const n = list.length;
   const slot = W / n;
-  const bw = Math.min(30, slot * 0.62);
+  const bw = Math.min(18, slot * 0.5);
   const max = Math.max(...list.map((b) => b.value));
   const anyHi = list.some((b) => b.highlight);
   const chartH = H - padT - padB;
-  const id = nextId('bc');
   const everyOther = n > 8;
 
   let out = '';
@@ -185,11 +184,9 @@ export function barChart(bars, { height = 160, valueFormat = String } = {}) {
     const cx = slot * i + slot / 2;
     const h = max > 0 ? Math.max(b.value > 0 ? 3 : 2, (b.value / max) * chartH) : 2;
     const y = padT + chartH - h;
-    const color = esc(b.color || 'var(--accent)');
     const dim = anyHi && !b.highlight;
-    // Degradado ember para la barra destacada (o para todas si no hay color propio ni destacadas)
-    const fill = (b.highlight && !b.color) || (!anyHi && !b.color) ? `url(#${id}-g)` : color;
-    out += `<path class="chart__bar${b.value <= 0 ? ' is-zero' : ''}${b.highlight ? ' is-hi' : ''}" d="${topRoundedBar(cx - bw / 2, y, bw, h, Math.min(7, bw / 2))}" style="fill:${fill};--i:${i}"${dim ? ' opacity=".42"' : ''}/>`;
+    const fill = b.color ? esc(b.color) : b.highlight ? 'var(--accent)' : anyHi ? 'rgba(235,235,245,.3)' : 'rgba(235,235,245,.6)';
+    out += `<path class="chart__bar${b.value <= 0 ? ' is-zero' : ''}${b.highlight ? ' is-hi' : ''}" d="${topRoundedBar(cx - bw / 2, y, bw, h, Math.min(3, bw / 2))}" style="fill:${fill};--i:${i}"${dim && b.color ? ' opacity=".35"' : ''}/>`;
     const showVal = b.highlight || (!anyHi && i === n - 1);
     if (showVal && b.value > 0) {
       out += `<text class="chart__value" x="${r2(cx)}" y="${r2(y - 6)}" text-anchor="middle">${esc(fv(b.value))}</text>`;
@@ -200,7 +197,7 @@ export function barChart(bars, { height = 160, valueFormat = String } = {}) {
   });
 
   const baseY = r2(padT + chartH);
-  return `<div class="chart chart--bar"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de barras"><defs><linearGradient id="${id}-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FF9500"/><stop offset=".55" stop-color="#FF5A1F"/><stop offset="1" stop-color="#FF2D55"/></linearGradient></defs><line class="chart__base" x1="0" x2="${W}" y1="${baseY}" y2="${baseY}"/>${out}</svg></div>`;
+  return `<div class="chart chart--bar"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de barras"><line class="chart__base" x1="0" x2="${W}" y1="${baseY}" y2="${baseY}"/>${out}</svg></div>`;
 }
 
 /* ═════════════ Calendario de calor ═════════════ */
@@ -267,7 +264,7 @@ export function heatmapCalendar(valuesByDay, { weeks = 16, endKey = todayKey(), 
       const y = r2(padT + d * step);
       const isToday = key === today;
       const style = lvl ? `style="fill:${c};fill-opacity:${OP[lvl]};--i:${w}"` : `style="--i:${w}"`;
-      cells += `<rect class="heat__cell${lvl ? '' : ' is-empty'}${isToday ? ' is-today' : ''}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3.5" ${style}><title>${esc(fmt.dateShort(key))}${v ? ` · ${esc(fmt.int(v))}` : ''}</title></rect>`;
+      cells += `<rect class="heat__cell${lvl ? '' : ' is-empty'}${isToday ? ' is-today' : ''}" x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" ${style}><title>${esc(fmt.dateShort(key))}${v ? ` · ${esc(fmt.int(v))}` : ''}</title></rect>`;
     }
   }
   const wd = [
@@ -299,8 +296,8 @@ export function sparkline(values, { color = 'var(--accent)', height = 32 } = {})
   const pad = 2.5;
   const pts = vals.map((v, i) => [(i / (vals.length - 1)) * W, pad + (1 - (v - min) / ((max - min) || 1)) * (H - pad * 2)]);
   const d = monotonePath(pts);
-  const id = nextId('sp');
-  return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" aria-hidden="true"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${c};stop-opacity:.28"/><stop offset="1" style="stop-color:${c};stop-opacity:0"/></linearGradient></defs><path d="${d}L${W} ${H}L0 ${H}Z" fill="url(#${id})"/><path d="${d}" fill="none" style="stroke:${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
+  // v2: solo la línea (sin relleno degradado)
+  return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px" aria-hidden="true"><path d="${d}" fill="none" style="stroke:${c}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
 /* ═════════════ Medidor semicircular ═════════════ */
@@ -315,8 +312,7 @@ export function gauge({ value, min = 0, max = 100, label = '', sublabel = '', co
   const cx = W / 2;
   const cy = 112;
   const r = 92;
-  const sw = 14;
-  const id = nextId('gg');
+  const sw = 10;
   const pt = (f) => {
     const a = Math.PI * (1 - f);
     return [r2(cx + r * Math.cos(a)), r2(cy - r * Math.sin(a))];
@@ -338,17 +334,10 @@ export function gauge({ value, min = 0, max = 100, label = '', sublabel = '', co
     .join('');
   return `<div class="chart gauge">
   <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label || 'Indicador')}: ${esc(valText)}">
-    <defs>
-      <linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${cx - r}" y1="0" x2="${cx + r}" y2="0">
-        <stop offset="0" style="stop-color:${c};stop-opacity:.45"/><stop offset="1" style="stop-color:${c};stop-opacity:1"/>
-      </linearGradient>
-      <filter id="${id}-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
-    </defs>
     <path d="M${sx} ${sy}A${r} ${r} 0 0 1 ${ex} ${ey}" fill="none" class="gauge__track" stroke-width="${sw}" stroke-linecap="round"/>
     ${ticks}
-    ${p > 0 ? `<path class="gauge__value" d="M${sx} ${sy}A${r} ${r} 0 0 1 ${vx} ${vy}" pathLength="1" fill="none" stroke="url(#${id})" stroke-width="${sw}" stroke-linecap="round"/>` : ''}
-    <circle cx="${vx}" cy="${vy}" r="9" style="fill:${c}" opacity=".55" filter="url(#${id}-glow)" class="gauge__knob-glow"/>
-    <circle cx="${vx}" cy="${vy}" r="6" fill="#fff" class="gauge__knob"/>
+    ${p > 0 ? `<path class="gauge__value" d="M${sx} ${sy}A${r} ${r} 0 0 1 ${vx} ${vy}" pathLength="1" fill="none" style="stroke:${c}" stroke-width="${sw}" stroke-linecap="round"/>` : ''}
+    <circle cx="${vx}" cy="${vy}" r="5.5" fill="#fff" stroke="#000" stroke-width="2" class="gauge__knob"/>
     <text class="gauge__val" x="${cx}" y="${cy - 14}" text-anchor="middle">${esc(valText)}</text>
     <text class="chart__xlabel" x="${r2(sx)}" y="${H - 1}" text-anchor="middle">${esc(nfAuto(lo))}</text>
     <text class="chart__xlabel" x="${r2(ex)}" y="${H - 1}" text-anchor="middle">${esc(nfAuto(hi))}</text>

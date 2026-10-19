@@ -10,9 +10,13 @@ export const STATE_VERSION = 2;
 const DEFAULT_PACK = 'eva';
 const DEFAULT_HR_SHORTCUT = 'BestRunning FC';
 const VISUAL_QUALITIES = ['auto', 'high', 'eco', 'off'];
-// Escenarios 3D que se ofrecen en Ajustes (§15.2; el 'legacy' oculto nunca se guarda). Aurora por defecto.
-const VISUAL_THEMES = ['aurora', 'cordillera', 'estadio', 'blank'];
-const DEFAULT_VISUAL_THEME = 'aurora';
+// Escenarios 3D que se ofrecen en Ajustes (§15.2; el 'legacy' oculto nunca se guarda). Por defecto 'auto': cada
+// clase en su mundo (js/player/scene-pick.js). El antiguo valor por defecto ('aurora') se migra una vez a 'auto';
+// un escenario elegido a mano se respeta.
+const VISUAL_THEMES = ['auto', 'aurora', 'cordillera', 'estadio', 'blank'];
+const DEFAULT_VISUAL_THEME = 'auto';
+const OLD_DEFAULT_THEME = 'aurora';
+const THEME_REV = 3; // 3: «Automático» para todos una vez (también quien tenía un mundo elegido a mano)
 
 const hasLS = (() => {
   try {
@@ -53,7 +57,7 @@ export function defaultState() {
     },
     // Escena 3D del reproductor (§14–§15): calidad 'auto'|'high'|'eco'|'off', escenario (§15.2), modo TV por
     // defecto, balanceo de cámara a tu zancada y fantasma de tu mejor marca (§14.1)
-    visuals: { quality: 'auto', theme: DEFAULT_VISUAL_THEME, tvMode: false, strideBob: true, ghost: true, captions: true },
+    visuals: { quality: 'auto', theme: DEFAULT_VISUAL_THEME, themeRev: THEME_REV, tvMode: false, strideBob: true, ghost: true, captions: true },
     history: [],
     achievements: {},
     ui: { libraryDuration: 20, libraryCategory: 'all', progressMetric: 'km' },
@@ -129,6 +133,12 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
   const vz = isPlainObject(st.visuals) ? st.visuals : { ...dv };
   vz.quality = VISUAL_QUALITIES.includes(vz.quality) ? vz.quality : dv.quality;
   vz.theme = VISUAL_THEMES.includes(vz.theme) ? vz.theme : dv.theme;
+  // Escenario automático. rev 2: quien seguía con el antiguo por defecto pasaba a 'auto'. rev 3 (una sola vez): todos
+  // pasan a 'auto', también un mundo elegido a mano antes (p. ej. 'estadio'); después se respeta cualquier elección nueva.
+  if (vz.themeRev !== THEME_REV) {
+    if (vz.theme === OLD_DEFAULT_THEME || (Number(vz.themeRev) || 0) < 3) vz.theme = DEFAULT_VISUAL_THEME;
+    vz.themeRev = THEME_REV;
+  }
   for (const k of ['tvMode', 'strideBob', 'ghost', 'captions']) vz[k] = typeof vz[k] === 'boolean' ? vz[k] : dv[k];
   st.visuals = vz;
   if (Array.isArray(st.history)) st.history = st.history.map(normalizeSession);
@@ -144,7 +154,10 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
 
 function hydrate(saved) {
   if (!isPlainObject(saved)) return defaultState();
-  return migrateState(mergeDeep(defaultState(), saved), saved.version);
+  const merged = mergeDeep(defaultState(), saved);
+  // La marca del escenario automático solo cuenta si venía guardada (los valores por defecto no deben saltarse la migración)
+  if (isPlainObject(merged.visuals) && !(isPlainObject(saved.visuals) && saved.visuals.themeRev === THEME_REV)) delete merged.visuals.themeRev;
+  return migrateState(merged, saved.version);
 }
 
 function loadInitial() {

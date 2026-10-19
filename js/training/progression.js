@@ -437,7 +437,10 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
 
   if (!history.length) {
     add(9, `${hey}tu primera clase te espera. Empieza suave: el plan se adapta a ti desde el primer día.`);
-    add(9, 'Antes de empezar, inicia «Cinta de correr» en tu Apple Watch: así tendrás el pulso de cada sesión.');
+    const nativeApp = typeof window !== 'undefined' && !!window.webkit?.messageHandlers?.bestrunning;
+    add(9, nativeApp
+      ? 'Con BestRunning en tu Apple Watch, el reloj se conecta solo y te manda el pulso en directo.'
+      : 'Antes de empezar, inicia «Cinta de correr» en tu Apple Watch: así tendrás el pulso de cada sesión.');
   }
 
   // Test y descarga

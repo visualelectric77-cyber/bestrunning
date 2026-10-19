@@ -5,7 +5,6 @@ import { ZONES } from '../training/levels.js';
 const W = 1080;
 const H = 1350;
 const PAD = 84;
-const ROUNDED = 'ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif';
 const SANS = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif';
 
 // Copia local de nombres/colores de categoría (SPEC §6.2) para no depender de templates.js.
@@ -14,7 +13,6 @@ const CATS = {
   fartlek: ['Fartlek', '#BF5AF2'], hills: ['Cuestas', '#C79A6B'], recovery: ['Recuperación', '#64D2FF'],
   challenge: ['Retos', '#FFD60A'], test: ['Test', '#7D7AFF'],
 };
-const FACES = { easy: ['😌', 'Muy fácil'], ok: ['🙂', 'Cómodo'], hard: ['😤', 'Exigente'], max: ['🥵', 'Al límite'], fail: ['😵', 'No pude'] };
 
 function makeCanvas(w, h) {
   if (typeof document === 'undefined') return null;
@@ -150,6 +148,7 @@ function wrapLines(ctx, text, maxW, maxLines) {
 }
 
 function drawProfile(ctx, segments, x, y, w, h) {
+  // v2: barras planas del color de su zona, 2 pt de separación y radio 2 (como profileChart), sin degradados
   const segs = (segments || []).filter((s) => s && s.sec > 0);
   if (!segs.length) return;
   const total = segs.reduce((a, s) => a + s.sec, 0);
@@ -157,39 +156,77 @@ function drawProfile(ctx, segments, x, y, w, h) {
   const max = Math.max(...speeds);
   const min = Math.min(...speeds);
   const lo = Math.max(0, min - (max - min) * 0.6 - 1);
-  const gap = segs.length > 60 ? 1.5 : 3;
+  const gap = segs.length > 60 ? 2 : 5;
   let cx = x;
   for (const s of segs) {
     const sw = (s.sec / total) * w;
     const bh = Math.max(10, ((s.speed - lo) / Math.max(0.1, max - lo)) * h);
-    const color = ZONES[s.zone]?.color || '#ff6a1a';
     const bw = Math.max(1, sw - gap);
-    const grad = ctx.createLinearGradient(0, y + h - bh, 0, y + h);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, `${color}88`);
-    roundRect(ctx, cx, y + h - bh, bw, bh, [Math.min(8, bw / 2), Math.min(8, bw / 2), 2, 2]);
-    ctx.fillStyle = grad;
+    roundRect(ctx, cx + Math.min(gap, sw * 0.35) / 2, y + h - bh, bw, bh, [Math.min(5, bw / 2), Math.min(5, bw / 2), 0, 0]);
+    ctx.fillStyle = ZONES[s.zone]?.color || '#8E8E93';
     ctx.fill();
     cx += sw;
   }
 }
 
-function statBlock(ctx, x, y, label, value, unit, align = 'left') {
-  ctx.textAlign = align;
-  ctx.fillStyle = 'rgba(235,235,245,0.5)';
-  ctx.font = `700 27px ${SANS}`;
-  setSpacing(ctx, 3);
-  ctx.fillText(label.toUpperCase(), x, y);
+// Foto de campaña de cada categoría (misma elección que la tarjeta de Hoy); flip = la persona pasa a la derecha
+const PHOTO = {
+  intervals: ['cat-intervals', false], fartlek: ['cat-intervals', false], challenge: ['cat-intervals', false],
+  endurance: ['cat-endurance', true], recovery: ['cat-recovery', false], tempo: ['cat-tempo', true],
+  hills: ['cat-tempo', true], test: ['cat-tempo', true],
+};
+
+/** Carga una imagen del propio sitio (sin contaminar el lienzo). Nunca lanza: null si no llega a tiempo. */
+function loadImage(src, ms = 2500) {
+  if (typeof Image === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    const t = setTimeout(() => resolve(null), ms);
+    img.onload = () => { clearTimeout(t); resolve(img); };
+    img.onerror = () => { clearTimeout(t); resolve(null); };
+    try { img.decoding = 'async'; } catch { /* nada */ }
+    img.src = src;
+  });
+}
+
+/** Dibuja la imagen cubriendo (x, y, w, h) como object-fit: cover, opcionalmente reflejada. */
+function drawCover(ctx, img, x, y, w, h, { flip = false, focusY = 0.4 } = {}) {
+  const k = Math.max(w / img.width, h / img.height);
+  const dw = img.width * k;
+  const dh = img.height * k;
+  const dx = x + (w - dw) / 2;
+  const dy = y + (h - dh) * focusY;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  if (flip) {
+    ctx.translate(x * 2 + w, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(img, dx, dy, dw, dh);
+  ctx.restore();
+}
+
+/** Cifra con rótulo (v2): rótulo gris arriba, cifra blanca SF Pro Display 700, unidad gris al 45 %. */
+function statBlock(ctx, x, y, label, value, unit) {
+  ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(235,235,245,0.62)';
+  ctx.font = `500 28px ${SANS}`;
   setSpacing(ctx, 0);
+  ctx.fillText(label, x, y);
   ctx.fillStyle = '#ffffff';
-  ctx.font = `800 76px ${ROUNDED}`;
-  ctx.fillText(value, x, y + 82);
+  ctx.font = `700 68px ${SANS}`;
+  setSpacing(ctx, -1.5);
+  ctx.fillText(value, x, y + 74);
   if (unit) {
     const vw = ctx.measureText(value).width;
+    setSpacing(ctx, 0);
     ctx.fillStyle = 'rgba(235,235,245,0.62)';
-    ctx.font = `700 32px ${ROUNDED}`;
-    ctx.fillText(unit, x + vw + 10, y + 82);
+    ctx.font = `600 30px ${SANS}`;
+    ctx.fillText(unit, x + vw + 8, y + 74);
   }
+  setSpacing(ctx, 0);
 }
 
 /** Dibuja la tarjeta y devuelve un Blob PNG (o null si no hay canvas). */
@@ -199,136 +236,103 @@ export async function renderShareCard(session, { workout = null, name = '' } = {
   const ctx = c.getContext('2d');
   const s = session || {};
 
-  // Fondo: negro con brasas naranja→rojo
-  ctx.fillStyle = '#08080a';
+  // v2 («serio, elegante»): negro puro, la foto de su categoría arriba fundida en negro, tipografía blanca
+  ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, W, H);
-  const g1 = ctx.createRadialGradient(170, 90, 10, 170, 90, 1050);
-  g1.addColorStop(0, 'rgba(255,149,0,0.85)');
-  g1.addColorStop(0.35, 'rgba(255,90,31,0.42)');
-  g1.addColorStop(1, 'rgba(255,45,85,0)');
-  ctx.fillStyle = g1;
-  ctx.fillRect(0, 0, W, H);
-  const g2 = ctx.createRadialGradient(1020, 1260, 10, 1020, 1260, 900);
-  g2.addColorStop(0, 'rgba(255,45,85,0.62)');
-  g2.addColorStop(1, 'rgba(255,45,85,0)');
-  ctx.fillStyle = g2;
-  ctx.fillRect(0, 0, W, H);
-  const shade = ctx.createLinearGradient(0, 0, 0, H);
-  shade.addColorStop(0, 'rgba(8,8,10,0)');
-  shade.addColorStop(0.45, 'rgba(8,8,10,0.35)');
-  shade.addColorStop(1, 'rgba(8,8,10,0.55)');
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, W, H);
-  // Estelas de velocidad
-  ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 9; i++) {
-    ctx.lineWidth = 2 + (i % 3) * 2;
-    const yy = 180 + i * 120;
-    ctx.beginPath();
-    ctx.moveTo(W - 80 - (i % 4) * 90, yy);
-    ctx.lineTo(W + 40, yy - 160);
-    ctx.stroke();
+  const PH = 640;
+  const [photoName, flip] = PHOTO[s.category] || ['hero-man', false];
+  const img = await loadImage(`./assets/media/${photoName}.jpg`);
+  if (img) {
+    drawCover(ctx, img, 0, 0, W, PH, { flip, focusY: photoName === 'hero-man' ? 0.62 : 0.35 });
+    const veil = ctx.createLinearGradient(0, 0, 0, PH);
+    veil.addColorStop(0, 'rgba(0,0,0,0.45)');
+    veil.addColorStop(0.22, 'rgba(0,0,0,0.05)');
+    veil.addColorStop(0.55, 'rgba(0,0,0,0.25)');
+    veil.addColorStop(1, '#000000');
+    ctx.fillStyle = veil;
+    ctx.fillRect(0, 0, W, PH);
   }
-  ctx.restore();
 
-  // Cabecera: logo + marca + fecha
-  drawLogoMark(ctx, PAD, PAD, 92);
+  // Cabecera: símbolo + «Best» blanco y «Running» ember sólido · fecha
+  drawLogoMark(ctx, PAD, PAD - 10, 76);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
+  ctx.font = `700 44px ${SANS}`;
+  setSpacing(ctx, -0.8);
   ctx.fillStyle = '#ffffff';
-  ctx.font = `800 46px ${SANS}`;
-  setSpacing(ctx, -1);
-  ctx.fillText('BestRunning', PAD + 120, PAD + 62);
+  ctx.fillText('Best', PAD + 98, PAD + 42);
+  const bw0 = ctx.measureText('Best').width;
+  ctx.fillStyle = '#FF5A1F';
+  ctx.fillText('Running', PAD + 98 + bw0, PAD + 42);
   setSpacing(ctx, 0);
   ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(255,255,255,0.78)';
-  ctx.font = `600 32px ${SANS}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.font = `500 30px ${SANS}`;
   const dayLabel = s.dayKey ? fmt.dateShort(s.dayKey) : '';
-  ctx.fillText(dayLabel, W - PAD, PAD + 60);
+  ctx.fillText(dayLabel, W - PAD, PAD + 40);
 
-  // Categoría y título
-  const [catName, catColor] = CATS[s.category] || ['Entrenamiento', '#ff9f0a'];
-  ctx.textAlign = 'left';
-  ctx.font = `800 30px ${SANS}`;
-  setSpacing(ctx, 5);
-  ctx.fillStyle = catColor;
+  // Categoría · duración (gris, mayúsculas finas) y título
+  const [catName] = CATS[s.category] || ['Entrenamiento'];
   const mins = Math.round((Number(s.elapsedSec) || 0) / 60);
-  ctx.fillText(`${catName.toUpperCase()} · ${mins} MIN`, PAD, 300);
-  setSpacing(ctx, 0);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `800 88px ${SANS}`;
-  setSpacing(ctx, -2);
+  ctx.textAlign = 'left';
+  ctx.font = `600 28px ${SANS}`;
+  setSpacing(ctx, 1.2);
+  ctx.fillStyle = 'rgba(235,235,245,0.72)';
+  ctx.font = `700 84px ${SANS}`;
+  setSpacing(ctx, -1.5);
   const lines = wrapLines(ctx, s.title || 'Entrenamiento', W - PAD * 2, 2);
-  lines.forEach((ln, i) => ctx.fillText(ln, PAD, 395 + i * 96));
+  const yT = PH - 30 - (lines.length - 1) * 92;
+  ctx.font = `600 28px ${SANS}`;
+  setSpacing(ctx, 1.2);
+  ctx.fillText(`${catName.toUpperCase()} · ${mins} MIN`, PAD, yT - 96);
+  setSpacing(ctx, -1.5);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 84px ${SANS}`;
+  lines.forEach((ln, i) => ctx.fillText(ln, PAD, yT + i * 92));
   setSpacing(ctx, 0);
 
-  // Cifra principal: distancia
-  const yBig = lines.length > 1 ? 790 : 720;
-  ctx.font = `800 300px ${ROUNDED}`;
-  setSpacing(ctx, -10);
+  // Cifra principal: distancia (blanca sólida) y «km» en gris
+  const yBig = PH + 230;
+  ctx.font = `700 230px ${SANS}`;
+  setSpacing(ctx, -6);
   const big = fmt.km(s.distanceKm || 0);
-  const bigGrad = ctx.createLinearGradient(PAD, yBig - 240, PAD, yBig);
-  bigGrad.addColorStop(0, '#ffffff');
-  bigGrad.addColorStop(1, '#ffd2b8');
-  ctx.fillStyle = bigGrad;
-  ctx.fillText(big, PAD - 8, yBig);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(big, PAD - 6, yBig);
   const bw = ctx.measureText(big).width;
   setSpacing(ctx, 0);
-  ctx.fillStyle = 'rgba(255,255,255,0.72)';
-  ctx.font = `800 76px ${ROUNDED}`;
-  ctx.fillText('km', PAD + bw + 10, yBig);
+  ctx.fillStyle = 'rgba(235,235,245,0.62)';
+  ctx.font = `600 ${Math.round(230 * 0.36)}px ${SANS}`;
+  ctx.fillText('km', PAD + bw + 8, yBig);
 
-  // Estadísticas
+  // Cifras: tres columnas con separadores finos
   const colW = (W - PAD * 2) / 3;
-  const yS1 = yBig + 90;
+  const yS = yBig + 84;
   const pace = s.avgSpeed > 0 ? fmt.pace(s.avgSpeed) : '–:––';
-  statBlock(ctx, PAD, yS1, 'Tiempo', fmt.clock(s.elapsedSec || 0), '');
-  statBlock(ctx, PAD + colW, yS1, 'Ritmo', pace, '/km');
-  // Con el pulso del Apple Watch importado (§12), el dato real gana a la estimación de kcal
   const hrAvg = Math.round(Number(s.hrAvg) || 0);
-  if (hrAvg >= 40) statBlock(ctx, PAD + colW * 2, yS1, 'Pulso medio', String(hrAvg), 'ppm');
-  else statBlock(ctx, PAD + colW * 2, yS1, 'Kcal', fmt.int(s.kcal || 0), '');
-  const yS2 = yS1 + 150;
-  statBlock(ctx, PAD, yS2, 'Vel. media', fmt.speed(s.avgSpeed || 0), 'km/h');
-  statBlock(ctx, PAD + colW, yS2, 'Vel. máx.', fmt.speed(s.maxSpeed || 0), 'km/h');
-  const face = FACES[s.feeling];
-  if (face) {
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(235,235,245,0.5)';
-    ctx.font = `700 27px ${SANS}`;
-    setSpacing(ctx, 3);
-    ctx.fillText('SENSACIÓN', PAD + colW * 2, yS2);
-    setSpacing(ctx, 0);
-    ctx.font = `64px ${SANS}`;
-    ctx.fillText(face[0], PAD + colW * 2, yS2 + 80);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `700 30px ${SANS}`;
-    ctx.fillText(face[1], PAD + colW * 2 + 80, yS2 + 70);
-  } else {
-    statBlock(ctx, PAD + colW * 2, yS2, 'Completado', `${Math.round((s.completionPct || 0) * 100)}`, '%');
-  }
+  statBlock(ctx, PAD, yS, 'Tiempo', fmt.clock(s.elapsedSec || 0), '');
+  statBlock(ctx, PAD + colW + 28, yS, 'Ritmo', pace, '/km');
+  // Con el pulso del Apple Watch, el dato real gana a la estimación de kcal
+  if (hrAvg >= 40) statBlock(ctx, PAD + colW * 2 + 28, yS, 'Pulso medio', String(hrAvg), 'ppm');
+  else statBlock(ctx, PAD + colW * 2 + 28, yS, 'Kcal', fmt.int(s.kcal || 0), '');
+  ctx.fillStyle = 'rgba(84,84,88,0.65)';
+  ctx.fillRect(PAD + colW + 2, yS - 30, 2, 116);
+  ctx.fillRect(PAD + colW * 2 + 2, yS - 30, 2, 116);
 
-  // Perfil de intensidad
-  const yP = H - 250;
-  const hP = 130;
+  // Perfil de intensidad (el único color: las zonas)
+  const yP = H - 228;
+  const hP = 104;
   const segs = (workout?.segments?.length ? workout.segments : traceToSegments(s.speedTrace)) || [];
-  // Línea base sutil
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, PAD, yP + hP + 6, W - PAD * 2, 3, 2);
-  ctx.fill();
   drawProfile(ctx, segs, PAD, yP, W - PAD * 2, hP);
 
-  // Pie
+  // Pie, en gris y sin emojis
   ctx.textAlign = 'left';
-  ctx.fillStyle = 'rgba(235,235,245,0.55)';
-  ctx.font = `600 28px ${SANS}`;
-  ctx.fillText(name ? `${name} · entrenado en cinta` : 'Entrenado en cinta', PAD, H - 62);
+  ctx.fillStyle = 'rgba(235,235,245,0.62)';
+  ctx.font = `500 28px ${SANS}`;
+  ctx.fillText(name ? `${name} · entrenado en cinta` : 'Entrenado en cinta', PAD, H - 64);
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `800 28px ${SANS}`;
-  ctx.fillText(s.isTest ? `VAM ${fmt.speed(s.test?.vam || 0)} km/h` : s.completed ? '¡Sesión completada! 🔥' : '¡Cada minuto cuenta! 💪', W - PAD, H - 62);
+  ctx.fillStyle = s.isTest ? '#FF5A1F' : 'rgba(235,235,245,0.62)';
+  ctx.font = `600 28px ${SANS}`;
+  ctx.fillText(s.isTest ? `VAM ${fmt.speed(s.test?.vam || 0)} km/h` : s.completed ? 'Sesión completada' : `${Math.round((s.completionPct || 0) * 100)} % completado`, W - PAD, H - 64);
 
   return new Promise((resolve) => {
     try { c.toBlob((b) => resolve(b || null), 'image/png'); } catch { resolve(null); }
@@ -359,7 +363,7 @@ export function shareFileName(session) {
 
 export function shareText(session) {
   const s = session || {};
-  return `¡${fmt.km(s.distanceKm || 0)} km en ${fmt.clock(s.elapsedSec || 0)} con BestRunning! 🔥`;
+  return `${fmt.km(s.distanceKm || 0)} km en ${fmt.clock(s.elapsedSec || 0)} con BestRunning`;
 }
 
 export function downloadBlob(blob, filename) {

@@ -1,6 +1,5 @@
 // BestRunning · router por hash (compatible con GitHub Pages) con transiciones y navegación declarativa.
 import { getState } from './store.js';
-import { haptic } from './haptics.js';
 
 const routes = [];
 let outlet = null;
@@ -189,6 +188,8 @@ function onPopState(e) {
     const idx = Number(st.idx) || 0;
     navType = idx < histIdx ? 'back' : 'forward';
     histIdx = idx;
+    // Gesto de borde de iOS: el sistema ya ha animado la vuelta; no se repite la transición propia
+    if (e.hasUAVisualTransition) navType = navType === 'back' ? 'back-ua' : 'forward-ua';
   } else {
     // Cambio manual del hash o <a href="#/…">: lo adoptamos como entrada propia.
     histIdx += 1;
@@ -251,7 +252,7 @@ async function render(navType) {
 }
 
 function transitionType(prev, next, navType) {
-  if (!prev || navType === 'initial') return 'none';
+  if (!prev || navType === 'initial' || navType === 'back-ua' || navType === 'forward-ua') return 'none';
   if (next.fullscreen && !prev.fullscreen) return 'modal-in';
   if (prev.fullscreen && !next.fullscreen) return navType === 'back' ? 'modal-out' : 'fade';
   if (prev.fullscreen && next.fullscreen) return 'fade';
@@ -274,7 +275,7 @@ function swap(mod, route, navType) {
   const prev = current;
   const type = transitionType(prev, route, navType);
   if (prev && currentEl) scrollMemory.set(prev.hash, currentEl.scrollTop);
-  const restoreTo = navType === 'back' || navType === 'forward' || navType === 'tab' ? scrollMemory.get(route.hash) || 0 : 0;
+  const restoreTo = ['back', 'forward', 'back-ua', 'forward-ua', 'tab'].includes(navType) ? scrollMemory.get(route.hash) || 0 : 0;
 
   const apply = () => {
     try {
@@ -301,6 +302,8 @@ function swap(mod, route, navType) {
     current = route;
 
     document.body.classList.toggle('is-fullscreen', route.fullscreen);
+    // iOS: en las pantallas empujadas (no raíz de pestaña) la tab bar se oculta
+    document.body.classList.toggle('is-pushed', !route.fullscreen && route.push);
     document.body.dataset.tab = route.tab || '';
     updateTabbar(activeTabFor(route));
 
@@ -377,7 +380,7 @@ function updateTabbar(tab) {
 
 function goTab(tab, href) {
   const root = href || `#/${tab}`;
-  haptic('selection');
+  // HIG: cambiar de pestaña no lleva háptica (solo los cambios de valor, confirmaciones y errores)
   if (current && current.tab === tab) {
     if (normHash(location.hash) !== normHash(root)) go(root, 'back', false);
     else currentEl?.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
