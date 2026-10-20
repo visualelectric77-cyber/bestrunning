@@ -20,6 +20,7 @@ import {
   HR_ENTRY_MIN, HR_ENTRY_MAX,
 } from '../integrations/watch-hr.js';
 import { isNative, nativeStatus, healthMissingOf } from '../integrations/native-bridge.js';
+import { diagMark } from '../core/diag.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -670,11 +671,14 @@ export function mount(el, { params = {} } = {}) {
       return;
     }
     saving = true;
+    const t0 = performance.now();
+    diagMark('guardar.toque');
     try {
       if (editing) saveEdit();
       else await saveFirst();
     } finally {
       saving = false;
+      diagMark('guardar.hecho', { ms: performance.now() - t0 });
     }
   }
 

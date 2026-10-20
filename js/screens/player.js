@@ -21,6 +21,7 @@ import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
+import { diagMark, diagWatch } from '../core/diag.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -3072,6 +3073,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function onFinished(s) {
     if (finishedHandled) return;
     finishedHandled = true;
+    diagMark('clase.fin', { activa_s: s?.activeSec || 0, total_s: s?.totalElapsed || 0 });
+    diagWatch('fin de clase');
     closeSound();
     clearInterval(snapTimer);
     const st = getState();
@@ -3142,7 +3145,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const go = () => {
       if (disposed || leaving) return;
       leaving = true;
+      const t0 = performance.now();
       teardownRuntime({ keepCoach: true });
+      diagMark('escena.soltada', { ms: performance.now() - t0 });
       navigate(`#/summary/${encodeURIComponent(session.id)}`, { replace: true });
     };
     if (!ov || !root) { go(); return; }

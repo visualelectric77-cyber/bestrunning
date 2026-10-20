@@ -724,6 +724,16 @@ const packStats = { pack: 0, tts: 0, schedules: 0, fullPack: 0, fullTts: 0 };
   const tc = buildCueSchedule(endurance50(), { chattiness: 'coach', seed: 1, pack: { available: tiny } });
   ok(tc.some((c) => c.kind === 'pre' && c.voice === 'pack'), 'pre-avisos con el pack mínimo');
   ok(tc.filter((c) => c.kind === 'change').every((c) => c.voice === 'tts'), 'sin clips de "¡Ahora!" ⇒ cambios con voz del sistema');
+  // «Trote. Recupera.» (now_jog_1) nunca en un trote que no viene de un tramo duro (pack de Eva: sin now_jog_2)
+  const evaLike = new Set([...ALL_IDS].filter((id) => id !== 'now_jog_2'));
+  const wj = { segments: [{ zone: 'warmup', speed: 6.5, sec: 120 }, { zone: 'jog', speed: 8.3, sec: 120 }, { zone: 'fast', speed: 11.5, sec: 120 }, { zone: 'jog', speed: 8.3, sec: 120 }, { zone: 'run', speed: 10, sec: 60 }] };
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const cj = buildCueSchedule(wj, { chattiness: 'coach', seed, pack: { available: evaLike } });
+    const first = cj.find((c) => c.kind === 'change' && c.at === 120);
+    ok(first && !first.clips?.includes('now_jog_1'), `seed ${seed}: el primer trote no dice «Trote. Recupera.»`);
+    const after = cj.find((c) => c.kind === 'change' && c.at === 360);
+    ok(!!after?.clips?.includes('now_jog_1'), `seed ${seed}: el trote tras un tramo duro sí dice «Trote. Recupera.»`);
+  }
   ok(tc.every((c) => !c.text || TTS_KINDS.has(c.kind) || c.voice === 'pack'), 'lo que no se compone se omite');
   ok(!tc.some((c) => c.kind === 'tip' || c.kind === 'motivation'), 'sin consejos grabados ⇒ sin consejos');
   ok(tc.find((c) => c.kind === 'intro')?.voice === 'pack', `inicio con "Pon la cinta a…" (${tc.find((c) => c.kind === 'intro')?.clips})`);

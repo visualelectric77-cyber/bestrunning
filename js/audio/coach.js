@@ -724,7 +724,7 @@ function buildPackSchedule(workout, opts, base, avail) {
         if (stage) ids = cc('testStage', { stage: n.stage, speed: n.speed }, pf);
         else {
           if (n.zone === 'cooldown' && p.zone !== 'cooldown') ids = cooldownStart(n, withDur, pf);
-          if (!ids) ids = cc('now', { zone: n.zone, speed: n.speed, sec: withDur ? n.sec : 0 }, pf);
+          if (!ids) ids = cc('now', { zone: n.zone, speed: n.speed, sec: withDur ? n.sec : 0, fromHard: !!(p && HARD.has(p.zone)) }, pf);
         }
         return ids && withRep && rep ? [rep, ...ids] : ids;
       };

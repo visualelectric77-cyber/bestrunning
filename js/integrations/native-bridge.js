@@ -8,6 +8,7 @@
 import { clamp, round1, todayKey, addDays, weekdayOf, capitalize, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, hrZones, hrMaxFromAge, hrTargetForZone } from '../training/levels.js';
 import { hrFromSamples, hrFieldsFrom, hrAtLevels, hasHrSeries, HR_MIN, HR_MAX } from './watch-hr.js';
+import { diagMark } from '../core/diag.js';
 
 /* ═════════════════ Tipos del protocolo (mismos nombres que native/Shared/Wire.swift) ═════════════════ */
 
@@ -516,6 +517,7 @@ export function createNativeBridge(opts = {}) {
   /* ───────── Resumen de Salud (workout.summary) ───────── */
 
   function onSummary(env, data) {
+    diagMark('reloj.resumen', { muestras: Array.isArray(data?.samples) ? data.samples.length : 0, origen: data?.source || '-' });
     const id = String(env.id || '');
     if (!id || !store?.getState) return;
     const st = st0() || {};
@@ -646,6 +648,7 @@ export function createNativeBridge(opts = {}) {
     try { json = String(store.exportState?.() || ''); } catch { json = ''; }
     if (!json) return false;
     lastBackupAt = now();
+    diagMark('copia.enviada', { kb: json.length / 1024 });
     return post('backup', { savedAt: Math.round(lastBackupAt), sessions: st.history.length, json });
   }
 

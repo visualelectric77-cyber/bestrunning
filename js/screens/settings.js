@@ -14,6 +14,7 @@ import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
 import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
 import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
+import { diagText } from '../core/diag.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -1384,6 +1385,7 @@ function aboutHtml(s) {
       <div class="list__row st-row"><span class="list__title">Funciona sin conexión</span><span class="list__value">Sí</span></div>
       <div class="list__row st-row"><span class="list__title">Tus datos</span><span class="list__value">Solo en este dispositivo</span></div>
       <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="update"><span class="list__title">Buscar actualizaciones</span></div>
+      <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="diag"><span class="list__title">Diagnóstico</span><span class="list__value">Copiar</span></div>
     `)}
     <div class="st-group">
       <div class="st-group__title">Créditos</div>
@@ -2987,6 +2989,13 @@ const PAGES = {
       if (name === 'update') {
         haptic('light');
         checkUpdate();
+      } else if (name === 'diag') {
+        // Registro del final de las clases (js/core/diag.js), para pegarlo en un mensaje
+        haptic('light');
+        const text = `${APP_VERSION}\n${diagText()}`;
+        Promise.resolve(navigator.clipboard?.writeText?.(text))
+          .then(() => toast('Diagnóstico copiado: pégalo en un mensaje', { icon: 'copy' }))
+          .catch(() => toast('No se ha podido copiar el diagnóstico', { kind: 'error' }));
       }
     },
   },

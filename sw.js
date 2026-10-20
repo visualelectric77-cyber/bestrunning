@@ -2,8 +2,8 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.5.3';
-const BUILD = 'e5e53ae11d';
+const VERSION = '1.5.4';
+const BUILD = 'a81bd62778';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
@@ -39,6 +39,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/audio/phrases.js',
   './js/audio/speech.js',
   './js/audio/voice-pack.js',
+  './js/core/diag.js',
   './js/core/haptics.js',
   './js/core/router.js',
   './js/core/store.js',
@@ -206,9 +207,21 @@ async function warmVoicePacks() {
   }
 }
 
+// Clips de voz corregidos (mp3 cache-first): al activarse una versión nueva se borra la copia guardada para que se
+// baje la buena. eva/set_1: llevaba un «¡Ah!» delante («¡Ah, pon la cinta a…!» sonaba «a, a…»).
+const STALE_AUDIO = ['/audio/packs/eva/set_1.mp3'];
+
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
+      try {
+        const ac = await caches.open(AUDIO_CACHE);
+        for (const r of await ac.keys()) {
+          if (STALE_AUDIO.some((p) => new URL(r.url).pathname.endsWith(p))) await ac.delete(r);
+        }
+      } catch {
+        /* sin caché de audio */
+      }
       const keys = await caches.keys();
       await Promise.all(
         keys

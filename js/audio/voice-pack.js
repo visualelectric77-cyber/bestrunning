@@ -207,7 +207,11 @@ export function composeCue(kind, vars = {}, { pick = (l) => l[0], available = nu
       break;
     }
     case 'now': {
-      const z = choose(ZONE_GROUP[vars.zone] || 'now_run');
+      let g = ZONE_GROUP[vars.zone] || 'now_run';
+      // «Trote. Recupera.» (now_jog_1) solo tras un tramo duro. Al empezar la clase (tras el calentamiento) o tras
+      // otro tramo suave, si el pack no trae «Ahora, trote suave.» (now_jog_2), «Pon la cinta a…» y la velocidad.
+      if (g === 'now_jog' && vars.fromHard === false && available && available.has('now_jog_1') && !available.has('now_jog_2')) g = 'set';
+      const z = choose(g);
       const s = speedClip(vars.speed);
       if (!z || !s) return null;
       const d = vars.sec ? durationClip(vars.sec) : null;
