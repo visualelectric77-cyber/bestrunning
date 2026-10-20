@@ -49,6 +49,10 @@ const GROUPS = {
   sprintpre: ['¡Prepárate para el sprint! A…'],
   recoverpre: ['Recuperación a la vista: bajamos a…'],
   set: ['Pon la cinta a…'],
+  // Modo pulso (js/player/hr-coach.js): por qué cambia la velocidad, seguido de la velocidad nueva
+  hrhigh: ['Vas alto de pulso. Bajamos a…', 'Tu corazón va acelerado. Bajamos a…'],
+  hrlow: ['Vas sobrado. Sube a…', 'Tienes margen. Subimos a…'],
+  hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
   // Arranque de cada tramo, seguido de la velocidad (y la duración si encaja).
   now_sprint: ['¡Ahora! ¡Sprint!', '¡Vamos, a tope!'],
   now_fast: ['¡Ahora! Correr rápido.', '¡Vamos, ritmo rápido!'],
@@ -104,7 +108,7 @@ export const MUSIC_CUES = {
 };
 
 /** Portadoras: conservar un poco de cola al recortar para que la pausa antes del número suene natural. */
-const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set']);
+const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set', 'hrhigh', 'hrlow']);
 
 function buildScript() {
   const out = [];

@@ -234,6 +234,11 @@
   "up_1",
   "up_2",
   "up_3",
-  "watch_1"
+  "watch_1",
+  "hrhigh_1",
+  "hrhigh_2",
+  "hrlow_1",
+  "hrlow_2",
+  "hralarm_1"
  ]
 }

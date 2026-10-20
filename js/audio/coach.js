@@ -1336,6 +1336,15 @@ export function createCoach(workout, settings = {}) {
         const s = speedOf(v.speed ?? seg?.speed);
         return go(packItem('resume', r ? [...r, ...(s ? [s] : [])] : null, 3, { preempt: true }));
       }
+      case 'hrAdjust': {
+        // Modo pulso: «Vas alto de pulso. Bajamos a…» / «Vas sobrado. Sube a…» + la velocidad nueva. Sin la frase
+        // grabada, solo la velocidad (como «adjust»).
+        const g = v.alarm ? 'hralarm' : toNumber(v.dir) < 0 ? 'hrhigh' : 'hrlow';
+        const ids = [1, 2].map((i) => `${g}_${i}`).filter((id) => avail.has(id));
+        const c = ids.length ? ids[Math.floor(Math.random() * ids.length)] : null;
+        const s = speedOf(v.speed);
+        return go(packItem('adjust', c ? [c, ...(s ? [s] : [])] : (s ? [s] : null), 2, { replace: true }));
+      }
       case 'adjust': {
         // "Once coma seis." confirma el ajuste
         const s = speedOf(v.speed);
@@ -1392,6 +1401,7 @@ export function createCoach(workout, settings = {}) {
         return go(line('pause', {}, 3, { preempt: true }));
       case 'resume':
         return go(line('resume', { speed: v.speed ?? seg?.speed ?? '' }, 3, { preempt: true }));
+      case 'hrAdjust': // voz del sistema: solo la velocidad, como «adjust»
       case 'adjust':
         if (!Number.isFinite(toNumber(v.speed))) return Promise.resolve();
         return go(line('adjust', { speed: v.speed }, 2, { require: ['speed'], replace: true }));

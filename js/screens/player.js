@@ -2609,7 +2609,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     });
     if (!r) return;
     let applied = 0;
-    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir)) applied++;
+    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm' })) applied++;
     if (!applied) return;
     const delta = fmt.speed(applied / 10);
     diagMark('pulso.ajuste', { dir: r.dir, kmh: applied / 10, ppm: r.avg });
@@ -2618,7 +2618,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       : `Vas sobrado (${r.avg} ppm): subimos ${delta} km/h`, { icon: 'heart', duration: 4200 });
   }
 
-  function doAdjust(dir) {
+  function doAdjust(dir, sayKind = 'adjust', sayVars = {}) {
     if (!engine || countingDown) return false;
     const s0 = engine.getState();
     if (s0.inTestStage || (s0.status !== 'running' && s0.status !== 'paused')) return false;
@@ -2644,7 +2644,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         coachCall('seek', s.totalElapsed);
         lastCoachPos = s.totalElapsed;
       }
-      coachCall('say', 'adjust', { speed: fmt.speed(s.currentSpeed) });
+      coachCall('say', sayKind, { ...sayVars, speed: fmt.speed(s.currentSpeed) });
       persist();
     }, 1300);
     return true;
