@@ -1,6 +1,7 @@
-// BestRunning · tarjeta para compartir (canvas 1080×1350) y logo dibujado con trazos.
+// RITMUP · tarjeta para compartir (canvas 1080×1350) y logotipo «Curva» dibujado con Path2D.
 import { fmt } from '../core/utils.js';
 import { ZONES } from '../training/levels.js';
+import { LOGO } from '../ui/intro-logo.js';
 
 const W = 1080;
 const H = 1350;
@@ -42,85 +43,105 @@ function setSpacing(ctx, px) {
   try { if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`; } catch { /* sin soporte */ }
 }
 
+// Geometría del logotipo «Curva» (generada por docs/brand-ritmup/curva/build.mjs). Path2D se crea al usarla:
+// en Node (pruebas) no existe y nada de esto se dibuja.
+let paths = null;
+function curvaPaths() {
+  if (paths) return paths;
+  if (typeof Path2D === 'undefined') return null;
+  try {
+    paths = {
+      white: new Path2D(LOGO.r.white),
+      ember: new Path2D(LOGO.r.ember),
+      letters: LOGO.letters.map((l) => ({ x: l.x, p: new Path2D(l.d) })),
+    };
+  } catch {
+    paths = null;
+  }
+  return paths;
+}
+
+/** La «r» de pista (68 × 100 unidades): calles blancas y la interior en ember. */
+function drawR(ctx, P, { color = '#ffffff', glow = 0 } = {}) {
+  if (glow > 0) {
+    // Halo ember suave bajo la calle interior (como el feGaussianBlur del icono)
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,90,31,0.55)';
+    ctx.shadowBlur = glow;
+    ctx.fillStyle = LOGO.ember;
+    ctx.fill(P.ember);
+    ctx.restore();
+  }
+  ctx.fillStyle = color;
+  ctx.fill(P.white, 'evenodd');
+  ctx.fillStyle = LOGO.ember;
+  ctx.fill(P.ember);
+}
+
 /**
- * Símbolo de la app, idéntico a assets/icons/icon.svg (rejilla de 1024): azulejo ember, chevron con tres líneas de
- * velocidad y la cinta debajo. Se dibuja escalado sobre (x, y) con lado `size`.
+ * Logotipo «ritmup» con su caja (viewBox de LOGO) arriba a la izquierda en (x, y) y `width` de ancho.
+ * Devuelve el alto dibujado (0 si no hay Path2D).
  */
-export function drawLogoMark(ctx, x, y, size) {
+export function drawWordmark(ctx, x, y, width, { color = '#ffffff' } = {}) {
+  const P = curvaPaths();
+  if (!P) return 0;
+  const [vx, vy, vw, vh] = LOGO.viewBox;
+  const k = width / vw;
+  ctx.save();
+  ctx.translate(x - vx * k, y - vy * k);
+  ctx.scale(k, k);
+  drawR(ctx, P, { color });
+  ctx.fillStyle = color;
+  for (const l of P.letters) {
+    ctx.save();
+    ctx.translate(l.x, 0);
+    ctx.fill(l.p, 'evenodd');
+    ctx.restore();
+  }
+  ctx.restore();
+  return vh * k;
+}
+
+/**
+ * Icono de la app, como assets/icons/icon.svg (rejilla de 1024): azulejo negro con un degradado muy leve y la «r»
+ * de pista centrada. `rounded` = esquinas de icono de iOS (false: a sangre, p. ej. para la carátula de Media Session).
+ */
+export function drawLogoMark(ctx, x, y, size, { rounded = true } = {}) {
   const k = size / 1024;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(k, k);
-  // Esquinas circulares (rx 229 del SVG) con arcTo, no con curvas cuadráticas
-  const tile = () => {
-    ctx.beginPath();
+  ctx.beginPath();
+  if (rounded) {
     ctx.moveTo(229, 0);
     ctx.arcTo(1024, 0, 1024, 1024, 229);
     ctx.arcTo(1024, 1024, 0, 1024, 229);
     ctx.arcTo(0, 1024, 0, 0, 229);
     ctx.arcTo(0, 0, 1024, 0, 229);
     ctx.closePath();
-  };
-  const g = ctx.createLinearGradient(0, 0, 1024, 1024);
-  g.addColorStop(0, '#ff9500');
-  g.addColorStop(0.48, '#ff5a1f');
-  g.addColorStop(1, '#ff2d55');
-  tile();
+  } else ctx.rect(0, 0, 1024, 1024);
+  const g = ctx.createLinearGradient(0, 0, 0, 1024);
+  g.addColorStop(0, '#141416');
+  g.addColorStop(1, '#000000');
   ctx.fillStyle = g;
   ctx.fill();
-  // Brillo arriba a la izquierda y sombra granate abajo a la derecha (como los radialGradient del SVG)
-  const hl = ctx.createRadialGradient(225, 82, 0, 225, 82, 870);
-  hl.addColorStop(0, 'rgba(255,255,255,0.26)');
-  hl.addColorStop(1, 'rgba(255,255,255,0)');
-  tile();
-  ctx.fillStyle = hl;
-  ctx.fill();
-  const dk = ctx.createRadialGradient(1024, 1075, 0, 1024, 1075, 922);
-  dk.addColorStop(0, 'rgba(176,12,52,0.45)');
-  dk.addColorStop(1, 'rgba(176,12,52,0)');
-  tile();
-  ctx.fillStyle = dk;
-  ctx.fill();
-  // Trazos blancos con la sombra suave del icono (los parámetros de sombra no se escalan con la matriz)
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.shadowColor = 'rgba(122,8,28,0.42)';
-  ctx.shadowBlur = 44 * k;
-  ctx.shadowOffsetY = 18 * k;
-  const line = (x1, yy, x2, w, style) => {
-    ctx.beginPath();
-    ctx.moveTo(x1, yy);
-    ctx.lineTo(x2, yy);
-    ctx.lineWidth = w;
-    ctx.strokeStyle = style;
-    ctx.stroke();
-  };
-  line(316, 356, 472, 56, 'rgba(255,255,255,0.6)');
-  line(234, 456, 582, 64, '#ffffff');
-  line(316, 556, 472, 56, 'rgba(255,255,255,0.6)');
-  const belt = ctx.createLinearGradient(241, 0, 859, 0);
-  belt.addColorStop(0, 'rgba(255,255,255,0.12)');
-  belt.addColorStop(1, 'rgba(255,255,255,0.62)');
-  line(260, 802, 840, 38, belt);
-  ctx.beginPath();
-  ctx.moveTo(534, 246);
-  ctx.lineTo(756, 456);
-  ctx.lineTo(534, 666);
-  ctx.lineWidth = 124;
-  ctx.strokeStyle = '#ffffff';
-  ctx.stroke();
+  const P = curvaPaths();
+  if (P) {
+    ctx.translate(318.14, 222.17);
+    ctx.scale(5.9392, 5.9392);
+    // shadowBlur no se escala con la matriz: el halo se da en píxeles reales
+    drawR(ctx, P, { glow: 30 * k });
+  }
   ctx.restore();
 }
 
-/** Logo como data URL (para Media Session). */
+/** Logo como data URL (para Media Session): el icono a sangre, el sistema pone sus propias esquinas. */
 export function logoDataUrl(size = 512) {
   try {
     const c = makeCanvas(size, size);
     if (!c) return '';
     const ctx = c.getContext('2d');
-    ctx.fillStyle = '#08080a';
-    ctx.fillRect(0, 0, size, size);
-    drawLogoMark(ctx, size * 0.1, size * 0.1, size * 0.8);
+    drawLogoMark(ctx, 0, 0, size, { rounded: false });
     return c.toDataURL('image/png');
   } catch {
     return '';
@@ -253,23 +274,17 @@ export async function renderShareCard(session, { workout = null, name = '' } = {
     ctx.fillRect(0, 0, W, PH);
   }
 
-  // Cabecera: símbolo + «Best» blanco y «Running» ember sólido · fecha
-  drawLogoMark(ctx, PAD, PAD - 10, 76);
+  // Cabecera: el logotipo «Curva» en blanco (la calle interior de la r, en ember) · fecha, en la misma línea base
+  const yBase = PAD + 40;
+  const markW = 196;
+  const [, vy, vw] = LOGO.viewBox;
+  drawWordmark(ctx, PAD, yBase - (100 - vy) * (markW / vw), markW);
   ctx.textBaseline = 'alphabetic';
-  ctx.textAlign = 'left';
-  ctx.font = `700 44px ${SANS}`;
-  setSpacing(ctx, -0.8);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('Best', PAD + 98, PAD + 42);
-  const bw0 = ctx.measureText('Best').width;
-  ctx.fillStyle = '#FF5A1F';
-  ctx.fillText('Running', PAD + 98 + bw0, PAD + 42);
-  setSpacing(ctx, 0);
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(255,255,255,0.82)';
   ctx.font = `500 30px ${SANS}`;
   const dayLabel = s.dayKey ? fmt.dateShort(s.dayKey) : '';
-  ctx.fillText(dayLabel, W - PAD, PAD + 40);
+  ctx.fillText(dayLabel, W - PAD, yBase);
 
   // Categoría · duración (gris, mayúsculas finas) y título
   const [catName] = CATS[s.category] || ['Entrenamiento'];
@@ -358,12 +373,12 @@ function traceToSegments(trace) {
 }
 
 export function shareFileName(session) {
-  return `bestrunning-${session?.dayKey || 'sesion'}.png`;
+  return `ritmup-${session?.dayKey || 'sesion'}.png`;
 }
 
 export function shareText(session) {
   const s = session || {};
-  return `${fmt.km(s.distanceKm || 0)} km en ${fmt.clock(s.elapsedSec || 0)} con BestRunning`;
+  return `${fmt.km(s.distanceKm || 0)} km en ${fmt.clock(s.elapsedSec || 0)} con RITMUP`;
 }
 
 export function downloadBlob(blob, filename) {
@@ -400,7 +415,7 @@ export async function shareSession(session, { workout = null, name = '', blob = 
   try { file = new File([b], filename, { type: 'image/png' }); } catch { file = null; }
   if (file && navigator.canShare?.({ files: [file] }) && navigator.share) {
     try {
-      await navigator.share({ files: [file], title: 'BestRunning', text: shareText(session) });
+      await navigator.share({ files: [file], title: 'RITMUP', text: shareText(session) });
       return 'shared';
     } catch (err) {
       if (err?.name === 'AbortError') return 'cancelled';

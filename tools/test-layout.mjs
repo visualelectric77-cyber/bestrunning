@@ -80,15 +80,20 @@ for (const sel of ['.td {', '.pn {', '.wk {', '.lb-carousel {', '.ob-step,']) {
 }
 ok(WIDE.test(more) && more.includes('.pg-body:not(.hs-body) {'), 'screens-more.css: Progreso a dos columnas');
 ok(/\.screen:has\(> \.st-body\)\s*\{\s*--content-max:\s*640px/.test(more), 'screens-more.css: Ajustes centrado');
-ok(/@media \(prefers-reduced-motion: reduce\)[\s\S]*\.ob-mk/.test(main), 'screens-main.css: el logo respeta reduced-motion');
+ok(/@media \(prefers-reduced-motion: reduce\)\s*\{[^}]*\.ob-brand,/.test(main), 'screens-main.css: el logo respeta reduced-motion');
 
-// 4 · Onboarding: mismo símbolo que el icono y botones con nombre accesible
+// 4 · Onboarding: el logotipo «Curva» de RITMUP (el de docs/brand-ritmup/curva) y botones con nombre accesible
 const ob = read('js/screens/onboarding.js');
 const icon = read('assets/icons/icon.svg');
-ok(icon.includes('534,246 756,456 534,666') && ob.includes('M534 246L756 456L534 666'), 'onboarding: el chevron del logo coincide con icon.svg');
-for (const [x1, x2, y] of [[316, 472, 356], [234, 582, 456], [316, 472, 556]]) {
-  ok(icon.includes(`x1="${x1}" y1="${y}" x2="${x2}"`) && ob.includes(`M${x2} ${y}H${x1}`), `onboarding: línea de velocidad y=${y} coincide con icon.svg`);
-}
+const curvaIcon = read('docs/brand-ritmup/curva/icon-1024.svg');
+const curvaMark = read('docs/brand-ritmup/curva/mark.svg');
+ok(icon.trim() === curvaIcon.trim(), 'icon.svg es el icono «Curva» de docs/brand-ritmup/curva');
+ok(/wordmarkSvg\(\{ cls: 'ob-brand__mark' \}\)/.test(ob) && /from '\.\.\/ui\/wordmark\.js'/.test(ob), 'onboarding: la bienvenida usa el logotipo «Curva»');
+const wm = read('js/ui/wordmark.js');
+ok(/from '\.\/intro-logo\.js'/.test(wm) && /LOGO\.r\.white/.test(wm) && /LOGO\.r\.ember/.test(wm) && /LOGO\.letters/.test(wm), 'wordmark.js: monta el logotipo desde intro-logo.js');
+const rWhite = (read('js/ui/intro-logo.js').match(/white: '([^']+)'/) || [])[1];
+ok(!!rWhite && curvaMark.includes(rWhite), 'intro-logo.js y mark.svg comparten la r');
+ok(!/Best<\/span>|ob-brand__grad|ob-logo__mark/.test(ob), 'onboarding: ya no queda el logo de BestRunning');
 ok(!/class="ob-bar/.test(ob), 'onboarding: ya no quedan las barras del logo antiguo');
 for (const m of ob.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
   const attrs = m[1];

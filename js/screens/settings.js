@@ -9,6 +9,7 @@ import {
 import { CATEGORIES } from '../training/templates.js';
 import { planWeek, cycleInfo, CYCLE_WEEKS } from '../training/planner.js';
 import { APP_VERSION } from '../version.js';
+import { wordmarkSvg } from '../ui/wordmark.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
 import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
 import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
@@ -267,7 +268,7 @@ function rowSummary(key, s) {
     case 'music': {
       const m = s.music || {};
       if (m.mode === 'own') return 'Mi música';
-      return m.enabled === false ? 'Apagada' : 'DJ BestRunning';
+      return m.enabled === false ? 'Apagada' : 'DJ RITMUP';
     }
     case 'watch':
       if (isNative()) return 'App del reloj';
@@ -309,7 +310,7 @@ function rootHtml(s) {
       </div>
     </section>
     ${groups}
-    <p class="st-foot">BestRunning ${esc(APP_VERSION)}</p>`;
+    <p class="st-foot">RITMUP ${esc(APP_VERSION)}</p>`;
 }
 
 /* ───────────── PERFIL ───────────── */
@@ -673,6 +674,35 @@ function sceneRow(t, on) {
 const demoLabel = (v) => (v.quality === 'off' ? 'Activa las animaciones para verla' : `Ver demo de ${sceneOf(demoWorld(v.theme)).name}`);
 const demoBg = (id) => `background-image:radial-gradient(70% 62% at 50% 52%,rgba(5,6,10,.78),rgba(5,6,10,.3)),url('./assets/scenes/${encodeURIComponent(id)}-poster.jpg')`;
 
+/* Animación al abrir (contrato compartido con ../ui/intro.js): localStorage 'ritmup.intro' = 'always' (por defecto,
+   también si falta) | 'launch' | 'off'. Aquí solo se lee y se escribe; la intro decide cuándo sonar. */
+const INTRO_KEY = 'ritmup.intro';
+const INTRO_OPTS = [
+  { value: 'always', title: 'Siempre', sub: 'Al abrir la app y al volver a ella tras un rato' },
+  { value: 'launch', title: 'Solo al arrancar', sub: 'Cuando la app se abre desde cero' },
+  { value: 'off', title: 'Nunca', sub: 'Entras directo, sin animación' },
+];
+const introPref = () => safe(() => {
+  const v = localStorage.getItem(INTRO_KEY);
+  return INTRO_OPTS.some((o) => o.value === v) ? v : 'always';
+}, 'always');
+
+function introHtml() {
+  const cur = introPref();
+  const rows = INTRO_OPTS.map((o) => {
+    const on = o.value === cur;
+    return `<div class="list__row st-row st-voice${on ? ' is-on' : ''}" data-st="intro" data-intro="${o.value}" role="radio" aria-checked="${on}" tabindex="0">
+      ${label(esc(o.title), esc(o.sub))}
+      <span class="st-voice__check">${icon('check', 14)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="st-group">
+      <div class="st-group__title">Animación al abrir</div>
+      <div class="list" role="radiogroup" aria-label="Animación al abrir">${rows}</div>
+      <p class="st-note">El logotipo de RITMUP dibujándose: dura unos segundos y un toque en la pantalla la salta.</p>
+    </div>`;
+}
+
 function displayHtml(s) {
   ensureSettingsCss();
   const v = visualsOf(s);
@@ -700,7 +730,8 @@ function displayHtml(s) {
         </div>
       </div>
       <button type="button" class="btn btn--secondary btn--block pl-demo__btn" data-st="demo3d"${canDemo ? '' : ' disabled'}>${icon('play', 18)}<span>${esc(demoLabel(v))}</span></button>
-    </section>`;
+    </section>
+    ${introHtml()}`;
 }
 
 /** Demo de 10 s en la propia página: la escena real con una Pirámide, entrando en el primer sprint. */
@@ -1104,15 +1135,15 @@ function nativeWatchHtml() {
   const w = ns?.watch;
   let c;
   if (!ns) {
-    c = { ok: false, ic: 'watch', title: 'Comprobando tu Apple Watch…', text: 'El iPhone está mirando si tienes un reloj emparejado con BestRunning.' };
+    c = { ok: false, ic: 'watch', title: 'Comprobando tu Apple Watch…', text: 'El iPhone está mirando si tienes un reloj emparejado con RITMUP.' };
   } else if (w?.paired && w?.installed && healthMissingOf(ns)) {
     c = { ok: false, ic: 'heart', title: 'Apple Watch conectado · falta el permiso del pulso', text: 'Sin permiso de Salud, el reloj no puede leer tu pulso en directo ni guardar la clase en Salud.' };
   } else if (w?.paired && w?.installed) {
     c = { ok: true, ic: 'check', title: 'Apple Watch conectado · pulso en directo', text: 'El reloj se abre solo al empezar la clase: vibra antes de cada cambio, te pasa el pulso en directo y guarda el entreno en Salud.' };
   } else if (w?.paired) {
-    c = { ok: false, ic: 'download', title: 'Instala BestRunning en el reloj: app Watch › Apps disponibles', text: 'Abre la app Watch del iPhone, baja hasta «Apps disponibles» y toca «Instalar» junto a BestRunning.' };
+    c = { ok: false, ic: 'download', title: 'Instala RITMUP en el reloj: app Watch › Apps disponibles', text: 'Abre la app Watch del iPhone, baja hasta «Apps disponibles» y toca «Instalar» junto a RITMUP.' };
   } else {
-    c = { ok: false, ic: 'watch', title: 'No hay ningún Apple Watch emparejado', text: 'Puedes entrenar igual. Cuando emparejes uno, instala en él BestRunning para tener el pulso en directo.' };
+    c = { ok: false, ic: 'watch', title: 'No hay ningún Apple Watch emparejado', text: 'Puedes entrenar igual. Cuando emparejes uno, instala en él RITMUP para tener el pulso en directo.' };
   }
   // 'prompt': aún sale la hoja de Salud (el botón la enseña) · 'denied': ya se dijo que no a algo (el botón abre Ajustes)
   const miss = ns ? healthMissingOf(ns) : null;
@@ -1124,7 +1155,7 @@ function nativeWatchHtml() {
     ${miss ? `<div class="st-group">
       <button type="button" class="btn btn--primary btn--lg btn--block" data-st="health-auth">${icon('heart', 18)}<span>${miss === 'denied' ? 'Abrir Ajustes' : 'Permitir acceso a Salud'}</span></button>
       <p class="st-note">${miss === 'denied'
-        ? 'Salud no deja a BestRunning leer tu pulso o guardar tus entrenos. En Ajustes: Apps › Salud › Acceso a datos y dispositivos › BestRunning › Activar todo.'
+        ? 'Salud no deja a RITMUP leer tu pulso o guardar tus entrenos. En Ajustes: Apps › Salud › Acceso a datos y dispositivos › RITMUP › Activar todo.'
         : 'Para ver tu pulso en directo en el reloj y guardar cada clase en Salud como carrera en interior, con pulso, distancia y calorías. Toca «Activar todo».'}</p>
     </div>` : ''}`;
 }
@@ -1149,7 +1180,7 @@ function watchHtml(s) {
       <section class="card st-info">
         <div>
           <b class="st-info__title">Pulso en directo, sin hacer nada</b>
-          <p>BestRunning en tu Apple Watch se conecta solo al empezar la clase y manda tu pulso al iPhone en directo: lo ves en la clase, por zonas y sobre tu perfil de velocidad en el resumen. Al terminar, el entreno se guarda en Salud.</p>
+          <p>RITMUP en tu Apple Watch se conecta solo al empezar la clase y manda tu pulso al iPhone en directo: lo ves en la clase, por zonas y sobre tu perfil de velocidad en el resumen. Al terminar, el entreno se guarda en Salud.</p>
         </div>
       </section>`;
   }
@@ -1176,11 +1207,11 @@ function watchShortcutHtml(s) {
       <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 14)}</i>
       <div class="mu-hrflow__step"><span>${icon('zap', 20)}</span><b>Atajo</b> <small>Lee Salud y copia</small></div>
       <i class="mu-hrflow__arrow" aria-hidden="true">${icon('chevron-right', 14)}</i>
-      <div class="mu-hrflow__step"><span>${icon('pulse', 20)}</span><b>BestRunning</b> <small>Pegar en el resumen</small></div>
+      <div class="mu-hrflow__step"><span>${icon('pulse', 20)}</span><b>RITMUP</b> <small>Pegar en el resumen</small></div>
     </section>
     ${group('Atajo de pulso', `
       <label class="list__row st-row">${label('Nombre del Atajo', 'Debe coincidir letra a letra')}<input id="st-hrshortcut" class="st-input" type="text" value="${esc(name || HR_SHORTCUT)}" placeholder="${esc(HR_SHORTCUT)}" maxlength="40" autocapitalize="words" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
-    `, 'Tras cada entreno, en el resumen pulsa «Importar pulso del Apple Watch»: se abre el Atajo, copia tus datos y, al volver a BestRunning, pulsas Pegar.')}
+    `, 'Tras cada entreno, en el resumen pulsa «Importar pulso del Apple Watch»: se abre el Atajo, copia tus datos y, al volver a RITMUP, pulsas Pegar.')}
     <div class="st-group">
       <div class="st-group__title">Crea el Atajo «<span data-shortcut-name>${shown}</span>» (3 minutos)</div>
       <div class="card st-guide" data-guide>${guideHtml(name || HR_SHORTCUT)}</div>
@@ -1201,7 +1232,7 @@ function installHtml() {
   const status = ok
     ? `<section class="card st-install is-ok">
         <span class="st-install__icon">${icon('check-circle', 40)}</span>
-        <b class="st-install__title">¡BestRunning ya está instalada!</b>
+        <b class="st-install__title">¡RITMUP ya está instalada!</b>
         <p>La estás usando como app: pantalla completa, sin barras de Safari y funcionando sin conexión.</p>
       </section>`
     : `<section class="card st-install">
@@ -1223,7 +1254,7 @@ function installHtml() {
         `Toca el botón ${icon('share', 15)} <b>Compartir</b> (en iOS 26 está dentro del menú <b>⋯</b> de la barra).`,
         `Elige ${icon('plus', 15)} <b>Añadir a pantalla de inicio</b>.`,
         'Deja activado <b>Abrir como app web</b> y toca <b>Añadir</b>.',
-        'Abre BestRunning desde su icono naranja. ¡A correr!',
+        'Abre RITMUP desde su icono en la pantalla de inicio. ¡A correr!',
       ])}</div>
     </div>
     <div class="st-group">
@@ -1269,11 +1300,11 @@ async function exportBackup() {
     toast('No he podido preparar la copia', { kind: 'error' });
     return;
   }
-  const name = `bestrunning-copia-${todayKey()}.json`;
+  const name = `ritmup-copia-${todayKey()}.json`;
   const file = safe(() => new File([json], name, { type: 'application/json' }), null);
   if (file && navigator.canShare && safe(() => navigator.canShare({ files: [file] }), false)) {
     try {
-      await navigator.share({ files: [file], title: 'Copia de BestRunning' });
+      await navigator.share({ files: [file], title: 'Copia de RITMUP' });
       haptic('success');
       toast('Copia exportada', { icon: 'check', kind: 'success' });
       return;
@@ -1298,6 +1329,8 @@ async function exportBackup() {
   }
 }
 
+const BACKUP_APPS = ['RITMUP', 'BestRunning'];
+
 /** Restaura una copia desde un <input type="file"> (también lo usa la bienvenida de la app nativa). → true si se restauró. */
 export async function importBackup(input) {
   const file = input?.files?.[0];
@@ -1317,11 +1350,13 @@ export async function importBackup(input) {
   } catch {
     j = null;
   }
+  // Copias de antes del cambio de nombre (app: 'BestRunning') y las nuevas (app: 'RITMUP'); las muy antiguas no lo llevan
   const ok = !!j && typeof j === 'object' && !Array.isArray(j) && typeof j.version === 'number'
+    && (j.app == null || BACKUP_APPS.includes(j.app))
     && (j.history == null || Array.isArray(j.history));
   if (!ok) {
     haptic('error');
-    toast('Ese archivo no es una copia de BestRunning', { kind: 'error' });
+    toast('Ese archivo no es una copia de RITMUP', { kind: 'error' });
     return false;
   }
   const n = Array.isArray(j.history) ? j.history.length : 0;
@@ -1375,8 +1410,7 @@ async function resetAll() {
 function aboutHtml(s) {
   const name = String(s.profile?.name || '').trim();
   return `<section class="st-about">
-      <div class="st-about__logo" aria-hidden="true"></div>
-      <h2 class="st-about__name">BestRunning</h2>
+      <h2 class="st-about__name">${wordmarkSvg({ cls: 'st-about__mark' })}</h2>
       <p class="st-about__tag">Tu entrenador personal de cinta</p>
       <span class="st-about__ver">Versión ${esc(APP_VERSION)}</span>
     </section>
@@ -1400,7 +1434,7 @@ function aboutHtml(s) {
     </div>
     <section class="card st-warn">
       <span class="st-warn__icon">${icon('info', 18)}</span>
-      <p>BestRunning no es un dispositivo médico. Si notas dolor en el pecho, mareo o una falta de aire fuera de lo normal, para la cinta y consulta a tu médico.</p>
+      <p>RITMUP no es un dispositivo médico. Si notas dolor en el pecho, mareo o una falta de aire fuera de lo normal, para la cinta y consulta a tu médico.</p>
     </section>
     <p class="st-foot">Hecho con cariño y muchos kilómetros</p>`;
 }
@@ -1700,7 +1734,7 @@ function musicHtml(s) {
   const vol = Math.round(clamp(numOr(m.volume, 0.8), 0, 1) * 100);
   return `<section class="card mu-hero${own ? ' is-own' : ''}">
       <div class="mu-hero__eq" aria-hidden="true">${'<i></i>'.repeat(9)}</div>
-      <div class="eyebrow">DJ BestRunning</div>
+      <div class="eyebrow">DJ RITMUP</div>
       <h2 class="mu-hero__title">Cada tramo, su música</h2>
       <p class="mu-hero__text">Como en una clase de ciclo indoor: el ritmo sube con la intensidad y en cada cambio de tramo mezclamos a compás, sin cortes ni silencios.</p>
       <div class="mu-hero__stats" data-mu-stats>${heroStatsHtml(s)}</div>
@@ -1708,7 +1742,7 @@ function musicHtml(s) {
     <div class="st-group">
       <div class="st-group__title">Qué suena mientras corres</div>
       <div class="card mu-mode">
-        <div class="st-seg">${segmented({ name: 'mu-mode', options: [{ value: 'app', label: 'Música BestRunning' }, { value: 'own', label: 'Mi música' }], value: own ? 'own' : 'app' })}</div>
+        <div class="st-seg">${segmented({ name: 'mu-mode', options: [{ value: 'app', label: 'Música RITMUP' }, { value: 'own', label: 'Mi música' }], value: own ? 'own' : 'app' })}</div>
         <p class="mu-mode__desc" data-mu-mode-desc>${MODE_DESC[own ? 'own' : 'app']}</p>
       </div>
     </div>
@@ -2127,7 +2161,7 @@ function openTrackSheet(id) {
 async function removeUserTrack(id, title) {
   const yes = await confirmDialog({
     title: '¿Eliminar la canción?',
-    message: `«${title}» se borrará de BestRunning (el archivo original sigue en Archivos).`,
+    message: `«${title}» se borrará de RITMUP (el archivo original sigue en Archivos).`,
     confirmText: 'Eliminar',
     cancelText: 'Cancelar',
     destructive: true,
@@ -2221,7 +2255,7 @@ function offlineHtml() {
     <button type="button" class="btn ${full ? 'btn--secondary' : 'btn--primary'} btn--block mu-offline__btn" data-st="mu-offline"${job ? ' disabled' : ''}>
       ${icon(full ? 'refresh' : 'download', 18)}<span>${job ? 'Descargando…' : full ? 'Comprobar de nuevo' : 'Descargar música para usar sin conexión'}</span>
     </button>
-    ${offline.usage ? `<p class="st-note mu-offline__usage">BestRunning ocupa ${fmtMB(offline.usage)} en este iPhone (música, voz y datos).</p>` : ''}`;
+    ${offline.usage ? `<p class="st-note mu-offline__usage">RITMUP ocupa ${fmtMB(offline.usage)} en este iPhone (música, voz y datos).</p>` : ''}`;
 }
 
 async function privateCacheAll(onProgress) {
@@ -2653,7 +2687,17 @@ const PAGES = {
     },
     action(name, el, ctx) {
       if (name === 'demo3d') fire(() => runDemo3d(ctx, el));
-      else if (name === 'scene') {
+      else if (name === 'intro') {
+        const v = INTRO_OPTS.some((o) => o.value === el.dataset.intro) ? el.dataset.intro : 'always';
+        ctx.body.querySelectorAll('[data-intro]').forEach((r) => {
+          const on = r.dataset.intro === v;
+          r.classList.toggle('is-on', on);
+          r.setAttribute('aria-checked', String(on));
+        });
+        if (v === introPref()) return;
+        haptic('selection');
+        safe(() => localStorage.setItem(INTRO_KEY, v));
+      } else if (name === 'scene') {
         const id = el.dataset.scene === AUTO_THEME ? AUTO_THEME : sceneOf(el.dataset.scene).id;
         const before = visualsOf(getState()).theme;
         ctx.body.querySelectorAll('[data-scene]').forEach((r) => {

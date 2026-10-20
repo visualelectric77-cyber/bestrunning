@@ -13,6 +13,7 @@ import * as audioEngine from '../audio/audio-engine.js';
 import { PACK_ID, composeCue } from '../audio/voice-pack.js';
 import { todayKey, mondayOf, fmt, esc, clamp, round1 } from '../core/utils.js';
 import { isNative, nativeStatus, requestNativeBackup } from '../integrations/native-bridge.js';
+import { wordmarkSvg } from '../ui/wordmark.js';
 
 const STEPS = ['welcome', 'about', 'speeds', 'week', 'voice'];
 const EVA_KEY = 'pack:eva'; // fila de la voz grabada en la lista de voces
@@ -60,49 +61,7 @@ function hm(min) {
 
 /* ───────────── Logo y fondo ───────────── */
 
-// Mismo símbolo que assets/icons/icon.svg (chevron + líneas de velocidad + cinta sobre degradado ember).
-// Los trazos de velocidad van dibujados de derecha a izquierda para que «salgan» del chevron al animarse.
-const LOGO = `<div class="ob-logo" aria-hidden="true">
-  <svg class="ob-logo__mark" viewBox="0 0 1024 1024" width="128" height="128">
-    <defs>
-      <linearGradient id="obEmber" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#FF9500"/><stop offset=".48" stop-color="#FF5A1F"/><stop offset="1" stop-color="#FF2D55"/>
-      </linearGradient>
-      <radialGradient id="obHl" cx=".22" cy=".08" r=".85">
-        <stop offset="0" stop-color="#fff" stop-opacity=".26"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
-      </radialGradient>
-      <radialGradient id="obDk" cx="1" cy="1.05" r=".9">
-        <stop offset="0" stop-color="#B00C34" stop-opacity=".45"/><stop offset="1" stop-color="#B00C34" stop-opacity="0"/>
-      </radialGradient>
-      <linearGradient id="obBelt" gradientUnits="userSpaceOnUse" x1="241" y1="0" x2="859" y2="0">
-        <stop offset="0" stop-color="#fff" stop-opacity=".12"/><stop offset="1" stop-color="#fff" stop-opacity=".62"/>
-      </linearGradient>
-      <linearGradient id="obShine" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".42"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
-      </linearGradient>
-      <filter id="obSh" x="-20%" y="-20%" width="140%" height="140%">
-        <feGaussianBlur in="SourceAlpha" stdDeviation="22"/><feOffset dy="18" result="b"/>
-        <feFlood flood-color="#7A081C" flood-opacity=".42"/><feComposite in2="b" operator="in"/>
-        <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
-      <clipPath id="obClip"><rect width="1024" height="1024" rx="229"/></clipPath>
-    </defs>
-    <rect width="1024" height="1024" rx="229" fill="url(#obEmber)"/>
-    <rect width="1024" height="1024" rx="229" fill="url(#obHl)"/>
-    <rect width="1024" height="1024" rx="229" fill="url(#obDk)"/>
-    <g clip-path="url(#obClip)"><rect class="ob-logo__shine" x="-600" y="-170" width="390" height="1365" fill="url(#obShine)" transform="skewX(-18)"/></g>
-    <g filter="url(#obSh)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
-      <g class="ob-mk-speed">
-        <path class="ob-mk ob-mk--l1" d="M472 356H316" stroke-width="56" stroke-opacity=".6" pathLength="1"/>
-        <path class="ob-mk ob-mk--l2" d="M582 456H234" stroke-width="64" pathLength="1"/>
-        <path class="ob-mk ob-mk--l3" d="M472 556H316" stroke-width="56" stroke-opacity=".6" pathLength="1"/>
-      </g>
-      <path class="ob-mk ob-mk--belt" d="M260 802H840" stroke="url(#obBelt)" stroke-width="38" pathLength="1"/>
-      <g class="ob-mk-chev"><path class="ob-mk ob-mk--chev" d="M534 246L756 456L534 666" stroke-width="124" pathLength="1"/></g>
-    </g>
-    <path class="ob-mk-run" d="M840 802H260" fill="none" stroke="#fff" stroke-width="38" stroke-linecap="round" pathLength="1"/>
-  </svg>
-</div>`;
+// Marca: el logotipo «Curva» de RITMUP (geometría en ../ui/intro-logo.js) en blanco sobre el negro de la foto.
 
 // Fondo: negro puro con la cinta en perspectiva, en líneas grises muy tenues (sin brillos de color)
 // Bienvenida: la campaña a sangre (vídeo en bucle, mudo; con «Reducir movimiento», solo su póster) bajo un velo negro
@@ -180,8 +139,7 @@ export function mount(el) {
   function welcomeHtml() {
     return `<div class="ob-welcome">
       <div class="ob-hero">
-        ${LOGO}
-        <h1 class="ob-brand" tabindex="-1"><span>Best</span><span class="ob-brand__grad">Running</span></h1>
+        <h1 class="ob-brand" tabindex="-1">${wordmarkSvg({ cls: 'ob-brand__mark' })}</h1>
         <p class="ob-tagline">Tu entrenador personal de cinta</p>
       </div>
       <ul class="ob-features">
@@ -204,7 +162,7 @@ export function mount(el) {
       ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span>Recuperar tus datos de este iPhone (${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'sesión' : 'sesiones'})</span></button>`
       : '';
     return `${restore}
-      <label class="btn btn--ghost btn--block ob-native__btn" for="ob-import">${icon('download', 18)}<span>Ya usaba BestRunning: importar copia</span>
+      <label class="btn btn--ghost btn--block ob-native__btn" for="ob-import">${icon('download', 18)}<span>Ya usaba RITMUP (antes BestRunning): importar copia</span>
         <input id="ob-import" class="st-file" type="file" accept="application/json,.json"></label>`;
   }
 

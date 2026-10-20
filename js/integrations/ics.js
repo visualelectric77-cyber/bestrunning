@@ -7,7 +7,7 @@ import { groupSegments } from '../training/generator.js';
 import { CATEGORIES } from '../training/templates.js';
 
 const CRLF = '\r\n';
-const PRODID = '-//BestRunning//Plan de entrenamiento 1.0//ES';
+const PRODID = '-//RITMUP//Plan de entrenamiento 1.0//ES';
 
 /* ───────────── Utilidades RFC 5545 ───────────── */
 
@@ -114,7 +114,7 @@ function describe(workout, state) {
     );
   }
   if (state.integrations?.watchReminder !== false) lines.push('Inicia «Cinta de correr» en tu Apple Watch.');
-  lines.push('Abre BestRunning y dale a Empezar. ¡A por ello!');
+  lines.push('Abre RITMUP y dale a Empezar. ¡A por ello!');
   return lines.join('\n');
 }
 
@@ -144,7 +144,7 @@ export function buildIcs(state, { weeks = 4, fromKey } = {}) {
     `PRODID:${PRODID}`,
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:BestRunning',
+    'X-WR-CALNAME:RITMUP',
     `X-WR-CALDESC:${escText('Tu plan de entrenamiento en cinta')}`,
   ];
 
@@ -163,7 +163,7 @@ export function buildIcs(state, { weeks = 4, fromKey } = {}) {
     const start = localDate(key, time);
     const durSec = Math.max(60, Math.round(w.totalSec || (w.minutes || day.minutes || 20) * 60));
     const end = new Date(start.getTime() + durSec * 1000);
-    const title = `BestRunning · ${w.title || 'Entrenamiento'}`;
+    const title = `RITMUP · ${w.title || 'Entrenamiento'}`;
     const url = appUrl(w, key);
 
     lines.push(
@@ -201,7 +201,7 @@ export function buildIcs(state, { weeks = 4, fromKey } = {}) {
 export async function exportPlanToCalendar(state) {
   const ics = buildIcs(state, { weeks: 4 });
   const events = (ics.match(/BEGIN:VEVENT/g) || []).length;
-  const name = `BestRunning-plan-${todayKey()}.ics`;
+  const name = `RITMUP-plan-${todayKey()}.ics`;
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
 
   let file = null;
@@ -213,7 +213,7 @@ export async function exportPlanToCalendar(state) {
 
   if (file && typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title: 'Plan BestRunning' });
+      await navigator.share({ files: [file], title: 'Plan RITMUP' });
       return { ok: true, method: 'share', events };
     } catch (err) {
       if (err?.name === 'AbortError') return { ok: false, method: 'share', events, cancelled: true };

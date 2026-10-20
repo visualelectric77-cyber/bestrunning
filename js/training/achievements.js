@@ -61,7 +61,7 @@ const A = (id, title, description, icon, tier, check) => ({ id, title, descripti
 
 export const ACHIEVEMENTS = [
   // Sesiones
-  A('first-run', 'Primera zancada', 'Completa tu primera sesión en BestRunning.', 'play', 'bronze', (s) => done(s).length >= 1),
+  A('first-run', 'Primera zancada', 'Completa tu primera sesión en RITMUP.', 'play', 'bronze', (s) => done(s).length >= 1),
   A('sessions-5', 'Cogiendo carrerilla', 'Completa 5 sesiones.', 'repeat', 'bronze', (s) => done(s).length >= 5),
   A('sessions-10', 'Diez de diez', 'Completa 10 sesiones.', 'medal', 'bronze', (s) => done(s).length >= 10),
   A('sessions-25', 'Hábito en marcha', 'Completa 25 sesiones: esto ya es rutina.', 'star', 'silver', (s) => done(s).length >= 25),

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <title>BestRunning</title>
+    <title>RITMUP</title>
     <meta name="description" content="Tu entrenador personal de cinta: clases guiadas con voz, plan semanal y progreso." />
 
     <!-- PWA en iOS -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="BestRunning" />
-    <meta name="application-name" content="BestRunning" />
+    <meta name="apple-mobile-web-app-title" content="RITMUP" />
+    <meta name="application-name" content="RITMUP" />
     <meta name="theme-color" content="#000000" />
     <meta name="color-scheme" content="dark" />
     <meta name="format-detection" content="telephone=no, date=no, email=no, address=no" />
@@ -62,40 +62,15 @@
         background: #000;
         transition: opacity 0.4s ease;
       }
-      #boot img {
+      /* La «r» de RITMUP centrada a un 22 % del ancho, como assets/splash (negro puro, sin texto) */
+      #boot svg {
         position: absolute;
         left: 50%;
-        top: 43%;
-        width: 23.5vw;
-        height: 23.5vw;
+        top: 50%;
+        width: 22vmin;
+        height: auto;
+        aspect-ratio: 68 / 100;
         transform: translate(-50%, -50%);
-        border-radius: 22.37%;
-      }
-      #boot p {
-        position: absolute;
-        left: 0;
-        right: 0;
-        top: calc(43% + 17.6vw);
-        margin: 0;
-        text-align: center;
-        font: 700 8.2vw/1.1 -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
-        letter-spacing: -0.02em;
-        color: #fff;
-      }
-      #boot p span {
-        color: #ff5a1f;
-      }
-      #boot small {
-        display: block;
-        margin-top: 2.6vw;
-        font: 500 3.4vw/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-        letter-spacing: 0;
-        color: rgba(235, 235, 245, 0.62);
-      }
-      @media (orientation: landscape) {
-        #boot img { width: 12vw; height: 12vw; }
-        #boot p { top: calc(43% + 8vw); font-size: 4vw; }
-        #boot small { font-size: 1.8vw; margin-top: 1.2vw; }
       }
       .is-booted #boot {
         opacity: 0;
@@ -134,13 +109,12 @@
     <div id="toast-root" aria-live="polite"></div>
 
     <div id="boot" aria-hidden="true">
-      <img src="./assets/icons/icon-512.png" alt="" width="104" height="104" />
-      <p>Best<span>Running</span><small>Tu entrenador personal de cinta</small></p>
+      <svg viewBox="0 0 68 100" focusable="false"><path fill="#fff" fill-rule="evenodd" d="M0 100L0 50A50 50 0 0 1 50 0L68 0L68 14.5L50 14.5A35.5 35.5 0 0 0 14.5 50L14.5 100ZM29.19 26.36A31.5 31.5 0 0 1 50 18.5L68 18.5L68 33L50 33A17 17 0 0 0 39.48 36.65Z"/><path fill="#FF5A1F" d="M18.5 100L18.5 50A31.5 31.5 0 0 1 26.36 29.19L36.65 39.48A17 17 0 0 0 33 50L33 100Z"/></svg>
     </div>
 
     <noscript>
       <p style="padding: 24px; font-family: -apple-system, system-ui, sans-serif; text-align: center">
-        BestRunning necesita JavaScript activado para funcionar.
+        RITMUP necesita JavaScript activado para funcionar.
       </p>
     </noscript>
   </body>

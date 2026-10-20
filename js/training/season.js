@@ -98,8 +98,8 @@ export const EVENTS = [
     intro: 'Especial de Navidad: corre con espíritu navideño y quema el turrón con una sonrisa.' },
   { key: 'verano', name: 'Verano', from: '07-01', to: '08-31', families: ['fartlek', 'series-cortas', 'musica'], themes: ['fartlek', 'musica', 'juego'],
     intro: 'Especial de Verano: sesión con chispa. Ventilador, agua a mano y a disfrutar.' },
-  { key: 'aniversario', name: 'Aniversario BestRunning', from: '10-18', to: '10-18', single: true, families: ['reto', 'piramide'], themes: ['records', 'fantasma'],
-    intro: '¡Aniversario de BestRunning! Hoy celebramos con un reto especial: un año más corriendo juntos.' },
+  { key: 'aniversario', name: 'Aniversario RITMUP', from: '10-18', to: '10-18', single: true, families: ['reto', 'piramide'], themes: ['records', 'fantasma'],
+    intro: '¡Aniversario de RITMUP! Hoy celebramos con un reto especial: un año más corriendo juntos.' },
 ];
 const inMd = (md, from, to) => (from <= to ? md >= from && md <= to : md >= from || md <= to);
 /** Evento activo en una fecha (o null). */

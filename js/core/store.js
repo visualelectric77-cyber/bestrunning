@@ -248,7 +248,7 @@ export function resetState() {
 }
 
 export function exportState() {
-  const payload = { app: 'BestRunning', exportedAt: new Date().toISOString(), ...state };
+  const payload = { app: 'RITMUP', exportedAt: new Date().toISOString(), ...state };
   return JSON.stringify(payload, null, 2);
 }
 
@@ -257,6 +257,8 @@ export function importState(json) {
     const data = typeof json === 'string' ? JSON.parse(json) : json;
     if (!isPlainObject(data)) return false;
     if (typeof data.version !== 'number') return false;
+    // Se aceptan las copias de antes del cambio de nombre (app: 'BestRunning') y las nuevas (app: 'RITMUP')
+    if (data.app != null && data.app !== 'RITMUP' && data.app !== 'BestRunning') return false;
     if (!isPlainObject(data.profile) && !isPlainObject(data.levels)) return false;
     if (data.history != null && !Array.isArray(data.history)) return false;
     if (isPlainObject(data.levels)) {

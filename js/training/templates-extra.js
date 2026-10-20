@@ -1710,7 +1710,7 @@ export function defineExtraTemplates({ T, frame, W, numberReps, choose, r5, roun
   });
 
   T({
-    id: 'anniversary-medley', title: 'Aniversario BestRunning', subtitle: 'Lo mejor del año en una sola clase', category: 'challenge',
+    id: 'anniversary-medley', title: 'Aniversario RITMUP', subtitle: 'Lo mejor del año en una sola clase', category: 'challenge',
     family: 'reto', themes: [TH.mixto, TH.records], intensity: 'hard', durations: ALL, event: 'aniversario', focus: 'Celebración',
     description: 'Clase de aniversario: una pirámide exprés, un crucero de cumpleaños, una vela rápida por cada bloque de la temporada y, para terminar, soplar las velas con un sprint.',
     coachNotes: ['Hoy se celebra: corre con una sonrisa.', 'Las velas son cortas y vivas: una detrás de otra.', 'Para soplar las velas, sprint final con todo.'],

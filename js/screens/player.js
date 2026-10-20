@@ -505,7 +505,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       watchAuto
         ? { ic: 'watch', html: 'El reloj se abre solo al empezar y te manda el pulso en directo' }
         : isNative()
-          ? { ic: 'watch', html: 'BestRunning en tu Apple Watch se conecta solo y manda tu pulso en directo' }
+          ? { ic: 'watch', html: 'RITMUP en tu Apple Watch se conecta solo y manda tu pulso en directo' }
           : st.integrations?.watchReminder !== false
             ? { ic: 'watch', html: 'Inicia <b>Cinta de correr</b> en tu Apple Watch' } : null,
       // Con «Mi música» la sesión de audio debe mezclarse con Spotify (Ambient en iOS): la voz obedece al modo
@@ -651,7 +651,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!miss) return '<div data-slot="health" hidden></div>';
     const small = miss === 'prompt'
       ? 'Toca para dar permiso: sin él, el reloj no lee tu pulso'
-      : 'Toca para abrir Ajustes y luego: Apps › Salud › Acceso a datos y dispositivos › BestRunning › Activar todo';
+      : 'Toca para abrir Ajustes y luego: Apps › Salud › Acceso a datos y dispositivos › RITMUP › Activar todo';
     return `<div data-slot="health"><button type="button" class="mu-ready mu-ready--health" data-act="health" style="--i:7">
         <span class="mu-ready__ic">${icon('heart', 22)}</span>
         <span class="mu-ready__txt"><b>Permite el pulso en Salud</b><small>${esc(small)}</small></span>
@@ -699,7 +699,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
     return `<button type="button" class="mu-ready${musicOn ? ' is-on' : ''}" data-act="music-ready" aria-pressed="${musicOn}" style="--i:6">
       <span class="mu-ready__ic">${icon('music', 22)}</span>
-      <span class="mu-ready__txt"><b>Música DJ BestRunning</b><small>${musicOn ? 'Electrónica a tu ritmo, mezclada en cada cambio' : 'Apagada en este entreno · toca para activarla'}</small></span>
+      <span class="mu-ready__txt"><b>Música DJ RITMUP</b><small>${musicOn ? 'Electrónica a tu ritmo, mezclada en cada cambio' : 'Apagada en este entreno · toca para activarla'}</small></span>
       <span class="mu-switch" aria-hidden="true"><span></span></span>
     </button>`;
   }
@@ -1950,7 +1950,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         try { localStorage.setItem(WAKE_WARN_KEY, String(Date.now())); } catch { /* idem */ }
       }
       const msg = unsupported
-        ? 'Sin HTTPS la pantalla puede apagarse y cortar la música: abre BestRunning desde su web o pon el bloqueo automático en «Nunca»'
+        ? 'Sin HTTPS la pantalla puede apagarse y cortar la música: abre RITMUP desde su web o pon el bloqueo automático en «Nunca»'
         : 'Tu iPhone podría apagar la pantalla: pon el bloqueo automático en «Nunca» mientras entrenas';
       later(() => notify(msg, { icon: 'info', duration: unsupported ? 6500 : 5200 }), countingDown ? 3600 : 0);
     }).catch(() => {});
@@ -2330,7 +2330,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function syncNowPlaying(seg) {
     if (!seg) return;
     setNowPlaying({
-      title: workout.title || 'BestRunning',
+      title: workout.title || 'RITMUP',
       subtitle: `${zoneName(seg.zone)} · ${fmt.speed(seg.speed)} km/h`,
       artwork,
     });

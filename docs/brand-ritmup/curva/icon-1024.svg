@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="RITMUP"><title>RITMUP</title>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#141416"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="hl2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".07"/><stop offset=".012" stop-color="#fff" stop-opacity=".025"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<filter id="glow" x="-1" y="-1" width="3" height="3" filterUnits="objectBoundingBox"><feGaussianBlur stdDeviation="5.05"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#hl2)"/>
+<g transform="translate(318.14 222.17) scale(5.9392)"><path fill="#FF5A1F" opacity=".35" filter="url(#glow)" d="M18.5 100L18.5 50A31.5 31.5 0 0 1 26.36 29.19L36.65 39.48A17 17 0 0 0 33 50L33 100Z"/><path fill="#FFFFFF" fill-rule="evenodd" d="M0 100L0 50A50 50 0 0 1 50 0L68 0L68 14.5L50 14.5A35.5 35.5 0 0 0 14.5 50L14.5 100ZM29.19 26.36A31.5 31.5 0 0 1 50 18.5L68 18.5L68 33L50 33A17 17 0 0 0 39.48 36.65Z"/><path fill="#FF5A1F" d="M18.5 100L18.5 50A31.5 31.5 0 0 1 26.36 29.19L36.65 39.48A17 17 0 0 0 33 50L33 100Z"/></g>
+</svg>

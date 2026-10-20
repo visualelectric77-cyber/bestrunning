@@ -707,14 +707,10 @@
 
 /* — Acerca de — */
 .st-about { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 0; }
-/* El logo de «Acerca de» es el icono de la app (SPEC §13), sin sombra ni flotación */
-.st-about__logo {
-  display: grid; place-items: center; width: 96px; height: 96px; border-radius: 22.37%; color: #fff;
-  background: url("../assets/icons/icon.svg") center / cover no-repeat, var(--surface-2);
-}
-.st-about__logo > svg { visibility: hidden; }
-.st-about__name { margin: var(--s-4) 0 0; font-size: var(--fs-title1); line-height: var(--lh-title1); font-weight: 700; letter-spacing: -0.012em; }
-.st-about__tag { margin: 2px 0 0; font-size: var(--fs-sub); color: var(--text-2); }
+/* El logotipo «Curva» en blanco (la calle interior de la r, en ember): sin icono encima, sin sombra ni flotación */
+.st-about__name { margin: var(--s-5) 0 0; line-height: 0; color: #fff; }
+.st-about__mark { display: block; width: 168px; height: auto; aspect-ratio: 607 / 188; }
+.st-about__tag { margin: var(--s-4) 0 0; font-size: var(--fs-sub); color: var(--text-2); }
 .st-about__ver { margin-top: var(--s-2); font-size: var(--fs-footnote); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .st-credits { display: flex; flex-direction: column; gap: var(--s-3); }
 .st-credits p { margin: 0; font-size: var(--fs-footnote); line-height: 1.5; color: var(--text-2); }
@@ -865,7 +861,7 @@
   .st-vam__big { font-size: 52px; }
   .st-vam__btn { margin-top: var(--s-3); }
   .st-install { padding: var(--s-5) var(--s-5) var(--s-4); }
-  .st-about__logo { width: 80px; height: 80px; }
+  .st-about__mark { width: 148px; }
   .pg-week { padding: var(--s-4); }
   .pg-totals { padding: var(--s-4); }
   .pg-totals__big { font-size: 56px; }

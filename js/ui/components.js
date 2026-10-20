@@ -743,7 +743,7 @@ export function photo(name, { cls = '', alt = '', eager = false, pos = null } = 
 export function bgVideo(name, { cls = '', poster = name } = {}) {
   // 1.5.3: SOLO el póster, sin <video>. En el iPhone un vídeo en marcha (aunque esté mudo) puede dejar la sesión de
   // audio de WebKit en «ambient», que obedece al modo silencio: en la 1.5.1-1.5.2 la clase se quedó sin coach ni música.
-  // Nada de <video> en la app hasta tener un formato que no toque el audio (imagen animada).
+  // Nada de <video> en la app.
   void name;
   return `<img class="bg-video bg-still${cls ? ` ${cls}` : ''}" src="${MEDIA_DIR}${encodeURIComponent(poster)}.jpg" alt="" aria-hidden="true" decoding="async">`;
 }

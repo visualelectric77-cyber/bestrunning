@@ -352,7 +352,7 @@ function installBanner() {
   return `<div class="card td-install" role="note">
     <span class="td-install__logo" aria-hidden="true"></span>
     <div class="td-install__body">
-      <b>Instala BestRunning</b>
+      <b>Instala RITMUP</b>
       <p>Toca <span class="td-install__share">${icon('share', 15)}</span> <b>Compartir</b> y luego <b>«Añadir a pantalla de inicio»</b>. Se abrirá a pantalla completa y funciona sin conexión.</p>
     </div>
     <button type="button" class="btn-icon td-install__close" data-dismiss-install aria-label="Ocultar">${icon('close', 16)}</button>

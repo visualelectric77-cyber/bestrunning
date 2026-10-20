@@ -417,7 +417,7 @@ export function mount(el, { params = {} } = {}) {
           ? `<details class="whr-details whr-manual-hr"><summary>Corregir a mano</summary>${manualHr(f)}</details>`
           : native ? '' : `<span class="sm-ro__label">O anótalo a mano</span>${manualHr(f)}`}
         <p class="muted sm-note">${native
-          ? 'Con BestRunning en el reloj, el pulso llega solo al terminar.'
+          ? 'Con RITMUP en el reloj, el pulso llega solo al terminar.'
           : 'Una web no puede leer el pulso del Watch en directo: el Atajo lo trae de Salud al terminar. También ves la media y la máxima en la app Fitness.'}</p>
       </section>`;
   }

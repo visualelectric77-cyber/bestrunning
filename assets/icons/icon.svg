@@ -1,33 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <defs>
-    <linearGradient id="belt" gradientUnits="userSpaceOnUse" x1="241.0" y1="0" x2="859.0" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0.12"/><stop offset="1" stop-color="#fff" stop-opacity="0.62"/></linearGradient>
-    <linearGradient id="ember" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#FF9500"/>
-      <stop offset="0.48" stop-color="#FF5A1F"/>
-      <stop offset="1" stop-color="#FF2D55"/>
-    </linearGradient>
-    <radialGradient id="hl" cx="0.22" cy="0.08" r="0.85">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.26"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="dk" cx="1" cy="1.05" r="0.9">
-      <stop offset="0" stop-color="#B00C34" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#B00C34" stop-opacity="0"/>
-    </radialGradient>
-    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="22"/>
-      <feOffset dy="18" result="b"/>
-      <feFlood flood-color="#7A081C" flood-opacity="0.42"/>
-      <feComposite in2="b" operator="in"/>
-      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-  <rect width="1024" height="1024" rx="229" fill="url(#ember)"/>
-  <rect width="1024" height="1024" rx="229" fill="url(#hl)"/>
-  <rect width="1024" height="1024" rx="229" fill="url(#dk)"/>
-  <g filter="url(#sh)" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="316" y1="356" x2="472" y2="356" stroke-width="56" stroke-opacity="0.6"/><line x1="234" y1="456" x2="582" y2="456" stroke-width="64" stroke-opacity="1.0"/><line x1="316" y1="556" x2="472" y2="556" stroke-width="56" stroke-opacity="0.6"/>
-    <line x1="260" y1="802" x2="840" y2="802" stroke="url(#belt)" stroke-width="38"/>
-    <polyline points="534,246 756,456 534,666" stroke-width="124"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="RITMUP"><title>RITMUP</title>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#141416"/><stop offset="1" stop-color="#000000"/></linearGradient>
+<linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="hl2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".07"/><stop offset=".012" stop-color="#fff" stop-opacity=".025"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<filter id="glow" x="-1" y="-1" width="3" height="3" filterUnits="objectBoundingBox"><feGaussianBlur stdDeviation="5.05"/></filter>
+</defs>
+<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#hl2)"/>
+<g transform="translate(318.14 222.17) scale(5.9392)"><path fill="#FF5A1F" opacity=".35" filter="url(#glow)" d="M18.5 100L18.5 50A31.5 31.5 0 0 1 26.36 29.19L36.65 39.48A17 17 0 0 0 33 50L33 100Z"/><path fill="#FFFFFF" fill-rule="evenodd" d="M0 100L0 50A50 50 0 0 1 50 0L68 0L68 14.5L50 14.5A35.5 35.5 0 0 0 14.5 50L14.5 100ZM29.19 26.36A31.5 31.5 0 0 1 50 18.5L68 18.5L68 33L50 33A17 17 0 0 0 39.48 36.65Z"/><path fill="#FF5A1F" d="M18.5 100L18.5 50A31.5 31.5 0 0 1 26.36 29.19L36.65 39.48A17 17 0 0 0 33 50L33 100Z"/></g>
 </svg>

@@ -1,4 +1,5 @@
-/* RITMUP · intro de arranque «Curva» (js/ui/intro.js). Solo transform, opacity (y el desenfoque de entrada de las letras). */
+/* RITMUP · intro de arranque v2 «Curva» (js/ui/intro.js). El lienzo pinta el mundo y la r; aquí viven el logotipo
+   vectorial, las letras, el reflejo, el empujón final y el fundido. Solo transform, opacity (y el desenfoque de las letras). */
 .ri {
   --s: min(64vw, 320px);
   --e-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -13,21 +14,65 @@
   -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  animation: ri-fade 0.45s cubic-bezier(0.4, 0, 0.6, 1) 2s both;
+  animation: ri-fade 0.42s cubic-bezier(0.4, 0, 0.6, 1) 2.8s both;
 }
+/* Al volver a la app: entra con un fundido a negro muy corto en vez de un corte */
+.ri--resume { animation: ri-in 0.16s ease-out both, ri-fade 0.42s cubic-bezier(0.4, 0, 0.6, 1) 2.8s both; }
+
+/* Empujón final: la cámara atraviesa la marca (crece y se va antes que el negro) y detrás aparece Hoy */
+.ri-world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 46%;
+  animation: ri-push 0.5s cubic-bezier(0.55, 0, 0.85, 0.35) 2.6s both;
+}
+.ri-cv,
+.ri-cutwrap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ── Corte de Kling: oscuro, casi monocromo, con un filo de luz ember ── */
+.ri-cutwrap {
+  overflow: hidden;
+  opacity: 0;
+  background: #000;
+}
+.ri-cut {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 42% 50%;
+  filter: saturate(0.32) contrast(1.24) brightness(0.66);
+  transform: scale(1.1);
+}
+.ri-tint {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0) 32%, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, 0.8) 100%),
+    radial-gradient(38% 46% at 0% 42%, rgba(255, 90, 31, 0.2), rgba(255, 90, 31, 0) 100%),
+    radial-gradient(120% 70% at 50% 50%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* ── Logotipo ── */
 .ri-pos {
   position: absolute;
   left: 50%;
   top: 46%; /* ópticamente un poco por encima del centro: la banda de la altura x queda aquí */
   width: var(--s);
   transform: translate(-50%, calc(-1 * var(--cy)));
+  animation: ri-fade 0.24s cubic-bezier(0.4, 0, 1, 1) 2.72s both; /* la marca se va antes que el negro */
 }
 .ri-stage {
   position: relative;
   width: 100%;
   aspect-ratio: var(--ar);
-  transform-origin: 50% var(--cy);
-  animation: ri-push 0.45s cubic-bezier(0.4, 0, 0.7, 0.4) 2s both;
 }
 .ri-stage > svg {
   position: absolute;
@@ -37,22 +82,24 @@
   overflow: visible;
   display: block;
 }
-.ri-ink { fill: #d4d4d4; } /* el reflejo la deja en blanco puro */
+.ri-r { opacity: 0; } /* la pinta el lienzo hasta que se asienta; entonces pasa a vector */
+.ri-ink { fill: #dcdcdc; } /* el reflejo la deja en blanco puro */
 
-/* ── Las letras: suben 10 unidades, de desenfocadas a nítidas, escalonadas ── */
+/* Las letras: suben, de desenfocadas a nítidas, escalonadas, mientras la r termina de colocarse */
 .ri-l {
   will-change: transform, opacity, filter;
-  animation: ri-letter 0.38s var(--e-out) calc(1.1s + 0.05s * var(--i)) both;
+  animation: ri-letter 0.44s var(--e-out) calc(1.86s + 0.048s * var(--i)) both;
 }
 
-/* ── Reflejo: un borde de luz fino que cruza la marca y la deja en blanco puro ── */
+/* Reflejo: un borde de luz fino que cruza la marca y la deja en blanco puro */
 .ri-sweep {
   transform: translateX(var(--x0));
-  animation: ri-sweep 0.42s cubic-bezier(0.45, 0, 0.25, 1) 1.75s both;
+  animation: ri-sweep 0.44s cubic-bezier(0.45, 0, 0.25, 1) 2.2s both;
 }
 
 @keyframes ri-fade { from { opacity: 1; } to { opacity: 0; } }
-@keyframes ri-push { from { transform: scale(1); } to { transform: scale(1.05); } }
+@keyframes ri-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ri-push { from { transform: none; } to { transform: scale(2.4); } }
 @keyframes ri-letter {
   from { opacity: 0; transform: translateY(var(--rise)); filter: blur(3px); }
   55% { filter: blur(0); }
@@ -63,9 +110,12 @@
   to { transform: translateX(var(--x1)); }
 }
 
-/* Movimiento reducido: el lockup quieto que aparece en 0,5 s y se funde con la app */
-.ri--still { animation: ri-fade 0.4s ease 1.25s both; }
+/* Movimiento reducido: el logotipo quieto y un fundido de 0,5 s hacia la app (el fundido lo hace intro.js con Web
+   Animations: con «Reducir movimiento», base.css pone a 0 el retraso de toda animación CSS) */
+.ri--still,
+.ri--still.ri--resume { animation: none; }
+.ri--still .ri-world,
+.ri--still .ri-pos { animation: none; }
+.ri--still .ri-r { opacity: 1; }
 .ri--still .ri-ink { fill: #fff; }
-.ri--still .ri-stage { animation: ri-in 0.5s ease both; }
 .ri--still .ri-l { animation: none; }
-@keyframes ri-in { from { opacity: 0; } to { opacity: 1; } }

@@ -8,14 +8,14 @@ function setHandler(action, fn) {
 }
 
 /** artwork opcional: [{ src, sizes, type }] (p. ej. un data URL del logo dibujado en canvas). */
-export function setNowPlaying({ title = 'BestRunning', subtitle = '', artwork = null } = {}) {
+export function setNowPlaying({ title = 'RITMUP', subtitle = '', artwork = null } = {}) {
   const m = ms();
   if (!m || typeof MediaMetadata === 'undefined') return;
   try {
     m.metadata = new MediaMetadata({
-      title: String(title || 'BestRunning'),
+      title: String(title || 'RITMUP'),
       artist: String(subtitle || ''),
-      album: 'BestRunning',
+      album: 'RITMUP',
       artwork: Array.isArray(artwork) ? artwork : [],
     });
   } catch { /* metadatos no soportados */ }

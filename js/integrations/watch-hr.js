@@ -37,7 +37,7 @@ const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(pre
 /** Pasos para crear el Atajo (nombres exactos de las acciones de Atajos en iOS en español). */
 export const SHORTCUT_GUIDE = Object.freeze([
   { action: 'Nuevo atajo', detail: `Abre la app Atajos, toca «+» y ponle de nombre exactamente «${SHORTCUT_NAME}».` },
-  { action: 'Recibir texto', detail: 'Toca ⓘ y activa la entrada «Texto» (si te pregunta, «Si no hay entrada: Continuar»). BestRunning le pasa el texto al abrirlo como «Entrada del atajo».' },
+  { action: 'Recibir texto', detail: 'Toca ⓘ y activa la entrada «Texto» (si te pregunta, «Si no hay entrada: Continuar»). RITMUP le pasa el texto al abrirlo como «Entrada del atajo».' },
   { action: 'Obtener diccionario de la entrada', detail: 'Con «Entrada del atajo». Recibe las claves v, id, start y end.' },
   { action: 'Obtener valor del diccionario', detail: 'Tres veces: clave «start», clave «end» y clave «id» (del «Diccionario»). Mantén pulsado cada resultado → Cambiar nombre: start, end, id.' },
   { action: 'Buscar muestras de salud', detail: 'Tipo «Frecuencia cardiaca». Añade el filtro «Fecha de inicio» «está entre» start y end. Ordenar por «Fecha de inicio» · «Más antiguo primero» · sin límite.' },
@@ -574,7 +574,7 @@ export function parseWatchHr(text, session) {
     const hasStats = [meta.avg, meta.max, meta.min].some(Number.isFinite);
     if (!body.trim() && !hasStats && !zipped) {
       if (pickKey(json, ['start']) != null && pickKey(json, ['end']) != null) {
-        return fail('Esto es lo que BestRunning envía al Atajo, no su respuesta. Revisa que el Atajo termine con «Copiar al portapapeles» del Diccionario con avg, max, min y csv.');
+        return fail('Esto es lo que RITMUP envía al Atajo, no su respuesta. Revisa que el Atajo termine con «Copiar al portapapeles» del Diccionario con avg, max, min y csv.');
       }
       return fail('No reconozco estos datos. El Atajo debe copiar un Diccionario con las claves v, id, avg, max, min y csv.');
     }
@@ -1138,7 +1138,7 @@ export async function openWatchHrSheet(opts = {}) {
   const guide = `
     <div class="whr-sheet__guide card">
       <b class="whr-sheet__gtitle">${icon('info', 16)} ${ready ? 'Cómo es el Atajo' : 'Primero, crea el Atajo (2 minutos)'}</b>
-      <p class="whr-sheet__gtext">El Atajo «${esc(name)}» lee de Salud el pulso de esta sesión y lo copia para BestRunning. Solo hay que crearlo una vez.</p>
+      <p class="whr-sheet__gtext">El Atajo «${esc(name)}» lee de Salud el pulso de esta sesión y lo copia para RITMUP. Solo hay que crearlo una vez.</p>
       ${ready ? `<details class="whr-details"><summary>Ver los pasos</summary>${shortcutGuideHtml({ name })}</details>` : shortcutGuideHtml({ name })}
       ${opts.showSettingsLink === false ? '' : `<button type="button" class="btn btn--ghost btn--block whr-sheet__link" data-href="#/settings/watch">${icon('gear', 16)}<span>Guía completa en Ajustes</span></button>`}
     </div>`;
