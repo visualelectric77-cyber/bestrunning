@@ -509,7 +509,8 @@ export function createNativeBridge(opts = {}) {
       }
     } catch { /* sin almacenamiento */ }
     const t = lastToday || (await buildToday().catch(() => null));
-    if (!t || t.status !== 'today' || !t.href) return { ok: false, reason: 'no-class-today' };
+    // 'done': «Otra clase» del reloj (build 7) repite la clase de hoy ya hecha
+    if (!t || (t.status !== 'today' && t.status !== 'done') || !t.href) return { ok: false, reason: 'no-class-today' };
     navigate(`${t.href}${t.href.includes('?') ? '&' : '?'}autostart=1`);
     return { ok: true };
   }
