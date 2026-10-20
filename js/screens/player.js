@@ -22,6 +22,7 @@ import { attachPlayer, isNative, post as nativePost } from '../integrations/nati
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
+import { createHrCoach } from '../player/hr-coach.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -2117,6 +2118,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { update(s); } catch (err) { reportOnce(err); }
     if (s.status === 'running' && !suppressCoach) {
       try { coachTick(s); } catch (err) { reportOnce(err); }
+      try { hrCoachTick(s); } catch (err) { reportOnce(err); }
       // Durante un salto (skip / «No puedo más») la música se reubica después con musicSeek
       try { musicTick(s); } catch (err) { reportOnce(err); }
       guardSession();
@@ -2580,6 +2582,40 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (vam) showBug({ lbl: 'VAM', val: fmt.speed(vam), sub: 'km/h', color: '#7D7AFF', kind: 'vam' });
     notify('¡Test terminado! Ahora, vuelta a la calma', { icon: 'gauge', duration: 4200 });
     return true;
+  }
+
+  /* ═════════════════ Modo pulso (js/player/hr-coach.js) ═════════════════ */
+  // Con pulso en directo del reloj: si vas fuera de la zona del tramo un buen rato, ajusta ±0,2 km/h con el mismo
+  // camino que los botones − / + (el coach confirma la velocidad nueva). Sin pulso no hace nada. Se apaga con
+  // localStorage 'ritmup.hrcoach' = 'off'.
+  // (estado colgado de la propia función: las declaraciones de aquí abajo están después del return de mount)
+  function hrCoachTick(s) {
+    const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0 });
+    const now = Date.now();
+    if (now - st.last < 1000) return;
+    st.last = now;
+    let off = false;
+    try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
+    if (off || !engine || countingDown || s.inTestStage) return;
+    const live = nb.liveHr?.();
+    const seg = s.segment;
+    if (!seg) return;
+    let target = null;
+    try { target = hrTargetForZone(seg.zone, getState().profile || {}); } catch { target = null; }
+    const r = st.coach.step({
+      nowMs: now, running: true, segIndex: s.segIndex, zone: seg.zone, segSec: seg.sec,
+      segElapsed: s.segElapsed, segRemaining: s.segRemaining,
+      hr: live ? { bpm: Number(live.bpm), atMs: Number(live.at) || now } : null, target,
+    });
+    if (!r) return;
+    let applied = 0;
+    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir)) applied++;
+    if (!applied) return;
+    const delta = fmt.speed(applied / 10);
+    diagMark('pulso.ajuste', { dir: r.dir, kmh: applied / 10, ppm: r.avg });
+    notify(r.dir < 0
+      ? `Pulso ${r.reason === 'alarm' ? 'muy alto' : 'alto'} (${r.avg}): bajamos ${delta} km/h`
+      : `Vas sobrado (${r.avg} ppm): subimos ${delta} km/h`, { icon: 'heart', duration: 4200 });
   }
 
   function doAdjust(dir) {
