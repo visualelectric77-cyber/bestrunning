@@ -7,7 +7,7 @@ const ACTIVE_TS_KEY = 'br.active.v1.ts';
 
 /** Versión del esquema persistido (2 = fase 2: música DJ, voz grabada y pulso del Watch). */
 export const STATE_VERSION = 2;
-const DEFAULT_PACK = 'eva';
+const DEFAULT_PACK = 'lucia';
 const DEFAULT_HR_SHORTCUT = 'BestRunning FC';
 const VISUAL_QUALITIES = ['auto', 'high', 'eco', 'off'];
 // Escenarios 3D que se ofrecen en Ajustes (§15.2; el 'legacy' oculto nunca se guarda). Por defecto 'auto': cada
@@ -113,6 +113,9 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
   if (v < 2) {
     if (isPlainObject(st.audio) && (st.audio.packId == null || st.audio.packId === '')) st.audio.packId = DEFAULT_PACK;
   }
+  // 1.5.5: la voz grabada pasa de Eva (ElevenLabs, plan gratuito: sin uso comercial) a Lucía (generada con licencia
+  // comercial en Magnific). Quien tenía Eva pasa a Lucía; quien eligió la voz del sistema (packId null) sigue igual.
+  if (isPlainObject(st.audio) && st.audio.packId === 'eva') st.audio.packId = DEFAULT_PACK;
   if (isPlainObject(st.integrations)) {
     const ig = st.integrations;
     if (!String(ig.hrShortcut || '').trim()) ig.hrShortcut = DEFAULT_HR_SHORTCUT;

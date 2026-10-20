@@ -43,7 +43,7 @@ section('store.js · valores por defecto (§11.6, §13)');
 {
   const d = store.defaultState();
   ok(d.version === 2 && store.STATE_VERSION === 2, 'version 2');
-  ok(d.audio.packId === 'eva', 'audio.packId = eva');
+  ok(d.audio.packId === 'lucia', 'audio.packId = lucia');
   const m = d.music;
   ok(m && m.enabled === true && m.mode === 'app' && m.volume === 0.8 && m.effects === true && m.energy === 'normal'
     && m.useBuiltIn === true && m.useImported === true && Array.isArray(m.disabled) && m.disabled.length === 0, 'music por defecto según §11.6');
@@ -56,7 +56,7 @@ section('store.js · migración de un usuario v1');
 {
   const s = store.getState();
   ok(s.version === 2, 'versión migrada a 2');
-  ok(s.audio.packId === 'eva', 'packId null → eva');
+  ok(s.audio.packId === 'lucia', 'packId null → lucia');
   ok(s.audio.voiceURI === v1.audio.voiceURI && s.audio.chattiness === 'coach' && s.audio.rate === 1.05, 'ajustes de voz del usuario intactos');
   ok(s.music && s.music.mode === 'app' && s.music.volume === 0.8 && Array.isArray(s.music.disabled), 'aparece state.music para usuarios antiguos');
   ok(s.integrations.watchReminder === false && s.integrations.healthShortcut === 'Mi Salud', 'integraciones del usuario intactas');
@@ -107,7 +107,10 @@ section('store.js · importState de una copia v1');
   const backup = JSON.stringify({ app: 'BestRunning', exportedAt: '2026-10-01', ...v1, audio: { ...v1.audio, packId: null } });
   ok(store.importState(backup) === true, 'importa la copia');
   const s = store.getState();
-  ok(s.audio.packId === 'eva' && s.music?.mode === 'app' && s.version === 2, 'la copia v1 se migra');
+  ok(s.audio.packId === 'lucia' && s.music?.mode === 'app' && s.version === 2, 'la copia v1 se migra');
+  // quien tenía Eva (licencia no comercial) pasa a Lucía; quien eligió la voz del sistema (null, v2) sigue igual
+  ok(store.importState(JSON.stringify({ app: 'BestRunning', exportedAt: '2026-10-19', ...v1, version: 2, audio: { ...v1.audio, packId: 'eva' } })) === true, 'importa una copia con Eva');
+  ok(store.getState().audio.packId === 'lucia', 'Eva → Lucía');
   ok(!('app' in s) && !('exportedAt' in s), 'sin metadatos de la copia');
   ok(store.importState('{"version":"x"}') === false, 'rechaza copias inválidas');
 }

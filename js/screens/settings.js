@@ -95,8 +95,8 @@ const loadSpeech = () => (speechP ||= import('../audio/speech.js').then((m) => (
 const loadAudio = () => (audioP ||= import('../audio/audio-engine.js').then((m) => (audioMod = m)).catch(() => null));
 
 /* Fase 2: música, importación, voz grabada y pulso del Watch (todo opcional: si un módulo falta, la página sigue). */
-const EVA_ID = 'eva';
-const EVA_NAME = 'Eva';
+const EVA_ID = 'lucia'; // la voz grabada de la app (antes Eva)
+const EVA_NAME = 'Lucía';
 /** Nombre visible de un pack: sin el proveedor («Eva Dorado · ElevenLabs» → «Eva»). */
 const packName = (p) => (p?.id === EVA_ID ? EVA_NAME : String(p?.name || p?.id || 'Voz').replace(/\s*·\s*ElevenLabs\s*$/i, '').trim() || 'Voz');
 const HR_SHORTCUT = 'BestRunning FC';
@@ -872,7 +872,7 @@ function packHintHtml(s) {
   const st = packStatus[sel];
   if (!st) return '';
   if (st.ok) return `${icon('check', 13)} Voz grabada lista. Si un aviso de cambio no está grabado, lo dirá la voz del sistema.`;
-  return `${icon('info', 13)} ${sel === EVA_ID ? 'Las grabaciones de Eva aún no están en la app.' : 'Este pack aún no tiene grabaciones.'} Mientras tanto, el coach habla con la voz del sistema y, en cuanto lleguen, se usarán solas.`;
+  return `${icon('info', 13)} ${sel === EVA_ID ? 'Las grabaciones de Lucía aún no están en la app.' : 'Este pack aún no tiene grabaciones.'} Mientras tanto, el coach habla con la voz del sistema y, en cuanto lleguen, se usarán solas.`;
 }
 
 function audioHtml(s) {
@@ -1392,7 +1392,7 @@ function aboutHtml(s) {
       <div class="card st-credits">
         <p>Diseñada a medida para entrenar en cinta con clases guiadas, perfil de intensidad y un coach que te habla, inspirada en la experiencia de las clases de ciclo indoor.</p>
         <p><b>Ciencia detrás:</b> FC máxima de Tanaka, zonas de Karvonen, VO₂máx de Léger, calorías ACSM y test VAM escalonado.</p>
-        <p><b>Voz:</b> Eva Dorado · ElevenLabs. Grabada para BestRunning, con la síntesis de voz de Apple como respaldo.</p>
+        <p><b>Voz del coach:</b> Lucía López, <b>voz generada con IA</b> (ElevenLabs v3 en Magnific, con licencia comercial), con la síntesis de voz de Apple como respaldo.</p>
         <p><b>Música:</b> electrónica de artistas de Pixabay (Pixabay Content License; lista completa en Perfil → Música), mezclada en directo por el motor DJ de la app.</p>
         <p><b>Escenarios 3D:</b> three.js (licencia MIT).</p>
         <p><b>Código:</b> escrito con Claude Code (Opus 5.5) en una noche.</p>
@@ -1458,7 +1458,7 @@ async function demoCoach(ctx, btn) {
     if (packStatus[a.packId]?.ok) {
       if (await demoPack(ctx, btn, a.packId)) return;
     } else {
-      toast(a.packId === EVA_ID ? 'Eva aún no está grabada: te habla la voz del sistema' : 'Ese pack no tiene grabaciones: te habla la voz del sistema', { icon: 'info' });
+      toast(a.packId === EVA_ID ? 'Lucía aún no está grabada: te habla la voz del sistema' : 'Ese pack no tiene grabaciones: te habla la voz del sistema', { icon: 'info' });
     }
   }
   const token = (ctx.demo = {});
@@ -2405,7 +2405,7 @@ async function selectPack(id, ctx) {
     toast(`Voz «${packName({ id, name: res.name })}» lista${res.count ? ` · ${fmt.int(res.count)} frases` : ''}`, { icon: 'check', kind: 'success' });
   } else if (id === EVA_ID) {
     // Eva sigue elegida: en cuanto lleguen sus grabaciones se usarán solas
-    toast('Las grabaciones de Eva aún no están: hasta entonces hablará la voz del sistema', { icon: 'info', duration: 4200 });
+    toast('Las grabaciones de Lucía aún no están: hasta entonces hablará la voz del sistema', { icon: 'info', duration: 4200 });
   } else {
     ctx.save((d) => { d.audio.packId = null; });
     updateAudioChecks(ctx, 'data-pack', '');

@@ -434,7 +434,7 @@ export function mount(el) {
     // Fase 2: la voz grabada (Eva Dorado) va primero; las del sistema quedan como alternativa y respaldo
     const pack = draft.audio.packId === PACK_ID;
     const rows = [
-      row(EVA_KEY, 'Eva', 'Voz grabada, la más natural', 'Recomendada', pack),
+      row(EVA_KEY, 'Lucía', 'Voz grabada, la más natural', 'Recomendada', pack),
       row('', 'Automática', def ? `Voz del iPhone · ${def.name}` : 'Voz del iPhone, la mejor disponible', '', !pack && !sel),
     ];
     for (const v of list.filter((x) => x.quality !== 'novelty').slice(0, 8)) {

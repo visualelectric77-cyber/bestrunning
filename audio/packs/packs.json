@@ -1,9 +1,9 @@
 [
  {
-  "id": "eva",
-  "name": "Eva Dorado · ElevenLabs",
-  "voiceId": "RgXx32WYOGrd7gFNifSf",
+  "id": "lucia",
+  "name": "Lucía López · voz generada con IA",
+  "voiceId": "yiWEefwu5z3DQCM79clN",
   "model": "eleven_v3",
-  "count": 173
+  "count": 230
  }
 ]

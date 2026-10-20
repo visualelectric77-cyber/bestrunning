@@ -6,8 +6,8 @@
 // Así el encadenado suena a entrenador real y no a palabras pegadas.
 import { numberWords } from './phrases.js';
 
-export const PACK_ID = 'eva';
-export const PACK_NAME = 'Eva Dorado · ElevenLabs';
+export const PACK_ID = 'lucia';
+export const PACK_NAME = 'Lucía López · voz generada con IA';
 export const PACK_SPEED_MIN = 6.0;
 export const PACK_SPEED_MAX = 15.5;
 
