@@ -135,6 +135,11 @@ li {
   display: none !important;
 }
 
+/* Párrafos sin viudas (una palabra sola en la última línea) */
+p {
+  text-wrap: pretty;
+}
+
 ::selection {
   background: rgba(255, 90, 31, 0.35);
 }
@@ -691,4 +696,13 @@ html[data-nav='modal-out']::view-transition-new(view) {
     font-size: 28px;
     line-height: 34px;
   }
+}
+
+/* Pantalla de error del router («No hemos podido abrir esta pantalla»): centrada y fuera de la isla y de la barra de
+   inicio (en las rutas a pantalla completa no hay barra de navegación que la empuje) */
+.router-error {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--safe-t) + var(--s-4)) var(--gutter) calc(var(--safe-b) + var(--s-4));
 }

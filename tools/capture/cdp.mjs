@@ -70,7 +70,7 @@ export async function connect({ port = PORT, match = null } = {}) {
 }
 
 /** Métricas de iPhone Pro Max (430×932 pt @3 = 1290×2796) con zonas seguras de iOS. */
-export async function setPhone(page, { land = false, w = 430, h = 932, dpr = 3 } = {}) {
+export async function setPhone(page, { land = false, w = 430, h = 932, dpr = 3, insets: ins = null } = {}) {
   const width = land ? h : w;
   const height = land ? w : h;
   await page.send('Emulation.setDeviceMetricsOverride', {
@@ -79,7 +79,10 @@ export async function setPhone(page, { land = false, w = 430, h = 932, dpr = 3 }
   });
   await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }).catch(() => {});
   // Isla dinámica + indicador de inicio (iPhone Pro Max): vertical 62/34, horizontal 0/21 con 62 a los lados
-  const insets = land ? { top: 0, bottom: 21, left: 62, right: 62 } : { top: 62, bottom: 34, left: 0, right: 0 };
+  // `ins` (opcional) = { top, bottom, side } en vertical para otros modelos (SE: 20/0/0)
+  const insets = ins
+    ? (land ? { top: 0, bottom: ins.landBottom ?? ins.bottom ?? 0, left: ins.side ?? 0, right: ins.side ?? 0 } : { top: ins.top ?? 0, bottom: ins.bottom ?? 0, left: 0, right: 0 })
+    : (land ? { top: 0, bottom: 21, left: 62, right: 62 } : { top: 62, bottom: 34, left: 0, right: 0 });
   let safe = false;
   try { await page.send('Emulation.setSafeAreaInsetsOverride', { insets }); safe = true; } catch { safe = false; }
   return { width, height, safe };

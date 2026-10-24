@@ -185,6 +185,9 @@ button.mu-ready:active { background: var(--surface-3); transition-duration: 0ms;
 }
 .mu-ready.is-on .mu-switch { background: var(--switch-on); }
 .mu-ready.is-on .mu-switch span { transform: translateX(20px); }
+/* «Mi música» en el iPhone: atajos para abrir Spotify o Música antes de empezar */
+.mu-apps { display: flex; gap: var(--s-2); margin-top: var(--s-2); }
+.mu-apps__btn { flex: 1; min-width: 0; gap: 6px; }
 
 /* ═════════════════ Perfil → Música ═════════════════ */
 .mu-hero {
@@ -499,6 +502,9 @@ button.mu-ready:active { background: var(--surface-3); transition-duration: 0ms;
 .mu-track__title { font-size: var(--fs-body); font-weight: 400; letter-spacing: -0.012em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mu-track__meta { display: flex; align-items: center; gap: 5px; font-size: var(--fs-footnote); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mu-track__meta b { color: var(--text-2); font-weight: 600; }
+/* El artista se acorta con «…»; los BPM nunca (antes se cortaban a «120 BPN» sin elipsis: el flex no la aplica) */
+.mu-track__artist { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mu-track__bpm { flex: none; }
 .mu-tag {
   flex: none;
   padding: 2px 6px;

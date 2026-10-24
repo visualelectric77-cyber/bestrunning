@@ -84,6 +84,9 @@ export function mount(el, { params = {} } = {}) {
   let cardPromise = null;
   let saving = false;
   let waitT = null;           // app nativa: fin de la espera del pulso del reloj
+  // «Tu coach»: declarado antes del primer render() (coachNoteHtml lo lee; más abajo daba ReferenceError y el
+  // resumen salía «No hemos podido abrir esta pantalla» en el iPhone con Apple Intelligence)
+  let aiAsked = false;
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); if (!disposed) fn(); }, ms);
@@ -373,7 +376,6 @@ export function mount(el, { params = {} } = {}) {
   /* ═════════════════ Tu coach (IA del iPhone, js/integrations/ai.js) ═════════════════ */
   // Tras guardar, con Apple Intelligence: un titular, 2–3 frases y un consejo escritos a partir de los datos YA
   // calculados. Si el texto trae una cifra que no está en los datos, se descarta. Se guarda en la sesión (aiNote).
-  let aiAsked = false;
   function coachNoteHtml(s) {
     const n = s.aiNote;
     if (n && n.body) {

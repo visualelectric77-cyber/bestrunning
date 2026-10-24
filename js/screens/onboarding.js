@@ -123,6 +123,7 @@ export function mount(el) {
     <footer class="ob-foot">
       <button type="button" class="btn btn--primary btn--lg btn--block ob-next" aria-label="Empezar"><span class="ob-next__label">Empezar</span>${icon('chevron-right', 20)}</button>
       <p class="ob-foot__note">Lo dejamos listo en un minuto</p>
+      ${isNative() ? `<div class="ob-native" data-ob-native>${nativeDataHtml()}</div>` : ''}
     </footer>
   </div>`;
 
@@ -145,9 +146,8 @@ export function mount(el) {
       <ul class="ob-features">
         <li style="--i:0"><span class="ob-features__icon">${icon('speaker', 24)}</span><span><b>Coach de voz</b> que te avisa antes de cada cambio de velocidad</span></li>
         <li style="--i:1"><span class="ob-features__icon">${icon('calendar', 24)}</span><span><b>Plan semanal</b> variado que se adapta a ti</span></li>
-        <li style="--i:2"><span class="ob-features__icon">${icon('chart', 24)}</span><span><b>Más rápido y más tiempo</b>, semana a semana</span></li>
+        <li style="--i:2"><span class="ob-features__icon">${icon('chart', 24)}</span><span><b>Más rápido y más tiempo</b>, semana&nbsp;a&nbsp;semana</span></li>
       </ul>
-      ${isNative() ? `<div class="ob-native" data-ob-native>${nativeDataHtml()}</div>` : ''}
     </div>`;
   }
 
@@ -159,10 +159,10 @@ export function mount(el) {
     const n = Number(b?.sessions) || 0;
     const when = Number(b?.savedAt) > 0 ? fmt.dateShort(todayKey(new Date(Number(b.savedAt)))) : '';
     const restore = empty && n > 0
-      ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span>Recuperar tus datos de este iPhone (${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'sesión' : 'sesiones'})</span></button>`
+      ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span class="ob-native__txt"><span>Recuperar tus datos de este iPhone</span><small>${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'sesión' : 'sesiones'}</small></span></button>`
       : '';
     return `${restore}
-      <label class="btn btn--ghost btn--block ob-native__btn" for="ob-import">${icon('download', 18)}<span>Ya usaba RITMUP (antes BestRunning): importar copia</span>
+      <label class="btn btn--ghost btn--block ob-native__btn ob-native__btn--import" for="ob-import"><span class="ob-native__txt"><small>¿Ya usabas RITMUP o BestRunning?</small><span class="ob-native__link">${icon('download', 18)}Importar tu copia</span></span>
         <input id="ob-import" class="st-file" type="file" accept="application/json,.json"></label>`;
   }
 
@@ -824,7 +824,7 @@ export function mount(el) {
   ob.addEventListener('change', onChange);
   // App nativa: la copia del iPhone puede anunciarse (native.hello) con la bienvenida ya en pantalla
   const onNativeStatus = () => {
-    const slot = stage.querySelector('[data-ob-native]');
+    const slot = ob.querySelector('[data-ob-native]');
     if (slot && !nativeBusy) slot.innerHTML = nativeDataHtml();
   };
   if (isNative()) window.addEventListener('br:native-status', onNativeStatus);

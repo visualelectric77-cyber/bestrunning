@@ -436,7 +436,7 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
   const daysToTest = testDay ? daysBetween(today, testDay) : null;
 
   if (!history.length) {
-    add(9, `${hey}tu primera clase te espera. Empieza suave: el plan se adapta a ti desde el primer día.`);
+    add(9, `${hey ? `${hey}tu` : 'Tu'} primera clase te espera. Empieza suave: el plan se adapta a ti desde el primer día.`);
     const nativeApp = typeof window !== 'undefined' && !!window.webkit?.messageHandlers?.bestrunning;
     add(9, nativeApp
       ? 'Con RITMUP en tu Apple Watch, el reloj se conecta solo y te manda el pulso en directo.'

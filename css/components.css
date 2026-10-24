@@ -2504,55 +2504,55 @@ input.field[inputmode='numeric'] {
 }
 
 /* ═════════════ Aviso «Sincronizando con tu Apple Watch» (js/ui/watch-sync.js) ═════════════ */
-/* La luz de la calle es transform puro (compositor): se mueve aunque la página esté ocupada */
+/* Material oscuro de la guía v2 (como los toasts): icono de línea sin círculo de color, sin escalados ni brillos.
+   Va BAJO la barra del resumen (✕ · Resumen · compartir): encima la tapaba hasta 2 minutos.
+   La luz de la calle es transform puro (compositor): se mueve aunque la página esté ocupada */
 .wsync {
   position: fixed;
   z-index: 260;
   left: 50%;
-  top: calc(var(--safe-t, env(safe-area-inset-top)) + 10px);
-  width: min(360px, calc(100vw - 32px));
+  /* abajo, sobre el botón principal del resumen: arriba tapaba la fecha de la sesión */
+  bottom: calc(var(--safe-b, env(safe-area-inset-bottom)) + 84px);
+  width: min(360px, calc(100vw - 2 * var(--gutter, 16px)));
   display: grid;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: 22px 1fr;
   grid-template-rows: auto 3px;
-  column-gap: 10px;
-  row-gap: 9px;
+  column-gap: 12px;
+  row-gap: 10px;
   align-items: center;
-  padding: 12px 16px 12px 12px;
-  border-radius: 22px;
-  background: rgba(28, 28, 30, 0.82);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  backdrop-filter: blur(24px) saturate(1.6);
-  border: 0.5px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  color: #fff;
+  padding: 12px 16px;
+  border-radius: var(--r-card, 22px);
+  background: var(--material, rgba(0, 0, 0, 0.72));
+  -webkit-backdrop-filter: var(--material-filter, blur(20px) saturate(180%));
+  backdrop-filter: var(--material-filter, blur(20px) saturate(180%));
+  box-shadow: inset 0 0 0 var(--hairline, 0.5px) var(--sep, rgba(84, 84, 88, 0.45));
+  color: var(--text, #fff);
   pointer-events: none;
   opacity: 0;
-  transform: translate3d(-50%, -14px, 0) scale(0.98);
-  transition: opacity 260ms var(--ease-out, ease-out), transform 360ms var(--ease-out, ease-out);
+  transform: translate3d(-50%, 8px, 0);
+  transition: opacity 260ms var(--ease-out, ease-out), transform 320ms var(--ease-out, ease-out);
 }
-.wsync.is-in { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
-.wsync.is-out { opacity: 0; transform: translate3d(-50%, -10px, 0) scale(0.98); }
+.wsync.is-in { opacity: 1; transform: translate3d(-50%, 0, 0); }
+.wsync.is-out { opacity: 0; transform: translate3d(-50%, 8px, 0); }
 .wsync__ic {
   grid-row: 1;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
-  background: rgba(255, 90, 31, 0.16);
-  color: #FF5A1F;
+  color: var(--text-2, rgba(235, 235, 245, 0.62));
   animation: wsyncPulse 1.6s ease-in-out infinite;
 }
 .wsync__txt { grid-row: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.wsync__txt b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.wsync__txt small { font-size: 13px; color: rgba(235, 235, 245, 0.62); }
+.wsync__txt b { font-size: var(--fs-sub, 15px); line-height: var(--lh-sub, 20px); font-weight: 600; letter-spacing: -0.01em; }
+.wsync__txt small { font-size: var(--fs-footnote, 13px); line-height: var(--lh-footnote, 18px); color: var(--text-2, rgba(235, 235, 245, 0.62)); }
 .wsync__track {
   grid-column: 1 / -1;
   position: relative;
   height: 3px;
   border-radius: 2px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--fill, rgba(118, 118, 128, 0.24));
 }
 .wsync__track i {
   position: absolute;
@@ -2561,22 +2561,22 @@ input.field[inputmode='numeric'] {
   width: 34%;
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(90deg, rgba(255, 90, 31, 0), #FF5A1F 70%, #FFE3D6);
-  box-shadow: 0 0 10px rgba(255, 90, 31, 0.8);
+  background: var(--accent, #FF5A1F);
   will-change: transform;
   animation: wsyncRun 1.25s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
-.wsync.is-done .wsync__ic { animation: none; background: rgba(48, 209, 88, 0.16); color: #30D158; }
-.wsync.is-done .wsync__track i { animation: none; transform: translate3d(0, 0, 0); width: 100%; background: #30D158; box-shadow: none; }
+.wsync.is-done .wsync__ic { animation: none; color: var(--ok, #30D158); }
+.wsync.is-done .wsync__track i { animation: none; transform: translate3d(0, 0, 0); width: 100%; background: var(--ok, #30D158); }
 @keyframes wsyncRun {
   from { transform: translate3d(-110%, 0, 0); }
   to { transform: translate3d(310%, 0, 0); }
 }
 @keyframes wsyncPulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.08); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 @media (prefers-reduced-motion: reduce) {
   .wsync__track i { animation-duration: 2.6s; }
   .wsync__ic { animation: none; }
 }
+

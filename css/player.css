@@ -402,7 +402,8 @@
 }
 .pl-struct__bar { width: 8px; height: 8px; border-radius: 50%; background: var(--zc); }
 .pl-struct__time { font-size: var(--fs-footnote); font-weight: 600; color: var(--text-2); }
-.pl-struct__lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Nombres largos («Tramo final · segunda mitad») en dos líneas en vez de cortarse */
+.pl-struct__lbl { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; text-wrap: balance; }
 .pl-struct__lbl small { margin-left: 2px; font-size: var(--fs-footnote); color: var(--text-2); }
 .pl-struct__speed { font-weight: 700; color: var(--text); }
 .pl-struct__dur { text-align: right; font-weight: 600; color: var(--text-2); }
@@ -1145,7 +1146,7 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .hud-done__skip { grid-area: skip; font: 500 11.5px/1 var(--font); text-align: center; color: var(--lbl); }
 
 /* ═════════════════ Modo TV (AirPlay): aún más mínimo — velocidad, zona, cuenta atrás y siguiente ═════════════════ */
-.pl.is-tv { --speed-fs: clamp(104px, min(40vw, 24dvh), 300px); --cd-fs: 76px; }
+.pl.is-tv { --speed-fs: clamp(104px, min(40vw, 24dvh), 300px); --cd-fs: clamp(64px, 17vw, 76px); }
 .pl.is-tv .hud-top,
 .pl.is-tv .hud-info,
 .pl.is-tv .hud-strip,
@@ -1164,7 +1165,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .pl.is-tv .hud-adj--minus { right: auto; left: 0; }
 .pl.is-tv .hud-adj--plus { left: auto; right: 0; }
 .pl.is-tv .hud-lt { padding: 16px 18px 16px; }
-.pl.is-tv .hud-lt__nt { font-size: clamp(22px, 6.2vw, 28px); }
+/* con la cuenta atrás gigante, «Calentar 7,7» cabía como «Cale… 7,7» en un iPhone de 393 */
+.pl.is-tv .hud-lt__nt { font-size: clamp(20px, 6vw, 28px); }
 .pl.is-tv .hud-lt__arrow { width: 28px; height: 28px; }
 .pl.is-tv .hud-lt__bar { margin-top: 14px; height: 4px; }
 
@@ -1215,6 +1217,9 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   .hud-strip { height: 28px; margin-top: 8px; }
   .hud-info { padding: 9px 16px; }
   .hud-np { margin-top: 8px; padding-top: 8px; }
+  /* columna de 320 pt: «0,23 km» pegaba con el separador y «88–106» rozaba el borde */
+  .hud-metrics { gap: 12px; }
+  .hud-m b { font-size: 16px; }
   /* Con controles: bugs y avisos se apartan a la IZQUIERDA de ✕-TV-lista (misma fila), no hacia abajo — en
      horizontal la fila ⏮ ⏯ ⏭ de la columna derecha queda justo debajo */
   .pl.is-ctl .hud-bugs { transform: translateX(calc(-2 * 44px - 20px)); }
@@ -1309,7 +1314,9 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    padding: 4px 0 12px;
+    /* 4 px a los lados: el anillo del escenario elegido (outline 2 + 2) no se recorta contra el borde del scroll */
+    padding: 4px 4px 12px;
+    margin-inline: -4px;
   }
   /* la columna se desplaza; sus bloques nunca se aplastan (la checklist recortaba su última línea) */
   .pl-ready__col > * { flex-shrink: 0; }
@@ -1319,8 +1326,11 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   .pl-ready__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .pl-rstat:nth-child(2n + 1) { padding-left: var(--s-3); border-left: var(--hairline) solid var(--sep); }
   .pl-rstat:first-child { padding-left: 0; border-left: 0; }
-  .pl-rstat__val { font-size: 22px; }
-  .pl-rstat__val small { font-size: calc(var(--unit-scale) * 22px); }
+  /* 4 cifras en media pantalla (≈ 330 pt): a 22 px «11,7 km/h» se cortaba por la derecha */
+  .pl-rstat, .pl-rstat:nth-child(2n + 1) { padding: 0 0 0 10px; }
+  .pl-rstat:first-child { padding-left: 0; }
+  .pl-rstat__val { font-size: 20px; }
+  .pl-rstat__val small { font-size: calc(var(--unit-scale) * 20px); }
   .pl-check__item { min-height: 48px; padding: 9px 14px; font-size: var(--fs-sub); line-height: var(--lh-sub); }
   .pl-ready__cta { grid-column: 2; grid-row: 2; max-width: none; padding: 8px 0 max(10px, var(--safe-b)); box-shadow: none; }
   .pl-start { min-height: 52px; }
@@ -1534,6 +1544,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 /* Solo lectura */
 .sm-edit { min-height: 32px; padding: 0 4px; gap: 4px; font-size: var(--fs-sub); text-transform: none; letter-spacing: -0.01em; }
 .sm-edit .icon { display: none; }
+/* 32 pt a la vista (no empuja la cabecera de la tarjeta), 44 pt al dedo */
+.sm-edit::after { content: ''; position: absolute; inset: -6px -8px; }
 .sm-ro__feel { display: flex; align-items: center; gap: 14px; }
 .sm-ro__feel .sm-face__lvl { height: 28px; gap: 4px; color: var(--text); }
 .sm-ro__feel .sm-face__lvl i { width: 5px; }

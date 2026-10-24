@@ -200,6 +200,21 @@ export function mount(el, { params = {}, query = {} } = {}) {
   const scene3dModP = visuals0Quality() !== 'off'
     ? import('../player/scene3d.js').catch(() => null)
     : Promise.resolve(null);
+  // Laboratorio «Clase con vídeo de YouTube» (beta, js/player/youtube.js): SOLO con localStorage
+  // 'ritmup.lab.youtube' === 'on'. Sin el interruptor no se carga nada de esto y el reproductor es el de siempre.
+  const labYt = (() => {
+    try { return globalThis.localStorage?.getItem('ritmup.lab.youtube') === 'on'; } catch { return false; }
+  })();
+  let ytMod = null;
+  if (labYt) {
+    import('../player/youtube.js').then((m) => {
+      ytMod = m;
+      if (disposed) return;
+      try { m.ensureYtCss(); } catch { /* sin estilos: el laboratorio no se ofrece */ }
+      const slot = root?.querySelector?.('[data-slot="yt"]');
+      if (slot && !engine) slot.outerHTML = readyYtHtml();
+    }).catch(() => {});
+  }
   // Motion graphics del HUD (js/player/motion.js): opcional; sin el módulo el HUD funciona igual
   let motionMod = null;
   let motion = null;
@@ -352,6 +367,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let vpTimer = null;
   let testEndAt = -1e9;       // «No puedo más»: el salto a la calma no celebra la MITAD
   let tint = 0;               // capa activa del tinte 2D (fundido cruzado entre dos capas)
+  // Laboratorio YouTube (todo inerte con ytBg = 'world', el valor por defecto)
+  let ytBg = 'world';         // fondo elegido en Preparación SOLO para esta clase: 'world' | 'youtube'
+  let ytPick = null;          // vídeo o lista elegido (parseYouTubeUrl + title)
+  let ytDraft = '';           // lo escrito en el campo
+  let ytErr = '';
+  let ytLive = false;         // la clase va con el vídeo (desde Empezar hasta que el vídeo falle)
+  let ytSession = false;      // la clase empezó con el vídeo: sesión de audio 'playback' (también en «Mi música»)
+  let yt = null;              // controlador de createYouTubeBackground
   const treadmill = state.treadmill || {};
   const weightKg = Number(state.profile?.weightKg) || 78;
   const mqLand = typeof matchMedia === 'function' ? matchMedia('(orientation: landscape)') : null;
@@ -547,7 +570,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
               ${readyStat('Kcal', fmt.int(workout.estKcal || 0), '')}
               ${readyStat('Vel. máx.', fmt.speed(workout.maxSpeed || 0), 'km/h')}
             </div>
-            ${readySceneHtml()}
+            ${labYt ? readyYtHtml() : ''}
+            ${ytBg === 'youtube' ? '<div data-slot="scene" hidden></div>' : readySceneHtml()}
             <section class="pl-ready__group" style="--i:3">
               <h2 class="list-header">Antes de empezar</h2>
               <ul class="pl-check">
@@ -602,8 +626,20 @@ export function mount(el, { params = {}, query = {} } = {}) {
         musicOn = !musicOn;
         haptic('selection');
         b.outerHTML = readyMusicHtml();
-      }
+      } else if (labYt && act.startsWith('yt-')) onYtReadyAct(act, b);
     });
+    if (labYt) {
+      // Campo del enlace de YouTube (solo existe con el laboratorio y «Vídeo de YouTube» elegido)
+      const onYtInput = (e) => {
+        const inp = e.target?.closest?.('[data-yt-input]');
+        if (!inp) return;
+        ytDraft = inp.value;
+        if (e.type === 'input' && !ytMod?.parseYouTubeUrl?.(ytDraft)) { if (ytErr) { ytErr = ''; paintYtReady(); } return; }
+        ytChoose(ytDraft, e.type !== 'input');
+      };
+      root.addEventListener('input', onYtInput);
+      root.addEventListener('change', onYtInput);
+    }
     // Borde de desplazamiento iOS (separador bajo «Preparación» en cuanto el contenido sube)
     const rbody = root.querySelector('.pl-ready__body');
     if (rbody) {
@@ -694,9 +730,23 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function readyMusicHtml() {
     if (!appMusic) {
+      // En el iPhone: atajos para abrir Spotify o Música sin salir a buscarlas (la clase aún no ha empezado)
+      const iphone = isNative() || /iPhone|iPod/.test(globalThis.navigator?.userAgent || '');
       return `<div class="mu-ready mu-ready--own" style="--i:6">
         <span class="mu-ready__ic">${icon('music', 22)}</span>
-        <span class="mu-ready__txt"><b>Mi música</b><small>Pon tu Spotify o Apple Music: el coach hablará por encima</small></span>
+        <span class="mu-ready__txt"><b>Mi música</b><small>${iphone
+    ? 'Tu música sigue sonando y el coach habla encima. Quita el modo silencio'
+    : 'Pon tu Spotify o Apple Music: el coach hablará por encima'}</small></span>
+      </div>${iphone ? `<div class="mu-apps" style="--i:6">
+        <a class="btn btn--secondary btn--sm mu-apps__btn" href="spotify:" rel="noopener">${icon('external', 15)}<span>Abrir Spotify</span></a>
+        <a class="btn btn--secondary btn--sm mu-apps__btn" href="music://" rel="noopener">${icon('external', 15)}<span>Abrir Música</span></a>
+      </div>` : ''}`;
+    }
+    // Laboratorio YouTube: con el vídeo de fondo la DJ no suena en esta clase (vuelve sola si el vídeo falla)
+    if (ytBg === 'youtube') {
+      return `<div class="mu-ready" data-act="music-yt" style="--i:6">
+        <span class="mu-ready__ic">${icon('music', 22)}</span>
+        <span class="mu-ready__txt"><b>Música DJ RITMUP</b><small>En esta clase suena el vídeo. Si no se puede ver, vuelve la DJ</small></span>
       </div>`;
     }
     return `<button type="button" class="mu-ready${musicOn ? ' is-on' : ''}" data-act="music-ready" aria-pressed="${musicOn}" style="--i:6">
@@ -704,6 +754,169 @@ export function mount(el, { params = {}, query = {} } = {}) {
       <span class="mu-ready__txt"><b>Música DJ RITMUP</b><small>${musicOn ? 'Electrónica a tu ritmo, mezclada en cada cambio' : 'Apagada en este entreno · toca para activarla'}</small></span>
       <span class="mu-switch" aria-hidden="true"><span></span></span>
     </button>`;
+  }
+
+  /* ───────── Laboratorio YouTube · Preparación: «Fondo» (solo con labYt) ───────── */
+  function readyYtHtml() {
+    if (!labYt) return '';
+    if (typeof ytMod?.readyHtml !== 'function') return '<div data-slot="yt" hidden></div>';
+    try {
+      return ytMod.readyHtml({
+        bg: ytBg, pick: ytPick, draft: ytDraft, err: ytErr, recents: ytMod.loadRecent(), own: !appMusic,
+      });
+    } catch { return '<div data-slot="yt" hidden></div>'; }
+  }
+
+  function paintYtReady() {
+    const slot = root?.querySelector?.('[data-slot="yt"]');
+    if (slot && !engine) slot.outerHTML = readyYtHtml();
+  }
+
+  /** Lee un enlace pegado; showErr: avisar si no vale (al confirmar el campo, no a cada tecla). */
+  function ytChoose(text, showErr = true) {
+    const p = ytMod?.parseYouTubeUrl?.(text);
+    if (!p) {
+      if (!showErr || !String(text || '').trim()) return false;
+      ytErr = 'Ese enlace no es de un vídeo ni de una lista de YouTube';
+      haptic('warning');
+      paintYtReady();
+      return false;
+    }
+    const known = ytMod.loadRecent().find((r) => ytMod.ytKey(r) === ytMod.ytKey(p));
+    ytPick = { ...p, title: known?.title || ytMod.defaultTitle(p) };
+    ytDraft = '';
+    ytErr = '';
+    haptic('selection');
+    paintYtReady();
+    // el script de YouTube se pide ya (al empezar, el reproductor está listo antes del «¡Ya!»)
+    try { ytMod.loadYouTubeApi().catch(() => {}); } catch { /* sin red */ }
+    return true;
+  }
+
+  /** Fondo de esta clase: con YouTube no hay mundo 3D (ni GPU ni batería); al volver a «Mundo 3D», se crea de nuevo. */
+  function setYtBg(v) {
+    const next = v === 'youtube' ? 'youtube' : 'world';
+    if (next === ytBg) return;
+    ytBg = next;
+    haptic('selection');
+    paintYtReady();
+    const slot = root?.querySelector?.('[data-slot="scene"]');
+    if (slot) slot.outerHTML = ytBg === 'youtube' ? '<div data-slot="scene" hidden></div>' : readySceneHtml();
+    if (appMusic) root?.querySelector('[data-act="music-ready"], [data-act="music-yt"]')?.replaceWith(htmlNode(readyMusicHtml()));
+    if (ytBg === 'youtube') {
+      cancel(preT);
+      preT = null;
+      // a medio crear, la propia creación la suelta al terminar (initScene); si ya existe, fuera ahora
+      if (!sceneP) destroyScene();
+    } else {
+      later(initScene, 120);
+    }
+  }
+
+  function onYtReadyAct(act, b) {
+    if (act === 'yt-bg') setYtBg(b.dataset.value);
+    else if (act === 'yt-clear') { ytPick = null; haptic('light'); paintYtReady(); }
+    else if (act === 'yt-recent') {
+      const r = ytMod?.loadRecent?.()[Number(b.dataset.i)];
+      if (r) ytChoose(ytMod.watchUrl(r));
+    } else if (act === 'yt-paste') {
+      const inp = () => root?.querySelector('[data-yt-input]');
+      const rd = globalThis.navigator?.clipboard?.readText;
+      if (typeof rd !== 'function') { inp()?.focus(); return; }
+      Promise.resolve(globalThis.navigator.clipboard.readText())
+        .then((t) => { if (!ytChoose(t)) inp()?.focus(); })
+        .catch(() => inp()?.focus());
+    }
+  }
+
+  function htmlNode(html) {
+    const t = document.createElement('template');
+    t.innerHTML = html.trim();
+    return t.content.firstElementChild || document.createTextNode('');
+  }
+
+  /** ¿Empieza esta clase con el vídeo? (laboratorio activo, «Vídeo de YouTube» y un enlace válido) */
+  function ytWanted() {
+    return labYt && ytBg === 'youtube' && !!ytPick && typeof ytMod?.createYouTubeBackground === 'function';
+  }
+
+  /* ───────── Laboratorio YouTube · en marcha (todo esto solo corre con ytLive) ───────── */
+  function ytLiveHtml() {
+    try { return ytMod.liveHtml(ytPick); } catch { return ''; }
+  }
+
+  /** Crea el reproductor en su recuadro (nunca lanza: si falla, la clase sigue como siempre con su DJ). */
+  function mountYt() {
+    if (yt || !ytLive || !refs.ytHost) return;
+    try { ytMod.rememberRecent(ytPick, { title: ytPick.title === ytMod.defaultTitle(ytPick) ? '' : ytPick.title }); } catch { /* sin almacenamiento */ }
+    try {
+      yt = ytMod.createYouTubeBackground(refs.ytHost, ytPick, {
+        onFail: (why) => ytFail(why),
+        onTitle: (t) => {
+          if (refs.ytTitle) refs.ytTitle.textContent = t;
+          try { ytMod.setRecentTitle(ytPick, t); } catch { /* idem */ }
+        },
+        onNeedsTap: (on) => {
+          if (refs.ytHint) refs.ytHint.hidden = !on;
+          if (refs.ytTitle) refs.ytTitle.hidden = !!on;
+        },
+      });
+    } catch { yt = null; }
+    if (!yt) { ytFail('crear'); return; }
+    // Restaurada a medias o empezada antes de que llegue el reproductor: arranca con la clase
+    if (engine?.getState().status === 'running') ytCall('play');
+  }
+
+  function ytCall(fn, ...args) {
+    try { return yt?.[fn]?.(...args); } catch { return undefined; }
+  }
+
+  function ytTeardown() {
+    const c = yt;
+    yt = null;
+    if (!c) return;
+    try { c.stop?.(); } catch { /* nada */ }
+    try { c.destroy?.(); } catch { /* nada */ }
+  }
+
+  /**
+   * El vídeo no se puede ver (error, no se deja incrustar, sin red para la API): aviso discreto y la clase sigue con
+   * su DJ como siempre (el reproductor normal, con fondo 2D: el mundo 3D no se crea a mitad de clase). Nunca bloquea.
+   */
+  function ytFail(why) {
+    if (!ytLive || disposed) return;
+    try { console.warn('[player] YouTube:', why); } catch { /* nada */ }
+    ytTeardown();
+    ytLive = false;
+    if (root) {
+      root.classList.remove('pl--yt');
+      refs.ytBox?.remove();
+      refs.ytBar?.remove();
+      delete refs.ytBox; delete refs.ytBar; delete refs.ytHost; delete refs.ytTitle; delete refs.ytHint;
+    }
+    if (finishedHandled) return;
+    notify('Este vídeo no se puede ver aquí', { icon: 'info', duration: 3600 });
+    if (appMusic && musicPrefs0.enabled !== false) {
+      musicOn = true;
+      applyMusicButton();
+      coachCall('updateSettings', { music: true });
+      // El AudioContext ya suena (el coach lo desbloqueó en Empezar): la DJ puede desbloquearse ya; si no, al tocar
+      initMusic(!!audioMod?.isUnlocked?.());
+      if (engine?.getState().status === 'running') startMusic();
+      refreshNowPlaying();
+    }
+    syncSession();
+    syncCtl();
+  }
+
+  function ytBarAct(act, b) {
+    haptic('selection');
+    if (act === 'yt-next') ytCall('next');
+    else {
+      const on = !!ytCall('setShuffle', b.getAttribute('aria-checked') !== 'true');
+      b.setAttribute('aria-checked', String(on));
+      notify(on ? 'Aleatorio activado' : 'Aleatorio desactivado', { icon: 'shuffle', duration: 1400 });
+    }
   }
 
   function readyStat(label, value, unit) {
@@ -719,7 +932,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const zc = zoneColor(first?.zone);
     const musicLbl = !appMusic ? 'Modo Mi música' : musicOn ? 'Apagar música' : 'Encender música';
     el.innerHTML = `
-      <div class="pl pl--live${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
+      <div class="pl pl--live${ytLive ? ' pl--yt' : ''}${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
         <div class="pl-bg pl-bg--live" aria-hidden="true">
           <i class="pl-bg__tint is-on" data-ref="tint0" style="--tc:${zc}"></i>
           <i class="pl-bg__tint" data-ref="tint1" style="--tc:${zc}"></i>
@@ -727,6 +940,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
           <i class="pl-bg__vignette"></i>
         </div>
         <div class="pl-world" data-ref="world" aria-hidden="true"></div>
+        ${ytLive ? ytLiveHtml() : ''}
         <div class="hud" data-ref="hud">
           <header class="hud-top hud-plate">
             <div class="hud-top__l">
@@ -903,6 +1117,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       snapTimer = setInterval(persist, 5000);
       disposers.push(() => clearInterval(snapTimer));
     }
+    if (ytLive) mountYt();
   }
 
   /** Pinta el mini perfil una sola vez (y tras ajustar velocidades); cada tick sólo mueve el clip y el cursor. */
@@ -941,6 +1156,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
   /* ═════════════════ Arranque ═════════════════ */
   // Red de seguridad: un <video> en marcha (aunque mudo) puede dejar la sesión de audio de iOS en «ambient» (calla con
   // el modo silencio). Antes de desbloquear el audio se paran y se sueltan todos los de la página.
+  // Laboratorio YouTube: esto NO toca el vídeo de YouTube. Su <video> vive dentro del iframe del reproductor, que es
+  // otro documento (youtube.com, otro origen): document.querySelectorAll('video') solo ve los del documento de la
+  // app, y el del iframe ni se ve ni se podría tocar (mismo origen obligatorio). Además, al empezar, el iframe aún no
+  // existe (se crea en renderLive, después de unlockAudioNow); al reanudar ya existe y sigue intacto. Comprobado en
+  // Chrome sin pantalla con el reproductor cargado: 0 <video> en el documento, el del iframe sigue sonando.
   function releaseVideos() {
     try {
       document.querySelectorAll('video').forEach((v) => {
@@ -971,7 +1191,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   // final. Con «Mi música» hay que mezclarse con Spotify/Apple Music (solo Ambient lo permite): la preparación pide
   // quitar el modo silencio.
   function desiredSession() {
-    if (appMusic) return 'playback';
+    // (laboratorio YouTube: el vídeo suena, no va mudo ⇒ también 'playback', aunque el modo sea «Mi música»)
+    if (appMusic || ytSession) return 'playback';
     return getState().audio?.duckMusic === false ? 'ambient' : 'transient';
   }
 
@@ -984,7 +1205,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /** ¿Debe seguir la sesión en 'playback'? (entreno en marcha o frase final aún sonando, y sin otro reproductor). */
   function holdPlayback() {
-    if (!appMusic || myGen !== sessionGen) return false;
+    if (!(appMusic || ytSession) || myGen !== sessionGen) return false;
     if (!disposed && engine && !finishedHandled) return true;
     return performance.now() < sessionHoldUntil;
   }
@@ -1001,7 +1222,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /** Al salir: 'auto' — pero si la frase final del coach aún suena (modo música de la app), cuando acabe. */
   function releaseSession() {
-    const wait = appMusic && finishedHandled ? sessionHoldUntil - performance.now() : 0;
+    const wait = (appMusic || ytSession) && finishedHandled ? sessionHoldUntil - performance.now() : 0;
     if (wait <= 0) { syncSession('auto'); return; }
     setTimeout(() => { if (myGen === sessionGen) syncSession('auto'); }, wait);
   }
@@ -1271,13 +1492,15 @@ export function mount(el, { params = {}, query = {} } = {}) {
    * Desde la preparación se crea oculta (lienzo en un hueco invisible); al empezar, el lienzo se pasa al HUD.
    */
   function initScene() {
+    // Laboratorio YouTube: con el vídeo de fondo no se crea el mundo 3D (ahorra GPU y batería)
+    if (ytBg === 'youtube') return;
     if (scene) { attachScene(); return; }
     if (sceneP || sceneDead || disposed || visuals.quality === 'off') return;
     const host0 = liveMounted() ? refs.world : root?.querySelector('[data-pre-world]');
     if (!host0) return;
     sceneP = scene3dModP
       .then((mod) => {
-        if (disposed || typeof mod?.createScene3D !== 'function') return null;
+        if (disposed || ytBg === 'youtube' || typeof mod?.createScene3D !== 'function') return null;
         if (typeof mod.isWebGLAvailable === 'function' && !mod.isWebGLAvailable()) return null;
         const canvas = document.createElement('canvas');
         canvas.className = 'pl-3d';
@@ -1304,6 +1527,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
       })
       .then((ctl) => {
         sceneP = null;
+        // (se eligió «Vídeo de YouTube» mientras se creaba: ni se marca como fallida ni se engancha)
+        if (ytBg === 'youtube') {
+          try { ctl?.destroy?.({ releaseContext: true }); } catch { /* nada */ }
+          dropCanvas();
+          return;
+        }
         if (!ctl || typeof ctl !== 'object') { sceneDead = true; dropCanvas(); return; }
         if (disposed || sceneDead) {
           try { ctl.destroy?.({ releaseContext: true }); } catch { /* nada */ }
@@ -1722,6 +1951,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // Con la hoja «Sonido» abierta los controles se recogen (no asoman cortados por encima de la hoja)
     if (!root || countingDown || finale || locked || cache.cdShow || snd) return false;
     if (cache.status !== 'running') return true;
+    // Laboratorio YouTube: el HUD tiene su propio espacio bajo el vídeo; los controles se quedan siempre a la vista
+    if (ytLive) return true;
     return Date.now() < ctlUntil;
   }
 
@@ -1911,6 +2142,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function toggleMusic() {
     haptic('selection');
+    if (ytLive) {
+      notify('Suena el vídeo de YouTube. Para la música DJ, elige «Mundo 3D» al preparar la clase', { icon: 'music', duration: 4200 });
+      return;
+    }
     if (!appMusic) {
       notify('Modo «Mi música»: suena tu Spotify o Apple Music y el coach habla encima. Cámbialo en Perfil → Música', { icon: 'music', duration: 4200 });
       return;
@@ -1960,6 +2195,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   function onStartTap() {
     if (engine) return;
+    // Laboratorio YouTube: se decide ANTES del desbloqueo (la sesión nace ya en 'playback') y de initMusic (la DJ ni
+    // se carga). El modo TV no aplica: el reproductor necesita su recuadro y nuestros datos completos.
+    if (ytWanted()) { ytLive = true; ytSession = true; musicOn = false; tvOn = false; }
+    else if (ytBg === 'youtube') ytBg = 'world'; // «Vídeo de YouTube» sin enlace: la clase de siempre
     unlockAudioNow();
     const packId = getState().audio?.packId;
     if (packId) { try { audioMod?.loadPack?.(packId)?.catch?.(() => {}); } catch { /* sin pack */ } }
@@ -1995,6 +2234,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       musicUnlocked = false;
       destroyScene();
       sceneDead = false;
+      if (ytLive) { ytTeardown(); ytLive = false; ytSession = false; musicOn = musicPrefs0.enabled !== false; tvOn = visuals.tvMode === true; }
       renderReady();
       toast('No se pudo empezar: vuelve a pulsar «Empezar»', { icon: 'warning', kind: 'warning' });
     }
@@ -2193,6 +2433,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       syncPosition();
       if (!quietPause) coachCall('say', 'pause', {});
       if (musicStarted) { mcall('pause'); stopBeat(); }
+      if (yt) ytCall('pause');
       if (snd) armSoundIdle(); // en pausa la hoja «Sonido» no se recoge sola
       persist();
     } else if (type === 'resume') {
@@ -2210,6 +2451,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         lastMusicPos = s.totalElapsed;
         startBeat();
       } else startMusic();
+      if (yt) ytCall('play');
       if (snd) armSoundIdle();
       keepAwake();
     } else if (type === 'start') {
@@ -2217,6 +2459,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       setPlaybackState('playing');
       syncPosition();
       startMusic();
+      if (yt) ytCall('play');
       later(maybeSoundHint, 2600);
     } else if (type === 'finish') {
       onFinished(data && data.status ? data : engine.getState());
@@ -2494,6 +2737,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     else if (act === 'music') toggleMusic();
     else if (act === 'list') openStructure();
     else if (act === 'endtest') doEndTest();
+    else if (yt && (act === 'yt-next' || act === 'yt-shuffle')) ytBarAct(act, b);
   }
 
   function onToggle() {
@@ -3168,6 +3412,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // 'playback' hasta que acabe la frase final (el fundido de la música devolvería la sesión a 'auto')
     sessionHoldUntil = performance.now() + SESSION_HOLD_MS;
     stopMusic(3);
+    ytTeardown();
     // Una sesión ya guardada (reapertura tras un fallo de almacenamiento que luego se recuperó) no se duplica
     const dup = (Array.isArray(st.history) ? st.history : [])
       .some((h) => h && h.workoutId === session.workoutId && h.startedAt === session.startedAt);
@@ -3292,6 +3537,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     clearInterval(snapTimer);
     cancel(adjustTimer);
     stopMusic(1);
+    ytTeardown();
     releaseSession();
     try { engine?.destroy(); } catch { /* nada */ }
     if (!keepCoach) { coachCall('destroy'); coach = null; }
@@ -3317,6 +3563,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (beatRaf) cancelAnimationFrame(beatRaf);
     beatRaf = 0;
     stopMusic(0.6);
+    ytTeardown();
     releaseSession();
     // Deja terminar la frase final del coach antes de destruirlo
     const c = coach;

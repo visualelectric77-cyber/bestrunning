@@ -1,0 +1,284 @@
+/* RITMUP · Laboratorio «Clase con vídeo de YouTube» (beta). Solo se carga con localStorage 'ritmup.lab.youtube' = 'on'
+   (lo inyecta js/player/youtube.js). Lenguaje v2 (docs/design/ui-v2.md): negro, tipografía, el color solo en los datos.
+
+   POLÍTICA DE YOUTUBE (obligatoria): NADA delante de ninguna parte del reproductor — ni HUD, ni botones, ni velos, ni
+   capas transparentes que capturen toques. Por eso el reproductor tiene SU celda de la rejilla (.pl-yt, «video») y el
+   HUD otra («hud»): no comparten píxeles. Mínimo 200×200. Nuestra barra (.pl-ytbar) va debajo o al lado, nunca encima. */
+
+/* ═════════════════ Preparación: «Fondo» ═════════════════ */
+.pl-ytp__seg { margin-bottom: var(--s-3); }
+.pl-ytp__box { display: flex; flex-direction: column; gap: var(--s-3); }
+.pl-ytp__field { display: flex; align-items: center; gap: var(--s-2); }
+.pl-ytp__field .field { flex: 1; min-width: 0; -webkit-user-select: text; user-select: text; }
+.pl-ytp__paste { flex: none; }
+.pl-ytp__err { margin: 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--danger); }
+.pl-ytp__note { margin: 0; padding: 0 var(--s-4); font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); text-wrap: pretty; }
+
+/* Elegido: miniatura 16:9 + título + «Vídeo · solo en esta clase» + quitar */
+.pl-ytp__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 10px 10px 10px 10px;
+  border-radius: var(--r-card);
+  background: var(--surface-1);
+  box-shadow: inset 0 0 0 2px #fff; /* elegido = anillo blanco de 2 px (guía v2, como los escenarios) */
+}
+.pl-ytp__thumb {
+  flex: none;
+  position: relative;
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.pl-ytp__thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.pl-ytp__thumb--sm { width: 64px; border-radius: 6px; }
+.pl-ytp__ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); }
+.pl-ytp__txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.pl-ytp__txt b {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font: 600 var(--fs-sub)/var(--lh-sub) var(--font);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.pl-ytp__txt small { font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); }
+.pl-ytp__x {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  background: var(--fill);
+}
+.pl-ytp__x:active { background: var(--fill-2); }
+.pl-ytp__x { position: relative; }
+.pl-ytp__x::after { content: ''; position: absolute; inset: -6px; } /* 44 pt al dedo */
+
+/* Últimos usados: lista agrupada (≥ 50 pt por fila, separador fino sangrado) */
+.pl-ytp__h { margin: 0 0 var(--s-2); padding: 0 var(--s-4); font: 600 13px/18px var(--font); letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-2); }
+.pl-ytp__list { margin: 0; padding: 0; list-style: none; border-radius: var(--r-card); overflow: hidden; background: var(--surface-1); }
+.pl-ytp__list li + li .pl-ytp__row { position: relative; }
+.pl-ytp__list li + li .pl-ytp__row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: calc(var(--s-4) + 64px + var(--s-3));
+  border-top: var(--hairline) solid var(--sep);
+}
+.pl-ytp__row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 8px var(--s-4);
+  border: 0;
+  text-align: left;
+  color: var(--text);
+  background: none;
+}
+.pl-ytp__row:active { background: var(--surface-3); }
+.pl-ytp__row .pl-ytp__txt b { font-weight: 400; -webkit-line-clamp: 1; }
+
+/* ═════════════════ Clase con vídeo (.pl--yt) ═════════════════
+   VERTICAL: reproductor arriba (16:9, a lo ancho, bajo el área segura) · nuestra barra · HUD debajo. */
+.pl--live.pl--yt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: "video" "ytbar" "hud";
+  --top-y: 8px;
+  --speed-fs: clamp(64px, min(24vw, 10.5dvh), 116px);
+  --cd-fs: 40px;
+  --pace-gap: max(10px, calc(var(--speed-fs) * 0.13));
+  --yt-w: min(640px, calc(100vw - var(--gx) - var(--gxr)));
+}
+/* sin mundo 3D ni tintes: negro puro detrás de todo */
+.pl--yt .pl-world,
+.pl--yt .pl-bg__tint,
+.pl--yt .pl-bg__floor { display: none; }
+
+.pl--yt .pl-yt {
+  grid-area: video;
+  position: relative;
+  justify-self: center;
+  width: var(--yt-w);
+  min-width: 200px;
+  aspect-ratio: 16 / 9;
+  min-height: 200px;
+  margin-top: calc(var(--safe-t) + 8px);
+  overflow: hidden;
+  border-radius: 12px;
+  background: #0a0a0c;
+  /* canto fino por FUERA del recuadro (outline): nada se dibuja sobre el reproductor */
+  outline: var(--hairline) solid rgba(255, 255, 255, 0.12);
+  outline-offset: 0;
+}
+.pl-yt__host, .pl-yt__frame, .pl-yt iframe { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; }
+
+/* Nuestra barra (debajo del vídeo): origen + título · «toca el vídeo» · Siguiente vídeo · Aleatorio (con lista) */
+.pl-ytbar {
+  grid-area: ytbar;
+  justify-self: center;
+  width: var(--yt-w);
+  min-width: 0;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: 8px;
+}
+.pl-ytbar__src { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.pl-ytbar__lbl { flex: none; font: 600 11px/1.1 var(--font); letter-spacing: 0.08em; text-transform: uppercase; color: var(--lbl); }
+.pl-ytbar__t, .pl-ytbar__hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 500 13px/1.25 var(--font); color: var(--ink2); }
+.pl-ytbar__hint { color: #fff; }
+.pl-ytbar__t[hidden], .pl-ytbar__hint[hidden] { display: none; }
+.pl-ytbar__btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--plate-edge);
+  border-radius: var(--r-pill);
+  font: 600 13px/1 var(--font);
+  color: #fff;
+  background: var(--glass-btn);
+  white-space: nowrap;
+}
+.pl-ytbar__btn:active { background: var(--glass-btn-on); }
+.pl-ytbar__sw[aria-checked="true"] { color: #000; background: #fff; border-color: #fff; }
+@media (max-width: 400px) {
+  /* «Siguiente vídeo» y «Aleatorio» caben como iconos con su rótulo accesible */
+  .pl-ytbar__btn { width: 34px; padding: 0; justify-content: center; }
+  .pl-ytbar__btn > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+
+/* El HUD, en su celda (ya no a pantalla completa): misma rejilla y mismos nodos de siempre, otra disposición */
+.pl--yt .hud {
+  grid-area: hud;
+  position: relative;
+  inset: auto;
+  min-height: 0;
+  height: 100%;
+  padding-top: var(--top-y);
+}
+.pl--yt .hud-speed { padding: 2px 0 6px; }
+.pl--yt .hud-zone { font-size: 13px; }
+.pl--yt .hud-pace { font-size: 17px; }
+.pl--yt .hud-lt { padding: 12px 16px 10px; }
+.pl--yt .hud-lt__bar { margin-top: 10px; }
+.pl--yt .hud-strip { height: 26px; margin-top: 8px; }
+.pl--yt .hud-lt__nt { font-size: 18px; }
+.pl--yt .hud-info { margin-top: 8px; padding: 9px 16px; }
+.pl--yt .hud-ctl { gap: 12px; padding: 10px 0 2px; }
+.pl--yt .hud-play { width: 60px; height: 60px; }
+.pl--yt .hud-ctl .hud-btn { width: 44px; height: 44px; }
+.pl--yt .hud-lockbar { padding: 10px 0 2px; }
+/* el HUD va en su propia rejilla: el orden de siempre, con los controles al final (bajo el pulgar) */
+.pl--yt .hud {
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-areas: "top" "speed" "test" "lt" "info" "ctl";
+}
+.pl--yt .hud-test { margin: 0 0 8px; }
+/* En pausa, la cápsula «En pausa» ocupa el sitio del rótulo de zona (vuelve al reanudar): sumadas, en un iPhone SE
+   la cifra crecía hacia arriba, la cápsula pisaba la barra superior y el ritmo quedaba bajo el panel «Queda» */
+.pl--yt[data-status="paused"] .hud-zone { display: none; }
+.pl--yt .hud-state { margin-bottom: 4px; padding: 5px 10px; }
+
+/* Sin modo TV ni «Sonando» de la DJ (la música es la del vídeo); vuelven si el vídeo falla (se quita .pl--yt) */
+.pl--yt .hud-tvbtn,
+.pl--yt .hud-tvhint,
+.pl--yt .hud-np { display: none; }
+/* El candado solo cubre el HUD (su celda), nunca el reproductor */
+.pl--yt .pl-lock { grid-area: hud; }
+/* Final: el recuadro se apaga con el resto del HUD */
+.pl--yt.is-finale .pl-yt,
+.pl--yt.is-finale .pl-ytbar { opacity: 0; transition: opacity 600ms ease; }
+/* Avisos globales (toasts): abajo, sobre los controles; arriba taparían el vídeo */
+body:has(.pl--live.pl--yt) #toast-root { top: auto; bottom: calc(var(--safe-b) + 92px); }
+
+/* Teléfonos bajos (iPhone mini / SE): el HUD se compacta para que quepa todo bajo el vídeo */
+@media (orientation: portrait) and (max-height: 760px) {
+  .pl--live.pl--yt { --speed-fs: clamp(56px, 9dvh, 84px); --cd-fs: 34px; }
+  .pl--yt .hud-strip { height: 20px; margin-top: 6px; }
+  .pl--yt .hud-lt { padding: 10px 14px 8px; }
+  .pl--yt .hud-ctl { gap: 10px; padding-top: 8px; }
+  .pl--yt .hud-play { width: 54px; height: 54px; }
+  .pl--yt .hud-ctl .hud-btn { width: 42px; height: 42px; }
+  .pl--yt .hud-info { margin-top: 6px; padding: 8px 14px; }
+}
+
+/* ═════════════════ HORIZONTAL: el mayor 16:9 a la izquierda · panel lateral oscuro (≈ 340 px) a la derecha ═════════════════ */
+@media (orientation: landscape) {
+  .pl--live.pl--yt {
+    /* panel lateral: ≈ 300–380 px útiles + el área segura derecha (isla dinámica en horizontal) */
+    --yt-side: calc(clamp(280px, 30vw, 360px) + var(--safe-r));
+    --yt-pad-t: max(10px, var(--safe-t));
+    --yt-pad-b: max(10px, var(--safe-b));
+    /* alto disponible para el vídeo: pantalla − márgenes − nuestra barra (34 + 8) */
+    /* ancho: de la zona segura izquierda (isla en horizontal) hasta 12 px antes del panel */
+    --yt-w: min(calc(100vw - var(--yt-side) - var(--gx) - 12px), calc((100dvh - var(--yt-pad-t) - var(--yt-pad-b) - 42px) * 16 / 9));
+    grid-template-columns: minmax(0, 1fr) var(--yt-side);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "video hud" "ytbar hud";
+    --speed-fs: clamp(56px, 15dvh, 96px);
+    --cd-fs: 34px;
+    --top-h: 34px;
+  }
+  /* pegado al panel (justify end + 12 px): centrado en su columna se metía 23 pt en la zona de la isla */
+  .pl--yt .pl-yt { align-self: end; margin: var(--yt-pad-t) 12px 0 0; justify-self: end; }
+  .pl--yt .pl-ytbar { align-self: start; justify-self: end; margin: 8px 12px var(--yt-pad-b) 0; }
+  .pl--yt .hud {
+    --gx: 14px;
+    --gxr: max(14px, var(--safe-r));
+    --top-y: var(--yt-pad-t);
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
+    grid-template-areas: "top" "speed" "test" "lt" "info" "ctl";
+    column-gap: 0;
+    padding: var(--top-y) var(--gxr) var(--yt-pad-b) var(--gx);
+    background: #0a0a0c;
+    box-shadow: inset var(--hairline) 0 0 rgba(255, 255, 255, 0.1);
+  }
+  .pl--yt .hud-speed { grid-area: speed; grid-column: auto; grid-row: auto; padding: 4px 0; }
+  .pl--yt .hud-test { justify-self: stretch; max-width: none; margin: 0 0 8px; min-height: 48px; }
+  .pl--yt .hud-top { padding: 0 12px; margin-right: calc(2 * 36px + 8px + 8px); }
+  .pl--yt .hud-top__title, .pl--yt .hud-top__el, .pl--yt .hud-top__div { display: none; }
+  .pl--yt .hud-top__sub::before { content: none; }
+  /* ✕ y estructura, a la derecha de la barra superior (no encima de la zona ni de la cifra) */
+  .pl--yt .hud-tools { position: static; grid-area: top; justify-self: end; align-self: center; gap: 8px; z-index: 3; }
+  .pl--yt .hud-tools .hud-btn { width: 36px; height: 36px; }
+  .pl--yt .hud-tools__sp { display: none; }
+  /* perfil y kcal fuera: en el panel caben la velocidad, el tramo, lo que queda, el pulso y los controles */
+  .pl--yt .hud-strip { display: none; }
+  .pl--yt .hud-lt { padding: 10px 14px 10px; }
+  .pl--yt .hud-lt__nt { font-size: 16px; }
+  .pl--yt .hud-info { padding: 8px 14px; }
+  /* «perfil y kcal fuera»: en 266 pt «Dist. 0,01 km» y «Kcal» se pegaban («kmKCAL») */
+  .pl--yt .hud-metrics > :nth-child(3), .pl--yt .hud-metrics > :nth-child(4) { display: none; }
+  .pl--yt .hud-m { flex: none; }
+  .pl--yt .hud-ctl, .pl--yt .hud-lockbar { gap: 6px; padding: 8px 0 0; }
+  .pl--yt .hud-play { width: 54px; height: 54px; }
+  .pl--yt .hud-ctl .hud-btn { width: 40px; height: 40px; }
+  .pl--yt .hud-duo { height: 42px; }
+  .pl--yt .hud-duo .mu-duo__btn { width: 38px; height: 38px; }
+  .pl--yt .hud-adj { width: 40px; height: 40px; }
+  .pl--yt .hud-adj--minus { right: calc(100% + 8px); }
+  .pl--yt .hud-adj--plus { left: calc(100% + 8px); }
+  .pl--yt.is-ctl .hud-bugs { transform: translateY(50px); }
+  .pl--yt .hud-note { max-width: calc(var(--yt-side) - 40px); }
+  .pl--yt .hud-done { left: var(--gx); right: var(--gxr); width: auto; bottom: var(--yt-pad-b); grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "ring txt" "btn btn" "skip skip"; }
+  body:has(.pl--live.pl--yt) #toast-root { top: auto; left: auto; right: max(14px, var(--safe-r)); width: calc(var(--yt-side) - 28px); bottom: calc(var(--safe-b) + 80px); }
+}

@@ -397,7 +397,7 @@ function readinessBlock(today) {
   if (r.temp != null && Math.abs(r.temp) >= 0.2) bits.push(`Temp. muñeca <b class="num">${r.temp > 0 ? '+' : ''}${fmt.dec1(r.temp)}</b> °C`);
   return `<section class="card td-ready td-ready--${r.level}" aria-label="Cómo está tu cuerpo hoy">
     <span class="td-ready__dot" aria-hidden="true"></span>
-    <div class="td-ready__txt"><b>${esc(r.title)}</b><span>${esc(r.text)}</span><small>${bits.join(' · ')} · frente a tus 4 semanas</small></div>
+    <div class="td-ready__txt"><b>${esc(r.title)}</b><span>${esc(r.text)}</span><small>${bits.join(' · ')} · frente a tus 4&nbsp;semanas</small></div>
   </section>`;
 }
 

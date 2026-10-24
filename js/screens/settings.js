@@ -256,7 +256,8 @@ function rowSummary(key, s) {
   const hist = s.history || [];
   switch (key) {
     case 'profile': return p.name ? esc(p.name) : 'Añade tu nombre';
-    case 'speeds': return LEVEL_KEYS.map((k) => fmt.speed(lv[k])).join(' · ');
+    // De trotar a sprint (las cuatro cifras no caben en un iPhone SE; el detalle está dentro)
+    case 'speeds': return `${fmt.speed(lv[LEVEL_KEYS[0]])} – ${fmt.speed(lv[LEVEL_KEYS[LEVEL_KEYS.length - 1]])} km/h`;
     case 'week': return `L–V ${sc.weekdayMinutes ?? 20}′ · J ${sc.thursdayMinutes ?? 50}′ · ${sc.weekendDay === 7 ? 'D' : 'S'} ${sc.weekendMinutes ?? 50}′`;
     case 'treadmill': return `${tm.hasIncline ? 'Inclinación · ' : ''}${fmt.speed(tm.maxSpeed ?? 18)} km/h`;
     case 'display': {
@@ -273,7 +274,7 @@ function rowSummary(key, s) {
     }
     case 'watch':
       if (isNative()) return 'App del reloj';
-      return s.integrations?.watchReminder === false ? 'Sin recordatorio' : 'Pulso con Atajos';
+      return s.integrations?.watchReminder === false ? 'Sin aviso' : 'Con Atajos';
     case 'install': return isStandalone() ? 'Instalada' : 'Sin instalar';
     case 'data': return `${hist.length} ${hist.length === 1 ? 'sesión' : 'sesiones'}`;
     case 'about': return `v${esc(APP_VERSION)}`;
@@ -609,7 +610,7 @@ const SCENES = (() => {
 const AUTO_SCENE = {
   id: AUTO_THEME,
   name: 'Automático',
-  description: 'Cada clase en su mundo: cuestas en la Cordillera, series y ritmos en el Estadio, rodajes largos en la Aurora y recuperación en Grafito.',
+  description: 'Cada clase en su mundo: cuestas en la Cordillera, series en el Estadio, rodajes en la Aurora y recuperación en Grafito.',
 };
 const sceneOf = (id) => (id === AUTO_THEME ? AUTO_SCENE : SCENES.find((t) => t.id === id) || SCENES.find((t) => t.id === DEFAULT_THEME) || SCENES[0] || { id: DEFAULT_THEME, name: 'Aurora', description: '' });
 const visualsOf = (s) => {
@@ -637,7 +638,7 @@ const SETTINGS_CSS = `
 .st-scene.is-on .st-scene__thumb{outline:2px solid var(--text);outline-offset:2px}
 .st-scene .st-row__label{min-width:0;flex:1}
 .st-scene .list__title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.st-scene .list__sub{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.st-scene .list__sub{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .st-scene.is-on .list__title{color:var(--text);font-weight:600}
 .st-scene .st-voice__check{margin-left:auto}
 @media (orientation:landscape) and (max-height:520px){.st-scene{padding-block:8px}.st-scene__thumb{width:44px;height:72px;border-radius:8px}}
@@ -778,7 +779,18 @@ function displayHtml(s) {
       <button type="button" class="btn btn--secondary btn--block pl-demo__btn" data-st="demo3d"${canDemo ? '' : ' disabled'}>${icon('play', 18)}<span>${esc(demoLabel(v))}</span></button>
     </section>
     ${feelHtml()}
-    ${introHtml()}`;
+    ${introHtml()}
+    ${labHtml()}`;
+}
+
+/* Laboratorio (beta): localStorage 'ritmup.lab.youtube' = 'on'. Apagado por defecto; sin él, el reproductor ni carga
+   js/player/youtube.js ni el script de YouTube (contrato con ../screens/player.js). */
+const LAB_YT_KEY = 'ritmup.lab.youtube';
+const labYtOn = () => safe(() => localStorage.getItem(LAB_YT_KEY) === 'on', false);
+function labHtml() {
+  return group('Laboratorio', toggleRow('st-lab-yt', 'Clase con vídeo de YouTube (beta)',
+    'En la preparación, elige «Vídeo de YouTube» como fondo y pega un enlace o una lista: se ve arriba y tus datos debajo. Sin mundo 3D ni música DJ en esa clase', labYtOn()),
+  'Funciones en pruebas: pueden cambiar o desaparecer.');
 }
 
 /** Demo de 10 s en la propia página: la escena real con una Pirámide, entrando en el primer sprint. */
@@ -1725,7 +1737,7 @@ function trackRow(t, disabled, i) {
     </button>
     <span class="mu-track__main">
       <span class="mu-track__title">${esc(title)}</span>
-      <span class="mu-track__meta">${user ? '<span class="mu-tag">Tuya</span>' : ''}${esc(t.artist || (user ? 'Importada' : 'Pixabay'))} · <b class="num">${fmtBpm(t.bpm)}</b> BPM</span>
+      <span class="mu-track__meta">${user ? '<span class="mu-tag">Tuya</span>' : ''}<span class="mu-track__artist">${esc(t.artist || (user ? 'Importada' : 'Pixabay'))}</span><span class="mu-track__bpm">· <b class="num">${fmtBpm(t.bpm)}</b> BPM</span></span>
     </span>
     ${energyBars(t.energy)}
     ${user ? `<button type="button" class="mu-more" data-edit-track="${esc(t.id)}" aria-label="Editar ${esc(title)}">${icon('edit', 17)}</button>` : ''}
@@ -2736,6 +2748,9 @@ const PAGES = {
       } else if (id === 'st-captions') {
         haptic('selection');
         set({ captions: !!v });
+      } else if (id === 'st-lab-yt') {
+        haptic('selection');
+        safe(() => { if (v) localStorage.setItem(LAB_YT_KEY, 'on'); else localStorage.removeItem(LAB_YT_KEY); });
       }
     },
     action(name, el, ctx) {

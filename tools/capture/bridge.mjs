@@ -13,17 +13,19 @@ const port = Number(process.argv[2]) || 9421;
 await launchChrome();
 let page = await connect();
 let clockId = null;
+const injIds = [];
 
 async function handle(c) {
   switch (c.op) {
     case 'setup': {
       if (clockId) { await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: clockId }).catch(() => {}); clockId = null; }
-      const m = await setPhone(page, { land: !!c.land });
+      // opcional: { w, h, dpr, insets: { top, bottom, side, landBottom }, scheme: 'light'|'dark' } (por defecto Pro Max oscuro)
+      const m = await setPhone(page, { land: !!c.land, ...(c.w ? { w: c.w, h: c.h } : {}), ...(c.dpr ? { dpr: c.dpr } : {}), ...(c.insets ? { insets: c.insets } : {}) });
       if (c.clock !== false) clockId = await installClock(page, { epoch: c.epoch ? new Date(c.epoch).getTime() : Date.now(), hour: c.hour ?? null });
-      await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }, { name: 'prefers-reduced-motion', value: 'no-preference' }] }).catch(() => {});
+      await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: c.scheme || 'dark' }, { name: 'prefers-reduced-motion', value: 'no-preference' }] }).catch(() => {});
       return m;
     }
-    case 'metrics': return setPhone(page, { land: !!c.land });
+    case 'metrics': return setPhone(page, { land: !!c.land, ...(c.w ? { w: c.w, h: c.h } : {}), ...(c.insets ? { insets: c.insets } : {}) });
     case 'nav': await navigate(page, c.url, { settleMs: c.settle ?? 1500, realWait: c.realWait ?? 1200 }); return page.eval('location.href');
     case 'eval': return page.eval(c.js);
     case 'tap': return tap(page, c.sel);
@@ -33,6 +35,9 @@ async function handle(c) {
     case 'shot': return shot(page, resolve(ROOT, c.file), { format: c.format || 'jpeg', quality: c.quality || 90 });
     case 'rec': return record(page, resolve(ROOT, c.file), { seconds: c.seconds ?? 5, perFrame: c.perFrame || null, before: c.before || null, sub: c.sub ?? 2, quality: c.quality ?? 94, actions: c.actions || [] });
     case 'logs': { const l = page.logs.splice(0); return l; }
+    // guion previo a la app en cada documento nuevo (p. ej. simular la app nativa) · { op: 'inject', js } · { op: 'uninject' }
+    case 'inject': injIds.push((await page.send('Page.addScriptToEvaluateOnNewDocument', { source: c.js })).identifier); return injIds.length;
+    case 'uninject': for (const id of injIds.splice(0)) await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: id }).catch(() => {}); return true;
     case 'reconnect': page.close(); page = await connect(); clockId = null; return true;
     default: throw new Error(`orden desconocida ${c.op}`);
   }

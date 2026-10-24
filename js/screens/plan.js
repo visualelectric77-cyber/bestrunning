@@ -311,7 +311,7 @@ function weekSummary(days) {
     <div class="stat-grid">
       ${cell('Sesiones', `${done}<span class="pn-of">/${train.length}</span>`, '')}
       ${cell('Tiempo', time, h ? 'h' : 'min')}
-      ${cell('Distancia est.', `${fmt.dec1(km)}`, 'km')}
+      ${cell('Distancia', `~${fmt.dec1(km)}`, 'km')}
     </div>
   </div>`;
 }
@@ -398,10 +398,10 @@ function askCoachHtml() {
     <label class="pn-ask__lbl" for="pn-ask-in">Cuéntale a tu coach</label>
     <div class="pn-ask__row">
       <input id="pn-ask-in" class="field pn-ask__in" type="text" maxlength="160" enterkeyhint="send"
-        placeholder="«Esta semana tengo poco tiempo», «mueve lo del jueves al viernes»…">
+        placeholder="Dime qué necesitas…">
       <button type="submit" class="btn btn--primary pn-ask__go" aria-label="Enviar">${icon('chevron-right', 18)}</button>
     </div>
-    <p class="pn-ask__hint">La IA de tu iPhone lo entiende; tú confirmas antes de cambiar nada.</p>
+    <p class="pn-ask__hint">Por ejemplo: «esta semana tengo poco tiempo» o «mueve lo del jueves al viernes». La IA de tu iPhone lo entiende y tú confirmas antes de cambiar nada.</p>
   </form>`;
 }
 
@@ -912,7 +912,7 @@ export function mount(el, { query } = {}) {
     if (!changes.length) { toast(reply || 'No hay nada que cambiar en tu plan con eso.', { icon: 'info', duration: 4200 }); return; }
     openSheet({
       title: 'Propuesta de tu coach',
-      html: `${reply ? `<p class="pn-ask__reply">${esc(reply)}</p>` : ''}<div class="list">${changes.map((c) => `<div class="list__row"><span class="list__title">${esc(capitalize(c.text))}</span></div>`).join('')}</div>`,
+      html: `${reply ? `<p class="pn-ask__reply">${esc(reply)}</p>` : ''}<div class="list">${changes.map((c) => `<div class="list__row"><span class="list__title">${esc(capitalize(c.text)).replace(/(\S+ → \S+(?: min)?)$/, '<span class="nowrap">$1</span>')}</span></div>`).join('')}</div>`,
       actions: [
         { label: 'Cancelar', kind: 'secondary', onClick: (close) => close?.() },
         { label: 'Aplicar', kind: 'primary', onClick: (close) => {
