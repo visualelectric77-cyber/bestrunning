@@ -3,6 +3,8 @@
 // filetes finos del color de la zona, rayas transversales que pasan a tu velocidad real, y cada cambio de tramo como
 // UNA línea fina de luz que viene por el suelo y se cruza justo en el segundo del cambio. Marcas de kilómetro en el
 // suelo con tipografía de retransmisión, fantasma como un punto de luz en la calle y oro suave si vas por delante.
+// Sensación de velocidad (ctx.speedFeel): juntas de la calle cada 2 m y balizas bajas cada 4 m a ambos lados, en el
+// mismo shader del suelo (contraste y densidad según la preferencia; nunca cambian la distancia ni las puertas).
 // 3 draw calls, shaders baratos, sin asignaciones por fotograma. Úsalo como plantilla para escenarios nuevos.
 
 export const meta = {
@@ -48,6 +50,7 @@ void main() {
 const FLOOR_FRAG = /* glsl */ `
 uniform vec3 uGround, uHorizon, uGlow, uLane, uGhostCol;
 uniform float uS, uFogD, uMid, uGhostZ, uGhostA, uLaneK, uAcross, uAcrossBase;
+uniform vec2 uFeel;              // sensación de velocidad: contraste de las señales cercanas, densidad de las juntas
 uniform vec4 uGate[${GATES}];     // z (relativo, < 0 delante), intensidad, -, -
 uniform vec3 uGateCol[${GATES}];
 varying vec3 vW;
@@ -78,11 +81,24 @@ void main() {
   // calles vecinas (cada 1,22 m), grises y tenues: lectura de pista de atletismo
   float lx = ax - LANE;
   float nb = lx > 0.3 ? bandAA(mod(lx + 0.61, 1.22), 0.61, 0.006 + dist * 0.00025) * (1.0 - smoothstep(2.0, 6.5, lx)) * exp(-dist * 0.012) : 0.0;
-  float tick = linesAA(s, 2.0, 0.008) * (1.0 - smoothstep(LANE - 0.05, LANE + 0.02, ax));
+  // juntas de la calle cada 2 m (1 m en 'intensa'): el flujo cercano que da la velocidad (pasan a tu velocidad)
+  float jsp = 2.0 / uFeel.y;
+  float tick = linesAA(s, jsp, 0.016) * (1.0 - smoothstep(LANE - 0.05, LANE + 0.02, ax));
+  // balizas bajas a ambos lados de la calle cada 4 m: tacos claros pegados al suelo (sin brillo ni destello)
+  float fwS = fwidth(s);
+  float fwX = fwidth(x);                           // (derivadas fuera de la rama: definidas en todo el cuadro 2×2)
+  float stud = 0.0;
+  if (fwS < 0.16) {
+    float bs = abs(fract(s / (4.0 / uFeel.y) + 0.5) - 0.5) * (4.0 / uFeel.y);
+    float bx = abs(ax - (LANE + 0.17));
+    stud = (1.0 - smoothstep(0.11, 0.11 + fwS * 1.5, bs)) * (1.0 - smoothstep(0.035, 0.035 + fwX * 1.5, bx));
+    stud *= 1.0 - smoothstep(0.05, 0.16, fwS);    // de lejos se apagan (sin centelleo)
+  }
   float gw = 0.006 + dist * 0.0003; // las líneas engordan con la distancia: sin punteado por aliasing
   float grid = max(linesAA(x, 4.0, gw), linesAA(s, 4.0, gw)) * smoothstep(LANE + 0.5, LANE + 1.6, ax) * (1.0 - smoothstep(10.0, 40.0, ax)) * exp(-dist * 0.01);
   col += uLane * edge * uLaneK * (0.55 + 0.45 * near) * (0.92 + 0.16 * uMid);
-  col += vec3(0.8, 0.85, 0.95) * (tick * 0.016 + grid * 0.0045 + nb * 0.03) * (0.35 + 0.65 * near);
+  col += vec3(0.8, 0.85, 0.95) * (tick * 0.07 * uFeel.x + grid * (0.0045 + 0.006 * uFeel.x) + nb * 0.03) * (0.35 + 0.65 * near);
+  col += vec3(0.78, 0.82, 0.9) * stud * 0.2 * uFeel.x * (0.4 + 0.6 * near);
   // cambios de tramo: una línea fina de luz que viene por el suelo y se cruza en el segundo exacto
   for (int i = 0; i < ${GATES}; i++) {
     float ga = uGate[i].y;
@@ -141,6 +157,7 @@ export function createTheme(ctx) {
     uGhostCol: { value: C('#9fe3ff') },
     uS: { value: 0 }, uFogD: { value: 0.0075 }, uMid: { value: 0 }, uGhostZ: { value: -30 }, uGhostA: { value: 0 },
     uLaneK: { value: 0.3 }, uAcross: { value: 9 }, uAcrossBase: { value: 0.25 },
+    uFeel: { value: new THREE.Vector2(1, 1) },
     uGate: { value: gateArr },
     uGateCol: { value: gateCol },
   };
@@ -227,6 +244,8 @@ export function createTheme(ctx) {
       floorU.uMid.value = f.reducedMotion ? 0 : sp.mid;
       floorU.uGround.value.copy(ground);
       floorU.uS.value = f.S % PERIOD;
+      const feel = ctx.speedFeel;
+      floorU.uFeel.value.set(feel ? feel.cue : 1, feel ? feel.density : 1);
 
       // líneas de cambio de tramo (las 3 siguientes y la recién cruzada mientras se aleja por detrás)
       let k = 0;

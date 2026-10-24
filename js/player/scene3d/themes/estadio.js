@@ -14,8 +14,10 @@
 // número, focos y gradas en la banda superior, la pista lejana en la ventana; horizontal — cámara exterior (calle 8): las
 // calles y el bordillo convergen en el hueco entre el número y la columna de datos y detrás de la columna solo hay gradas
 // oscuras y el arcén liso. Movimiento reducido: la cámara solo recorre rectas (cortes limpios en las curvas).
+// Sensación de velocidad (ctx.speedFeel, en el shader de la pista): marcas de ritmo cada ~2,5 m sobre las líneas de
+// tu calle y grano cercano algo más presente; cámara de raíl a 1,85 m (antes 2,3). Los metros siguen siendo reales.
 // 6–8 llamadas de dibujo, shaders baratos, cero asignaciones por fotograma.
-import { RC, LANE_W, LS, BEND, wrapS, pathPoint, easeCubicIntegral, A as HALF_STRAIGHT, R0, WALL } from './estadio/track.js';
+import { RC, LANE_W, LS, LC, BEND, wrapS, pathPoint, easeCubicIntegral, A as HALF_STRAIGHT, R0, WALL } from './estadio/track.js';
 import { buildSky, buildGround, buildStands, buildLights } from './estadio/stadium.js';
 import { DECAL_VERT, DECAL_FRAG } from './estadio/shaders.js';
 import { laneNumbersTexture, makePaint, makeBug, makeFinalGraphic } from './estadio/graphics.js';
@@ -226,6 +228,7 @@ export function createTheme(ctx) {
   let dimK = 0;
   let finA = 0;
   let firstFrame = true;
+  let feelD = -1;            // densidad de las marcas de ritmo compuesta en el uniforme
   let momentKey = -1;        // qué hay pintado en markB (1 MITAD · 2 META · 100+n escalón n)
   let lastSig = 0;
   const halfT = tl.totalSec / 2;
@@ -240,7 +243,8 @@ export function createTheme(ctx) {
     if (portrait) {
       const top = sp ? (sp.y + sp.h) / H : 0.45;
       const fy = clamp(top + 0.05, 0.4, 0.62);
-      base.lat = 0; base.h = 2.3; base.fov = 60; base.sx = 0; base.sy = 1 - 2 * fy;
+      // cámara de raíl a 1,85 m (2,3 hasta oct-26): a metros reales el flujo del suelo ∝ velocidad / altura de ojo
+      base.lat = 0; base.h = 1.85; base.fov = 60; base.sx = 0; base.sy = 1 - 2 * fy;
       G.uLaneCam.value.set(LANE_W, 2 * LANE_W);
     } else {
       // cámara exterior (calle 8): todas las calles a la izquierda bajan por el hueco libre de abajo a la izquierda; a la
@@ -250,7 +254,7 @@ export function createTheme(ctx) {
       const gapR = seg ? seg.x / W : 0.55;
       const fx = clamp((gapL + gapR) / 2, 0.45, 0.75);
       const fy = sp ? clamp((sp.y + sp.h) / H + 0.02, 0.5, 0.8) : 0.72;
-      base.lat = 7.5 * LANE_W - RC; base.h = 1.75; base.fov = 62; base.sx = 2 * fx - 1; base.sy = 1 - 2 * fy;
+      base.lat = 7.5 * LANE_W - RC; base.h = 1.6; base.fov = 62; base.sx = 2 * fx - 1; base.sy = 1 - 2 * fy;
       G.uLaneCam.value.set(7 * LANE_W, 8 * LANE_W);
     }
   }
@@ -453,6 +457,11 @@ export function createTheme(ctx) {
       lastSig = sig;
       placeWorld(sig, rm ? 0 : LOOK);
       G.uSigCam.value = wrapS(sig);
+      // sensación de velocidad: contraste y separación de las marcas de ritmo (un número entero por vuelta: sin costura)
+      const feel = ctx.speedFeel;
+      const fd = feel ? feel.density : 1;
+      if (fd !== feelD) { feelD = fd; G.uFeel.value.y = LC / Math.round(LC / (2.5 / fd)); }
+      G.uFeel.value.x = feel ? feel.cue : 1;
       G.uMotion.value = clamp((vNow * Math.max(dt, 1 / 60)) / 0.06 - 0.4, 0, 1);
 
       // ── color de zona exacto en el bordillo (el acento gradual del núcleo, en lo demás) ──

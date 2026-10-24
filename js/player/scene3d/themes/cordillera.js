@@ -12,6 +12,8 @@
 // el camino con rótulo de retransmisión; récord = acento dorado sutil. Final = corte limpio de realización a la maqueta
 // en relieve de la clase entera (la ruta de principio a fin en los colores de sus zonas) con una deriva lentísima.
 // Sin destellos, sin máscaras: la legibilidad sale de la composición.
+// Sensación de velocidad (ctx.speedFeel, en el shader del terreno): marcas cada 4 u junto al camino y mojones bajos
+// cada 8 u en el borde de la senda; ojo a 3,7 u (antes 4,2) y balanceo de zancada a la escala del mundo.
 // ~6 draw calls (cielo, terreno, luz del fantasma, ≤3 rótulos) + postproceso; sin asignaciones por fotograma.
 import { createProfile, bendAt, DS, S0, BASE, ZONE_KEYS } from './cordillera/profile.js';
 import { NB, TERRAIN_VERT, TERRAIN_FRAG, SKY_VERT, SKY_FRAG, DOT_VERT, DOT_FRAG } from './cordillera/glsl.js';
@@ -91,6 +93,7 @@ export function createTheme(ctx) {
     uMisc: { value: new THREE.Vector4(0, 0, 0, 1) },
     uLines: { value: new THREE.Vector4(2, 160, 0.2, 1) },
     uRoute: { value: new THREE.Vector2(-1e9, 1e9) },
+    uFeel: { value: new THREE.Vector2(1, 1) },
   };
   const NOISE = ctx.shaders.NOISE;
   const terrainMat = (back) => new THREE.ShaderMaterial({
@@ -198,7 +201,7 @@ export function createTheme(ctx) {
       st.fy = clamp(top + 0.47 * (bot - top), 0.48, 0.66);
       st.fx = 0.5;
       st.fov = 58;
-      st.eye = 4.2;
+      st.eye = 3.7;   // (4,2 hasta oct-26: el flujo del suelo ∝ velocidad / altura de ojo; más bajo = más velocidad)
       st.side = 0.32;
       st.aurBase = 0.42;
       st.aurAz = 0;
@@ -211,7 +214,7 @@ export function createTheme(ctx) {
       st.fx = clamp(gapL + 0.62 * Math.max(0, gapR - gapL), 0.45, 0.78);
       st.fy = seg ? clamp(seg.y / H, 0.3, 0.56) : 0.46;
       st.fov = 44;
-      st.eye = 5.2;
+      st.eye = 4.6;
       // un pelín a un lado del camino: la senda entra por abajo en el centro del hueco y sube hasta el punto de fuga
       const gapX = (gapL + 0.3 * Math.max(0, gapR - gapL)) * W;
       const dyPx = (1 - st.fy) * H;
@@ -401,6 +404,8 @@ export function createTheme(ctx) {
     misc.w = ctx.qualityLevel > 0 ? 1 : 0;
     U.uLines.value.z = (0.2 + 0.04 * f.approach) * (1 - 0.35 * st.pauseK);
     U.uLines.value.y = st.accentR;
+    const feel = ctx.speedFeel;
+    U.uFeel.value.set(feel ? feel.cue : 1, feel ? feel.density : 1);
 
     /* ── Cámara ── */
     const T = rig.target;
@@ -431,7 +436,7 @@ export function createTheme(ctx) {
       rig.settle.lookAt = 0.9;
       rig.settle.fov = 1.6;
       rig.settle.shift = 1.2;
-      rig.bobScale = 1;
+      rig.bobScale = 2.2;   // unidades de la cordillera ≈ 2,3× las de los demás escenarios (ojo a 3,7 u)
       U.uExag.value = 1;
       U.uFog.value.w = 0;
       misc.x = 0;

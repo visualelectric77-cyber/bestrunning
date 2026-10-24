@@ -16,6 +16,7 @@ import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
 import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagText } from '../core/diag.js';
+import { notifyAvailable, notifyConfig, setNotifyConfig } from '../integrations/ai.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -532,6 +533,20 @@ function cycleHtml(s) {
     <button type="button" class="btn btn--secondary btn--block" data-st="reset-cycle"><span>Reiniciar ciclo</span></button>`;
 }
 
+/** Avisos de la mañana (los programa el iPhone: js/integrations/ai.js → notify.config). */
+function notifyHtml() {
+  const c = notifyConfig();
+  const time = (id, title, sub, v) => `<label class="list__row st-row">${label(title, sub)}<input id="${id}" class="st-input st-time" type="time" value="${esc(v)}"></label>`;
+  return group('Avisos', `
+      ${toggleRow('st-ntf-on', 'Cómo estás para entrenar', 'Cada mañana: tu semáforo de fatiga y la clase del día', c.enabled)}
+      ${time('st-ntf-wd', 'De lunes a viernes', '', c.weekdayTime)}
+      ${time('st-ntf-we', 'Fin de semana', '', c.weekendTime)}
+      ${toggleRow('st-ntf-pre', 'Antes de correr', '«En 5 min corres» con tu clase', c.preRun)}
+      ${time('st-ntf-pre-t', 'Lunes a miércoles y viernes', 'Al salir de pesas', c.preRunTime)}
+      ${time('st-ntf-thu', 'Jueves', 'Tu sesión larga', c.thursdayPreRunTime)}
+    `, 'Tu iPhone mira de madrugada lo que midió el reloj mientras dormías (pulso en reposo, VFC, temperatura y respiración). Todo se calcula en el iPhone.');
+}
+
 function weekHtml(s) {
   const sc = s.schedule || {};
   return `${group('Duración de tus sesiones', `
@@ -541,6 +556,7 @@ function weekHtml(s) {
       ${segRow('Duración del finde', '', 'st-we-min', minuteOptions([45, 50, 55, 60], sc.weekendMinutes ?? 50), sc.weekendMinutes ?? 50)}
     `)}
     <section class="card st-wkcard" data-weekprev>${weekPreviewHtml(s)}</section>
+    ${notifyAvailable() ? notifyHtml() : ''}
     ${group('Recordatorio', `
       <label class="list__row st-row">${label('Hora de entrenar', 'Para los eventos del Calendario')}<input id="st-reminder" class="st-input st-time" type="time" value="${esc(sc.reminderTime || '07:00')}"></label>
     `, 'Se usa al añadir tu plan al Calendario desde «Mi plan», con aviso 10 minutos antes.')}
@@ -703,6 +719,36 @@ function introHtml() {
     </div>`;
 }
 
+/* Sensación de velocidad del mundo 3D (contrato con ../player/scene3d): localStorage 'ritmup.speedfeel' = 'real' |
+   'viva' (por defecto) | 'intensa'. Solo cambia la percepción (marcas cercanas, balanceo, campo de visión); el mundo
+   sigue sincronizado con la clase igual. */
+const FEEL_KEY = 'ritmup.speedfeel';
+const FEEL_OPTS = [
+  { value: 'real', title: 'Real', sub: 'Como lo ves en la cinta, sin exagerar nada' },
+  { value: 'viva', title: 'Viva', sub: 'Un punto más de sensación de velocidad (recomendada)' },
+  { value: 'intensa', title: 'Intensa', sub: 'Se siente como ir más rápido de lo que vas' },
+];
+const feelPref = () => safe(() => {
+  const v = localStorage.getItem(FEEL_KEY);
+  return FEEL_OPTS.some((o) => o.value === v) ? v : 'viva';
+}, 'viva');
+
+function feelHtml() {
+  const cur = feelPref();
+  const rows = FEEL_OPTS.map((o) => {
+    const on = o.value === cur;
+    return `<div class="list__row st-row st-voice${on ? ' is-on' : ''}" data-st="feel" data-feel="${o.value}" role="radio" aria-checked="${on}" tabindex="0">
+      ${label(esc(o.title), esc(o.sub))}
+      <span class="st-voice__check">${icon('check', 14)}</span>
+    </div>`;
+  }).join('');
+  return `<div class="st-group">
+      <div class="st-group__title">Sensación de velocidad</div>
+      <div class="list" role="radiogroup" aria-label="Sensación de velocidad">${rows}</div>
+      <p class="st-note">El mundo siempre va sincronizado con tu clase; esto solo cambia cuánto se nota la velocidad.</p>
+    </div>`;
+}
+
 function displayHtml(s) {
   ensureSettingsCss();
   const v = visualsOf(s);
@@ -731,6 +777,7 @@ function displayHtml(s) {
       </div>
       <button type="button" class="btn btn--secondary btn--block pl-demo__btn" data-st="demo3d"${canDemo ? '' : ' disabled'}>${icon('play', 18)}<span>${esc(demoLabel(v))}</span></button>
     </section>
+    ${feelHtml()}
     ${introHtml()}`;
 }
 
@@ -2594,6 +2641,12 @@ const PAGES = {
         if (host) host.innerHTML = weekPreviewHtml(getState());
       } else if (id === 'st-reminder' && /^\d{2}:\d{2}/.test(String(v))) {
         ctx.save((d) => { d.schedule.reminderTime = String(v).slice(0, 5); });
+      } else if (id === 'st-ntf-on' || id === 'st-ntf-pre') {
+        haptic('selection');
+        setNotifyConfig(id === 'st-ntf-on' ? { enabled: !!v } : { preRun: !!v });
+      } else if (['st-ntf-wd', 'st-ntf-we', 'st-ntf-pre-t', 'st-ntf-thu'].includes(id) && /^\d{2}:\d{2}/.test(String(v))) {
+        const key = { 'st-ntf-wd': 'weekdayTime', 'st-ntf-we': 'weekendTime', 'st-ntf-pre-t': 'preRunTime', 'st-ntf-thu': 'thursdayPreRunTime' }[id];
+        setNotifyConfig({ [key]: String(v).slice(0, 5) });
       }
     },
     async action(name, el, ctx) {
@@ -2697,6 +2750,16 @@ const PAGES = {
         if (v === introPref()) return;
         haptic('selection');
         safe(() => localStorage.setItem(INTRO_KEY, v));
+      } else if (name === 'feel') {
+        const v = FEEL_OPTS.some((o) => o.value === el.dataset.feel) ? el.dataset.feel : 'viva';
+        ctx.body.querySelectorAll('[data-feel]').forEach((r) => {
+          const on = r.dataset.feel === v;
+          r.classList.toggle('is-on', on);
+          r.setAttribute('aria-checked', String(on));
+        });
+        if (v === feelPref()) return;
+        haptic('selection');
+        safe(() => localStorage.setItem(FEEL_KEY, v));
       } else if (name === 'scene') {
         const id = el.dataset.scene === AUTO_THEME ? AUTO_THEME : sceneOf(el.dataset.scene).id;
         const before = visualsOf(getState()).theme;

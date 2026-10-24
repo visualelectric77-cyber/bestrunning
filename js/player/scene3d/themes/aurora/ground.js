@@ -24,6 +24,7 @@ const FRAG = /* glsl */ `
 #define RIPS ${RIPS}
 uniform vec3 uGround, uHorizon, uRiverCol, uKmCol, uGhostCol, uGold, uAmb;
 uniform float uGlow, uWidth, uFogD, uRecord, uFade, uVpK, uSg, uRelief;
+uniform vec2 uFeel;      // sensación de velocidad: contraste de las señales cercanas, densidad de las balizas
 uniform vec3 uAccent;
 uniform vec4 uGate[GATES];
 uniform vec3 uGateCol[GATES];
@@ -70,8 +71,10 @@ void main() {
   float fr = 0.03 + 0.97 * pow(1.0 - cosT, 5.0);
   col = mix(col, hz, fr * 0.8);
   // luz de la aurora sobre la llanura: velo frío que revela el relieve, más presente hacia el horizonte
-  float nearK = smoothstep(2.0, 14.0, d);
-  col += uAmb * tex * uRelief * nearK * (0.35 + 0.65 * smoothstep(4.0, 60.0, d)) * (1.0 - fr * 0.6);
+  // (la sensación de velocidad acerca el relieve: el flujo cercano es el que se siente; su LOD ya evita el parpadeo)
+  float feelK = clamp(uFeel.x, 0.0, 1.5);
+  float nearK = mix(smoothstep(2.0, 14.0, d), smoothstep(0.6, 5.0, d), min(feelK, 1.0));
+  col += uAmb * tex * uRelief * nearK * (0.35 + 0.65 * smoothstep(4.0, 60.0, d) + 0.5 * feelK * (1.0 - smoothstep(6.0, 30.0, d))) * (1.0 - fr * 0.6);
   // resplandor del río (del color de cada tramo de río), que también ilumina el relieve
   vec3 rc = uRiverCol;
   for (int k = 0; k < GATES; k++) if (uGate[k].y > 0.0) rc = mix(rc, uGateCol[k], smoothstep(uGate[k].x - 0.5, uGate[k].x + 0.5, d));
@@ -109,6 +112,18 @@ void main() {
     float tr = behind > 0.0 ? 0.25 + 0.75 * exp(-behind / 16.0) : 0.12;
     col += uGhostCol * exp(-gx * gx * 90.0) * tr * uGhost.z * 0.05 * smoothstep(6.0, 18.0, d);
   }
+  // balizas de nieve: tacos bajos y claros en las dos orillas del río cada 3 u (pasan a tu velocidad; sin brillo).
+  // Se apagan de lejos (sin centelleo) y muy cerca de la cámara (detrás del rótulo inferior)
+  float fwz = 2.2222 * fwidth(q1.y);                // = fwidth(zw), ya calculada para el LOD del relieve
+  float fwdx = fwidth(dx);                          // (derivadas fuera de la rama)
+  if (uFeel.x > 0.001 && fwz < 0.15) {
+    float bsp = 3.0 / max(uFeel.y, 0.5);
+    float bs = abs(fract(zw / bsp + 0.5) - 0.5) * bsp;
+    float bx = abs(abs(dx) - (uWidth * 2.4 + 0.25));
+    float stud = (1.0 - smoothstep(0.09, 0.09 + fwz * 1.5, bs)) * (1.0 - smoothstep(0.035, 0.035 + fwdx * 1.5, bx));
+    stud *= (1.0 - smoothstep(0.05, 0.15, fwz)) * smoothstep(0.8, 2.5, d);
+    col += vec3(0.62, 0.7, 0.86) * stud * 0.16 * uFeel.x * uFade;
+  }
   // niebla al color del horizonte ⇒ horizonte sin costura
   float fx = dist * uFogD;
   col = mix(col, hz, 1.0 - exp(-fx * fx));
@@ -127,6 +142,7 @@ export function createGround(ctx, shared) {
     uAmb: { value: new THREE.Color('#1b2140') },
     uGlow: { value: 0.05 }, uWidth: { value: 1.5 }, uFogD: { value: 0.0062 }, uRecord: { value: 0 }, uFade: { value: 1 },
     uVpK: { value: 1 }, uAccent: { value: new THREE.Color() }, uSg: { value: 0 }, uRelief: { value: 0.05 },
+    uFeel: { value: new THREE.Vector2(1, 1) },
     uBend: shared.uBend, uSm: shared.uSm, uGate: shared.uGate, uGateCol: shared.uGateCol, uKm: shared.uKm,
     uMark: shared.uMark, uGhost: shared.uGhost,
     uSun: { value: new THREE.Color(0, 0, 0) }, uSunAz: { value: -0.3 },

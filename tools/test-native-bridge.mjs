@@ -106,6 +106,7 @@ const SCHEMA = {
     watch: { paired: 'bool', installed: 'bool', reachable: 'bool', link: 'str', workout: 'str', run: opt('str') },
     health: { auth: 'str', hr: opt('str') }, backup: opt({ savedAt: 'num', sessions: 'int', bytes: 'int' }),
     caps: opt(arr('str')), // build 6: lo que sabe hacer la app (solo en native.hello)
+    aiReason: opt('str'), // build 9: por qué no hay IA del iPhone (sin 'ai' en caps)
   },
   backup: { savedAt: 'num', sessions: 'int', json: 'str' },
   'backup.get': {},
@@ -114,10 +115,18 @@ const SCHEMA = {
   'audio.session': { type: 'str' },
   'audio.kick': { reason: 'str' },
   haptic: { style: opt('str') }, // build 6: vibración de iOS (js/core/haptics.js → BRNative.post)
+  // build 9: Salud para el semáforo de fatiga, IA del iPhone y avisos de la mañana (js/integrations/ai.js)
+  'health.metrics.get': { days: opt('int') },
+  'health.metrics': { resting: arr('any'), hrv: arr('any'), wristTemp: opt(arr('any')), wristTempAbsolute: opt('bool'), respiratory: opt(arr('any')), at: 'num' },
+  'ai.request': { id: 'str', task: 'str', input: 'obj' },
+  'ai.result': { id: 'str', task: opt('str'), ok: 'bool', output: opt('obj'), error: opt('str'), message: opt('str') },
+  'notify.config': { enabled: 'bool', weekdayTime: 'str', weekendTime: 'str', preRun: 'bool', preRunTime: 'str', thursdayPreRunTime: opt('str') },
+  'notify.status': { authorized: 'bool', enabled: 'bool' },
+  'plan.days': { days: arr({ dayKey: 'str', title: 'str', minutes: 'int', category: 'str', rest: 'bool', segments: opt(arr('any')) }) },
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',
-  'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic'];
+  'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic', 'health.metrics.get', 'ai.request', 'notify.config', 'plan.days'];
 const HAPTIC_STYLES = ['light', 'medium', 'heavy', 'soft', 'rigid', 'selection', 'success', 'warning', 'error'];
 const ID_REQUIRED = new Set(['cmd', 'workout.summary', 'backup.get']);
 // Decimales máximos (§3.1): km/h 1 · km 3 · left/elapsed/remaining 1 · volumen 2
@@ -136,6 +145,8 @@ function checkVal(spec, v, p, errs) {
   if (spec === 'num') { if (typeof v !== 'number' || !Number.isFinite(v)) errs.push(`${p}: debe ser número (${v})`); return; }
   if (spec === 'str') { if (typeof v !== 'string') errs.push(`${p}: debe ser texto`); return; }
   if (spec === 'bool') { if (typeof v !== 'boolean') errs.push(`${p}: debe ser booleano`); return; }
+  if (spec === 'obj') { if (!isObj(v)) errs.push(`${p}: debe ser objeto`); return; } // contenido libre (entrada y salida de la IA)
+  if (spec === 'any') return; // [dayKey, número] y tramos [zona, s]: listas mixtas
   if (spec && spec.arr) {
     if (!Array.isArray(v)) { errs.push(`${p}: debe ser lista`); return; }
     v.forEach((x, i) => checkVal(spec.arr, x, `${p}[${i}]`, errs));

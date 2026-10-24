@@ -97,6 +97,7 @@ uniform vec4 uMarkK;          // 1 = kilómetro
 uniform vec4 uMoment;         // x σrel MITAD, y intensidad, z σrel META de la clase, w intensidad
 uniform vec4 uBank[6];        // focos (mundo) + intensidad (reflejo satinado)
 uniform vec2 uLaneCam;        // calle de la cámara [r0, r1]
+uniform vec2 uFeel;           // sensación de velocidad: x contraste de las señales cercanas, y separación de las marcas (σ)
 varying vec3 vW;
 varying vec2 vP;
 NOISE_CHUNK
@@ -140,7 +141,9 @@ void main() {
   float lr = fract(r / TLW);
   float streak = vnoise(vec2(sig * 0.32, r * 7.0));
   float wear = exp(-pow((lr - 0.5) / 0.24, 2.0)) * mix(1.0, 0.2, li / 7.0) * onLanes * (0.55 + 0.45 * streak);
-  vec3 synth = mix(uTrack, uApron, apronM) * (0.84 + 0.16 * n1 + 0.1 * (mott - 0.5) + 0.14 * (grain - 0.5)) * (1.0 + 0.16 * wear);
+  // (el grano cercano es el flujo óptico más fino: la sensación de velocidad lo sube un poco donde hay píxeles)
+  float grainK = 0.14 + 0.1 * clamp(uFeel.x, 0.0, 1.5) * near * uDetail;
+  vec3 synth = mix(uTrack, uApron, apronM) * (0.84 + 0.16 * n1 + 0.1 * (mott - 0.5) + grainK * (grain - 0.5)) * (1.0 + 0.16 * wear);
   float stripe = 0.5 + 0.5 * cos(p.x * (PI / 6.0));
   float sw = 1.0 - smoothstep(0.5, 3.0, fwidth(p.x) * 2.0);
   vec3 grass = uGrass * (0.8 + 0.32 * mix(0.5, stripe, sw) + 0.12 * (n1 - 0.5));
@@ -162,7 +165,12 @@ void main() {
   float across = smoothstep(-0.05, 0.02, r) * (1.0 - smoothstep(TTW, TTW + 0.05, r));
   float fin = lineAA(abs(relSig(TLS, uSigCam) - srel) * sScale, 0.025, fwM);
   fin += lineAA(abs(relSig(TLS + PI * TRCP, uSigCam) - srel) * sScale, 0.025, fwM);
-  float paint = max(max(lane, hurdle * 0.55), fin * across);
+  // marcas de ritmo: pequeñas marcas claras sobre las dos líneas de TU calle cada ~2,5 m (como las de vallas, más
+  // seguidas): el flujo cercano que da la sensación de velocidad a metros reales. Solo de cerca (sin moaré)
+  float sR = abs(fract(sig / uFeel.y + 0.5) - 0.5) * uFeel.y * sScale;
+  float camLine = max(lineAA(abs(r - uLaneCam.x), 0.07, fwR), lineAA(abs(r - uLaneCam.y), 0.07, fwR));
+  float rhythm = lineAA(sR, 0.05, fwM) * camLine * near * clamp(0.15 + 0.5 * uFeel.x, 0.0, 1.0);
+  float paint = max(max(max(lane, hurdle * 0.55), fin * across), rhythm);
   vec3 col = mix(base, uPaint * uPaintK, paint);
   col = mix(col, vec3(0.42, 0.43, 0.45) * uPaintK, curb);       // bordillo de aluminio
 

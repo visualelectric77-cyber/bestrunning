@@ -29,6 +29,8 @@
 // Música por instrumento: bombo → ondas concéntricas finas en la escarcha, confinadas al lecho del río · charles →
 // brillo leve de una fracción de las motas · medios → amplitud lenta de las cortinas. Reducido: ondas lentas y raras.
 // Sprint (vertical): las dos cortinas delanteras se cruzan en V hacia el punto de fuga y enmarcan el río.
+// Sensación de velocidad (ctx.speedFeel, en el shader del suelo): el relieve de la escarcha llega hasta cerca de la
+// cámara y unas balizas de nieve bajas marcan las orillas del río cada 3 u (sin brillo; nunca tocan la distancia).
 // Coste: 5 draw calls (cielo, estrellas, suelo, cortinas, río) + rótulos ocasionales; sin asignaciones por fotograma.
 import { createSky, createDaylight } from './aurora/sky.js';
 import { createRibbons } from './aurora/ribbons.js';
@@ -589,6 +591,8 @@ export function createTheme(ctx) {
     amb.copy(ambBase).lerp(skyAcc, 0.12);
     gu.uAmb.value.copy(amb);
     gu.uRelief.value = (0.32 + 0.08 * st.energy) * intro;
+    const feel = ctx.speedFeel;
+    gu.uFeel.value.set(feel ? feel.cue : 1, feel ? feel.density : 1);
     gu.uSun.value.copy(sky.u.uSun.value);
     gu.uSunAz.value = sky.u.uSunAz.value;
     for (let i = 0; i < RIPS; i++) {

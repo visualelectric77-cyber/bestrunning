@@ -13,6 +13,8 @@ import { EVENTS } from '../training/season.js';
 import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js';
 import { buildWorkout } from '../training/generator.js';
 import { exportPlanToCalendar } from '../integrations/ics.js';
+import { aiAvailable, aiRequest } from '../integrations/ai.js';
+import { planChanges } from '../training/plan-intent.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, makeRng,
 } from '../core/utils.js';
@@ -390,6 +392,19 @@ function dayRow(day, today, i, createdKey, state) {
     </div>${extras}</li>`;
 }
 
+/* ── Plan hablado: «Cuéntale a tu coach» (IA del iPhone → js/training/plan-intent.js → confirmar) ── */
+function askCoachHtml() {
+  return `<form class="card pn-ask" data-ask-coach autocomplete="off">
+    <label class="pn-ask__lbl" for="pn-ask-in">Cuéntale a tu coach</label>
+    <div class="pn-ask__row">
+      <input id="pn-ask-in" class="field pn-ask__in" type="text" maxlength="160" enterkeyhint="send"
+        placeholder="«Esta semana tengo poco tiempo», «mueve lo del jueves al viernes»…">
+      <button type="submit" class="btn btn--primary pn-ask__go" aria-label="Enviar">${icon('chevron-right', 18)}</button>
+    </div>
+    <p class="pn-ask__hint">La IA de tu iPhone lo entiende; tú confirmas antes de cambiar nada.</p>
+  </form>`;
+}
+
 function view(state, monday, today, first) {
   const ci = safe(() => cycleInfo(state, monday), null);
   const days = safe(() => planWeek(state, monday), null);
@@ -422,6 +437,7 @@ function view(state, monday, today, first) {
   const block = si || ci ? `<div class="card pn-block">${seasonBlock(si)}${cycleBar(ci)}</div>` : '';
   return `
     ${weekHeader(monday, ci, canPrev, canNext, monday === curMonday)}
+    ${monday === curMonday && aiAvailable() ? askCoachHtml() : ''}
     ${block}
     ${weekSummary(days)}
     ${testNote}
@@ -869,6 +885,47 @@ export function mount(el, { query } = {}) {
   // Tras soltar, repinta si hubo cambios del store durante el arrastre.
   const onPointerEnd = () => setTimeout(() => dirty && render(), 400);
 
+  // Plan hablado
+  const onAsk = async (e) => {
+    const form = e.target.closest?.('[data-ask-coach]');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const text = String(input?.value || '').trim();
+    if (!text || form.dataset.busy) return;
+    form.dataset.busy = '1';
+    form.classList.add('is-busy');
+    haptic('light');
+    const today = todayKey();
+    const week = safe(() => planWeek(getState(), mondayOf(today)), []).filter((d) => d.date >= today);
+    const next = safe(() => planWeek(getState(), addDays(mondayOf(today), 7)), []);
+    const days = [...week, ...next].slice(0, 10);
+    const out = await aiRequest('planIntent', {
+      text, today,
+      week: days.map((d) => ({ dayKey: d.date, weekday: dayName(d.date), status: d.status, title: d.workout?.title || (d.kind === 'rest' ? 'Descanso' : ''), minutes: d.minutes || 0 })),
+    });
+    delete form.dataset.busy;
+    form.classList.remove('is-busy');
+    if (!out) { toast('Tu coach no ha podido responder ahora. Prueba de nuevo o cambia el día a mano.', { icon: 'info' }); return; }
+    const changes = safe(() => planChanges(getState(), out, today, days, { alternativesFor, getTemplate, setDayOverride, swapDays }), []);
+    const reply = String(out.reply || '').slice(0, 240);
+    if (!changes.length) { toast(reply || 'No hay nada que cambiar en tu plan con eso.', { icon: 'info', duration: 4200 }); return; }
+    openSheet({
+      title: 'Propuesta de tu coach',
+      html: `${reply ? `<p class="pn-ask__reply">${esc(reply)}</p>` : ''}<div class="list">${changes.map((c) => `<div class="list__row"><span class="list__title">${esc(capitalize(c.text))}</span></div>`).join('')}</div>`,
+      actions: [
+        { label: 'Cancelar', kind: 'secondary', onClick: (close) => close?.() },
+        { label: 'Aplicar', kind: 'primary', onClick: (close) => {
+          setState((d) => { for (const c of changes) c.apply(d); });
+          haptic('success');
+          if (input) input.value = '';
+          close?.();
+          toast('Plan actualizado', { icon: 'check' });
+        } },
+      ],
+    });
+  };
+  el.addEventListener('submit', onAsk, true);
   el.addEventListener('click', onClick, true);
   el.addEventListener('keydown', onKey);
   root.addEventListener('pointerup', onPointerEnd);
@@ -881,6 +938,7 @@ export function mount(el, { query } = {}) {
     drag.destroy();
     cleanupHeader?.();
     el.removeEventListener('click', onClick, true);
+    el.removeEventListener('submit', onAsk, true);
     el.removeEventListener('keydown', onKey);
     root.removeEventListener('pointerup', onPointerEnd);
   };

@@ -74,6 +74,7 @@ export function buildGround(THREE, noiseChunk) {
     uMoment: { value: new THREE.Vector4(1e5, 0, 1e5, 0) },
     uBank: { value: banks },
     uLaneCam: { value: new THREE.Vector2(1.22, 2.44) },
+    uFeel: { value: new THREE.Vector2(1, 2.5) },
   };
   // plano único en XZ (espacio del estadio): cubre el interior hasta bajo las gradas
   const geo = new THREE.PlaneGeometry(2 * (A + R0 + WALL + 60), 2 * (R0 + WALL + 60), 1, 1);

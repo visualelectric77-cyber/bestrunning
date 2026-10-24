@@ -8,6 +8,7 @@ import { ACHIEVEMENTS } from '../training/achievements.js';
 import { coachInsight } from '../training/progression.js';
 import { ZONES, LEVEL_KEYS, vamFromLevels, estimateVo2max, vo2Category } from '../training/levels.js';
 import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, round1 } from '../core/utils.js';
+import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
 import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integrations/watch-hr.js';
 import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integrations/session-music.js';
 
@@ -372,7 +373,27 @@ function speedsSection(s, today) {
     <div class="list pg-levels">${tiles}</div>
     ${chart}
     ${vo2Card(s)}
+    ${racesCard(s)}
   </section>`;
+}
+
+/** Marcas estimadas por tu VAM (js/training/race-predict.js): un rango por distancia y el ritmo medio por km. */
+function racesCard(s) {
+  const vam = safe(() => vo2Data(s).vam, 0);
+  const rows = safe(() => predictRaces(vam), []);
+  if (!rows.length) return '';
+  const pace = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  return `<div class="card pg-card pg-races">
+    <div class="pg-card__head"><div class="eyebrow">Tus marcas estimadas</div></div>
+    <div class="list pg-races__list">
+      ${rows.map((r) => `<div class="list__row pg-races__row">
+        <span class="list__title">${esc(r.label)}</span>
+        <span class="pg-races__time num">${fmtRaceTime(r.fastSec)}<span class="pg-races__sep">–</span>${fmtRaceTime(r.slowSec)}</span>
+        <span class="pg-races__pace num">${pace(r.paceSec)}<small>/km</small></span>
+      </div>`).join('')}
+    </div>
+    <p class="muted pg-races__note">Según tu VAM de ${fmt.speed(vam)} km/h. El tiempo rápido es con buen día y entrenamiento específico. En la cinta, con un 1 % de inclinación se parece más a correr fuera.</p>
+  </div>`;
 }
 
 function vo2Data(s) {

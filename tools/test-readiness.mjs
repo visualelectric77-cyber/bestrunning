@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+// RITMUP · pruebas del semáforo de fatiga (js/training/readiness.js) y de la comprobación de cifras de la IA.
+import { readiness } from '../js/training/readiness.js';
+import { numbersAreGrounded } from '../js/integrations/ai.js';
+let n = 0; let bad = 0;
+const ok = (c, m) => { n++; if (!c) { bad++; console.log(`  ✗ ${m}`); } };
+const today = '2026-10-24';
+const day = (k) => { const d = new Date(2026, 9, 24); d.setDate(d.getDate() - k); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const series = (recent, base) => Array.from({ length: 35 }, (_, k) => [day(k), k < 7 ? recent : base]);
+ok(readiness(null, today) === null, 'sin datos: nada');
+ok(readiness({ resting: [[today, 50]], hrv: [] }, today) === null, 'pocos días: nada');
+ok(readiness({ resting: series(52, 52), hrv: series(50, 50) }, today)?.level === 'green', 'en tu línea: verde');
+ok(readiness({ resting: series(56, 52), hrv: series(50, 50) }, today)?.level === 'amber', 'reposo +4: ámbar');
+ok(readiness({ resting: series(59, 52), hrv: series(50, 50) }, today)?.level === 'red', 'reposo +7: rojo');
+ok(readiness({ resting: series(52, 52), hrv: series(38, 50) }, today)?.level === 'red', 'VFC −24 %: rojo');
+ok(readiness({ resting: series(55, 52), hrv: series(44, 50) }, today)?.level === 'red', 'dos ámbar: rojo');
+ok(readiness({ resting: [], hrv: series(50, 50) }, today)?.level === 'green', 'solo VFC también vale');
+const r = readiness({ resting: series(56, 52), hrv: series(45, 50) }, today);
+ok(r.resting.delta === 4 && r.hrv.pct === -10, `cifras (${r.resting.delta}, ${r.hrv.pct})`);
+ok(numbersAreGrounded('Has corrido 6,58 km en 45 minutos a 8,8 km/h', [6.58, 45, 8.8]), 'cifras del input: fiable');
+ok(!numbersAreGrounded('Has corrido 7 km en 45 minutos', [6.58, 45]), 'cifra inventada: no fiable');
+ok(numbersAreGrounded('Muy buena sesión, sigue así', []), 'sin cifras: fiable');
+const flat = (v) => Array.from({ length: 35 }, (_, k) => [day(k), v]);
+ok(readiness({ resting: series(56, 52), hrv: series(50, 50), wristTemp: [[day(0), 0.6], [day(1), 0.5]], respiratory: [] }, today)?.title === 'Puede que estés incubando algo', 'temperatura + reposo: posible catarro');
+ok(readiness({ resting: [], hrv: [], wristTemp: [[day(0), 0.9]] }, today)?.level === 'red', 'solo temperatura alta: rojo');
+ok(readiness({ resting: series(52, 52), hrv: series(50, 50), wristTemp: [[day(0), 0.1]], respiratory: series(14, 14) }, today)?.level === 'green', 'temperatura normal: verde');
+ok(readiness({ resting: series(52, 52), hrv: series(50, 50), respiratory: Array.from({ length: 35 }, (_, k) => [day(k), k < 3 ? 17.5 : 14]) }, today)?.level === 'red', 'respiración +3,5: rojo');
+void flat;
+console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ fatiga e IA: ${n} comprobaciones`);
+process.exitCode = bad ? 1 : 0;

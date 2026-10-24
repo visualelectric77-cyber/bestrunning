@@ -19,6 +19,8 @@ import {
   openSwapSheet, seasonOf, seasonLine, seasonChips, sessionsOn, sessionRow, ensureSeasonStyles, eventIntro, altItem,
 } from './plan.js';
 import { eventOn } from '../training/season.js';
+import { readiness } from '../training/readiness.js';
+import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
 const INSTALL_KEY = 'br.td.installDismissed';
 
@@ -385,6 +387,20 @@ function eventBanner(si, today) {
 }
 
 /** Todas las sesiones hechas el día elegido (planificada y extra), cada una con su resumen. */
+/** Semáforo de fatiga (pulso en reposo y VFC de Salud, js/training/readiness.js). Solo con datos suficientes. */
+function readinessBlock(today) {
+  const r = safe(() => readiness(cachedHealthMetrics(), today), null);
+  if (!r) return '';
+  const bits = [];
+  if (r.resting) bits.push(`Reposo <b class="num">${r.resting.now}</b> ppm${r.resting.delta ? ` <span class="td-ready__d">(${r.resting.delta > 0 ? '+' : ''}${r.resting.delta})</span>` : ''}`);
+  if (r.hrv) bits.push(`VFC <b class="num">${r.hrv.now}</b> ms${r.hrv.pct ? ` <span class="td-ready__d">(${r.hrv.pct > 0 ? '+' : ''}${r.hrv.pct} %)</span>` : ''}`);
+  if (r.temp != null && Math.abs(r.temp) >= 0.2) bits.push(`Temp. muñeca <b class="num">${r.temp > 0 ? '+' : ''}${fmt.dec1(r.temp)}</b> °C`);
+  return `<section class="card td-ready td-ready--${r.level}" aria-label="Cómo está tu cuerpo hoy">
+    <span class="td-ready__dot" aria-hidden="true"></span>
+    <div class="td-ready__txt"><b>${esc(r.title)}</b><span>${esc(r.text)}</span><small>${bits.join(' · ')} · frente a tus 4 semanas</small></div>
+  </section>`;
+}
+
 function sessionsBlock(state, day, dateKey, today) {
   const list = sessionsOn(state, dateKey);
   if (!list.length) return '';
@@ -480,6 +496,9 @@ export function mount(el) {
     const streak = typeof stats.streakWeeks === 'function' ? safe(() => stats.streakWeeks(state, new Date()), 0) : 0;
     const si = seasonOf(state, today);
 
+    // Avisos de la mañana: el iPhone necesita saber qué toca los próximos días (solo manda si ha cambiado)
+    safe(() => { const nx = planWeek(state, addDays(mondayOf(today), 7)) || []; syncPlanDays([...(list || []).filter((d) => d.date >= today), ...nx]); }, null);
+
     const blocks = [
       `<div class="td-head">
         <span class="td-date">${esc(capitalize(fmt.dateLong(today)))}</span>
@@ -487,6 +506,7 @@ export function mount(el) {
       </div>`,
       list ? `<section class="td-week">${seasonBar(si)}${weekStrip(list, today, selected, state)}</section>` : seasonBar(si),
       eventBanner(si, today),
+      selected === today ? readinessBlock(today) : '',
       heroBlock(day, state, today, heroAnim),
       safe(() => sessionsBlock(state, day, selected, today), ''),
       speedsBlock(state, today),
@@ -532,6 +552,10 @@ export function mount(el) {
   };
   root.addEventListener('click', onClick);
 
+  // Semáforo de fatiga: pide las métricas de Salud al iPhone (si las ofrece) y repinta si han cambiado
+  let gone = false;
+  fetchHealthMetrics(35).then((m) => { if (m && !gone) render(); }).catch(() => {});
+
   // Si la app sigue abierta al cambiar de día (o vuelve de segundo plano), se actualiza sola.
   const checkDay = () => {
     const k = todayKey();
@@ -548,6 +572,7 @@ export function mount(el) {
   const unsub = subscribe(() => render());
 
   return () => {
+    gone = true;
     unsub?.();
     cleanupHeader?.();
     clearInterval(timer);

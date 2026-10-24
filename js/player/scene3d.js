@@ -28,6 +28,8 @@
 //   scene.setTheme(id) → Promise<bool> · scene.getTheme() → id · scene.setQuality(q) · scene.setTvMode(bool)
 //   scene.setStrideBob(bool) (alias setStride) · scene.resize() · scene.getInfo() · scene.destroy({ releaseContext })
 //   scene.setRunning(bool)                // false: creada pero sin pintar (preparación); true: vuelve a pintar
+//   scene.setSpeedFeel('real'|'viva'|'intensa')  // sensación de velocidad (scene3d/speedfeel.js); sin llamarla se lee
+//                                         //   localStorage 'ritmup.speedfeel' al crear la escena y en cada escenario
 //   Calidad 'auto': baja por cadencia Y coste de CPU por fotograma (un rAF a 30 fps del modo de bajo consumo con poco
 //   coste no es sobrecarga ⇒ se mantienen DPR y bloom); ignora ~8 s tras arrancar/escenario/volver; sube con
 //   histéresis (un nivel que falló espera 45 s, 90 s… hasta 8 min), también desde 'eco'.
@@ -66,7 +68,9 @@
 //     textTexture(text, opts) → CanvasTexture (versalitas/tracking de retransmisión), textPlane(text, opts) → Mesh,
 //     util { clamp, clamp01, lerp, damp, smoothstep, springTo, easeInOutCubic, easeOutCubic, easeInOutSine,
 //            easeOutQuart }, rng(seed) → () ⇒ [0,1), shaders { NOISE, FOG, OUTPUT }, fmtSpeed(v) '11,5', fmtClock(s) '1:30',
-//     fonts { ui, rounded }, ghostLights (vivo: true ⇒ las luces de tu récord sustituyen tu marca del fantasma) }
+//     fonts { ui, rounded }, ghostLights (vivo: true ⇒ las luces de tu récord sustituyen tu marca del fantasma),
+//     speedFeel (vivo: { id, cue, density, bob, fov } de scene3d/speedfeel.js — escala SOLO las señales cercanas del
+//     suelo: contraste `cue` y densidad `density`; el núcleo ya aplica el balanceo y el FOV extra) }
 //   frame (un único objeto reutilizado; no guardes referencias a sus hijos entre fotogramas) = {
 //     t (s de clase, suavizado, continuo), dt (s, ≤ 0,1), time (s de animación, monótono, sigue en pausa),
 //     totalElapsed (último del motor), segIndex, segElapsed, segRemaining, segDuration, segProgress (0..1),
@@ -82,7 +86,7 @@
 //   Eventos para el escenario: los de la API ('segment', 'countdown', 'km', 'halfway', 'drop', 'finish', 'pause',
 //   'resume', 'testStage', 'testEnd', 'adjust') + los del núcleo: 'gate' {index, zone, prevZone, speed, prevSpeed, up}
 //   (justo en el segundo del cambio), 'seek' {from, to} (salto de reloj: corta), 'start', 'record' {on, deltaM},
-//   'timeline' {version} (velocidades ajustadas), 'quality' {name, level}, 'tv' {on}.
+//   'timeline' {version} (velocidades ajustadas), 'quality' {name, level}, 'tv' {on}, 'speedfeel' {id} (lee ctx.speedFeel).
 // ════════════════════════════════════════════════════════════════════════════════════════════════════
 import * as THREE from '../vendor/three/build/three.module.min.js';
 import { Timeline, visualSpeed } from './scene3d/timeline.js';
@@ -100,6 +104,7 @@ import {
   ZONE_RANK,
 } from './scene3d/util.js';
 import { THEMES, DEFAULT_THEME, themeById, listThemes } from './scene3d/themes/index.js';
+import { readSpeedFeel, speedFeelProfile, speedFeelFov, kmhOfVisual } from './scene3d/speedfeel.js';
 import { ZONES } from '../training/levels.js';
 
 export { THEMES, DEFAULT_THEME, listThemes };
@@ -140,7 +145,7 @@ function noopController() {
   const f = () => {};
   return {
     setState: f, setBeat: f, event: f, resize: f, setQuality: f, setTvMode: f, destroy: f, setHudRects: f, setGhost: f,
-    setAnalyser: f, setStride: f, setStrideBob: f, setRunning: f, setTheme: async () => false, getTheme: () => null,
+    setAnalyser: f, setStride: f, setStrideBob: f, setRunning: f, setSpeedFeel: f, setTheme: async () => false, getTheme: () => null,
     getInfo: () => ({ fps: 0, quality: 'off', level: -1 }),
   };
 }
@@ -230,6 +235,9 @@ export async function createScene3D(canvas, {
   if (mql?.matches) reduced = true;
   let tv = !!tvMode;
   let strideOn = strideBob !== false;
+  // Sensación de velocidad (scene3d/speedfeel.js): solo percepción (señales cercanas, balanceo, FOV extra)
+  let feel = speedFeelProfile(readSpeedFeel());
+  let feelForced = false;
 
   // Estado del motor (`rate`: solo laboratorio, avance 5×/20×; 0 = congelado)
   const st = { status: 'ready', totalElapsed: 0, segIndex: 0, segElapsed: 0, segRemaining: 0, currentSpeed: 0, distanceKm: 0, rate: 1 };
@@ -401,6 +409,8 @@ export async function createScene3D(canvas, {
       fonts: { ui: FONT_UI, rounded: FONT_ROUNDED },
       /** true mientras las luces de tu récord sustituyen la marca propia del fantasma de ESTE escenario. */
       get ghostLights() { return paceOn && theme?.ctx === ctxRef; },
+      /** Sensación de velocidad vigente { id, cue, density, bob, fov } (solo percepción; nunca la distancia). */
+      get speedFeel() { return feel; },
       _postSettings: postS,
     };
     return ctxRef;
@@ -445,6 +455,7 @@ export async function createScene3D(canvas, {
   /** Carga y activa un escenario; si falla, el de respaldo. Devuelve el id activo. */
   async function loadTheme(id) {
     const req = ++themeReq;
+    if (!feelForced) feel = speedFeelProfile(readSpeedFeel());
     const entry = themeById(id) || themeById(DEFAULT_THEME) || themeById(FALLBACK_THEME);
     let mod = null;
     let inst = null;
@@ -693,7 +704,7 @@ export async function createScene3D(canvas, {
     let bobX = 0;
     let bobY = 0;
     if (strideOn && !reduced && timeScale > 0) {
-      const k = timeScale * rig.bobScale;
+      const k = timeScale * rig.bobScale * feel.bob;
       bobY = (0.5 - 0.5 * Math.cos(sp * Math.PI * 2)) * 0.012 * k;
       bobX = Math.sin(stepPhase * Math.PI) * 0.005 * k;
     }
@@ -819,6 +830,9 @@ export async function createScene3D(canvas, {
       applyRigFacade(rig, theme.ctx.rig);
       post.set(theme.ctx._postSettings);
       try { director.apply(F, rig.target, tl, dt, now); } catch { director.snap(); }
+      // sensación de velocidad: unos grados más de FOV a velocidad alta (sigue la rampa de la cinta; el muelle del rig
+      // lo suaviza). El horizonte no se mueve: la cámara va nivelada y el encuadre lo fija el desplazamiento de lente
+      if (!reduced && !(F.finale > 0) && feel.fov > 0) rig.target.fov += speedFeelFov(feel, kmhOfVisual(vNow)) * F.intro;
     }
     rig.update(dt, aspect, bobX, bobY);
     // luces de tu récord: con la cámara final (desplazamiento de lente incluido). Tres fallos seguidos ⇒ se apagan y
@@ -1111,6 +1125,13 @@ export async function createScene3D(canvas, {
 
     setStride(on) { strideOn = on !== false; },
     setStrideBob(on) { strideOn = on !== false; },
+    /** Sensación de velocidad ('real' | 'viva' | 'intensa'); null ⇒ vuelve a leer localStorage 'ritmup.speedfeel'. */
+    setSpeedFeel(id) {
+      feelForced = id != null;
+      feel = speedFeelProfile(feelForced ? id : readSpeedFeel());
+      callTheme('event', 'speedfeel', { id: feel.id });
+      return feel.id;
+    },
 
     /** Cambia de escenario en caliente (el anterior sigue hasta que el nuevo está listo). */
     async setTheme(id) {
@@ -1127,7 +1148,7 @@ export async function createScene3D(canvas, {
         cost: +costAvg.toFixed(2), throttled, running, parked,
         t: +localT.toFixed(2), reduced, tv, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
         ghost: F.ghost.active ? Math.round(F.ghost.deltaM) : null, golden: goldOn, audio: spectrum.out.live,
-        stride: strideOn && !reduced, post: { ...post.settings }, director: director.info(),
+        stride: strideOn && !reduced, post: { ...post.settings }, director: director.info(), speedFeel: feel.id,
       };
     },
 

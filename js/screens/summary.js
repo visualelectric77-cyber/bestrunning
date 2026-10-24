@@ -2,7 +2,9 @@
 // Pulso del Apple Watch (SPEC §12): importación vía Atajo + portapapeles, línea de pulso sobre el perfil,
 // zonas de FC y pulso por velocidad; las casillas de media/máxima siguen como alternativa manual.
 import { fmt, esc, clamp, round1, todayKey, capitalize } from '../core/utils.js';
-import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels } from '../training/levels.js';
+import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels, hrMaxFromAge } from '../training/levels.js';
+import { raisedHrMax } from '../training/race-predict.js';
+import { buildHrModel, sessionHrOffset } from '../training/hr-model.js';
 import { getState, setState, subscribe, lastPersistOk } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, toast, confirmDialog, celebrate, emptyState } from '../ui/components.js';
@@ -22,6 +24,7 @@ import {
 import { isNative, nativeStatus, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagMark } from '../core/diag.js';
 import { showWatchSync } from '../ui/watch-sync.js';
+import { aiAvailable, aiRequest, numbersAreGrounded } from '../integrations/ai.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -129,7 +132,22 @@ export function mount(el, { params = {} } = {}) {
     render();
     // Con la sesión ya valorada, los logros de pulso se evalúan aquí (si no, al pulsar Guardar), como con el Atajo
     if (rated && hasHrSeries(next)) later(awardAchievements, 1700);
+    maybeRaiseHrMax(next);
   };
+
+  /** FC máxima medida: si el reloj registró un pulso sostenido por encima de la de tus zonas, se sube (nunca baja). */
+  function maybeRaiseHrMax(ses) {
+    try {
+      const p = getState().profile || {};
+      const cur = p.hrMax || hrMaxFromAge(p.age || 46);
+      const nv = hasHrSeries(ses) ? raisedHrMax(cur, ses) : null;
+      if (!nv) return;
+      setState((d) => { if (d.profile) d.profile.hrMax = nv; });
+      diagMark('fcmax.medida', { de: cur, a: nv });
+      later(() => toast(`Tu FC máxima medida es ${nv} ppm: hemos ajustado tus zonas de pulso`, { icon: 'heart', duration: 5200 }), 1200);
+    } catch { /* nada */ }
+  }
+  if (session && hasHrSeries(session)) later(() => maybeRaiseHrMax(findSession()), 1500);
   window.addEventListener('br:native-hr', onNativeHr);
 
   // App nativa con el reloj: mientras el reloj guarda el entreno y manda el pulso (en clases largas tarda), un aviso
@@ -352,11 +370,70 @@ export function mount(el, { params = {} } = {}) {
       ${extraActions(s, false)}`;
   }
 
+  /* ═════════════════ Tu coach (IA del iPhone, js/integrations/ai.js) ═════════════════ */
+  // Tras guardar, con Apple Intelligence: un titular, 2–3 frases y un consejo escritos a partir de los datos YA
+  // calculados. Si el texto trae una cifra que no está en los datos, se descarta. Se guarda en la sesión (aiNote).
+  let aiAsked = false;
+  function coachNoteHtml(s) {
+    const n = s.aiNote;
+    if (n && n.body) {
+      return `<section class="card sm-card sm-coach" style="--i:4">
+        <div class="sm-card__head"><span class="sm-card__title">Tu coach</span><span class="sm-opt">IA en tu iPhone</span></div>
+        <p class="sm-coach__head">${esc(n.headline || '')}</p>
+        <p class="sm-coach__body">${esc(n.body)}</p>
+        ${n.tip ? `<p class="sm-coach__tip">${icon('info', 15)}<span>${esc(n.tip)}</span></p>` : ''}
+      </section>`;
+    }
+    if (!aiAvailable() || !s.feeling) return '';
+    if (!aiAsked) { aiAsked = true; later(() => askCoach(s), 600); }
+    return `<section class="card sm-card sm-coach is-loading" style="--i:4" aria-busy="true">
+        <div class="sm-card__head"><span class="sm-card__title">Tu coach</span><span class="sm-opt">IA en tu iPhone</span></div>
+        <p class="sm-coach__wait"><span class="sm-coach__bar" aria-hidden="true"><i></i></span>Leyendo tu sesión…</p>
+      </section>`;
+  }
+
+  async function askCoach(s0) {
+    const s = findSession() || s0;
+    if (!s || s.aiNote) return;
+    const r1 = (x) => Math.round(Number(x) * 10) / 10;
+    const r2 = (x) => Math.round(Number(x) * 100) / 100;
+    const fx = feelings().find((x) => x.key === s.feeling);
+    const input = {
+      title: s.title || '',
+      minutes: Math.round((Number(s.elapsedSec) || 0) / 60),
+      km: r2(s.distanceKm || 0),
+      avgKmh: r1(s.avgSpeed || 0),
+      maxKmh: r1(s.maxSpeed || 0),
+      feel: fx?.label || '',
+      record: (() => { try { return recordBadges(s, getState().history || []).some((b) => b.record); } catch { return false; } })(),
+    };
+    if (s.hrAvg) input.hrAvg = s.hrAvg;
+    if (s.hrMax) input.hrMax = s.hrMax;
+    const off = hrOffsetOf(s);
+    if (off && Math.abs(off.ppm) >= 5) input.vsPrev = { hrVsUsual: off.ppm, atKmh: off.speed };
+    const lc = (Array.isArray(s.levelChanges) ? s.levelChanges : []).map((c) => ({ level: c.level, from: c.from, to: c.to }));
+    if (lc.length) input.levelChanges = lc;
+    const allowed = [input.minutes, input.km, input.avgKmh, input.maxKmh, input.hrAvg, input.hrMax,
+      off ? off.ppm : null, off ? Math.abs(off.ppm) : null, off ? off.speed : null,
+      ...lc.flatMap((c) => [c.from, c.to])].filter((v) => v != null);
+    const out = await aiRequest('sessionSummary', input);
+    if (disposed || !out) { if (!disposed) render(); return; }
+    const note = { headline: String(out.headline || '').slice(0, 80), body: String(out.body || '').slice(0, 400), tip: String(out.tip || '').slice(0, 160) };
+    if (!note.body || !numbersAreGrounded(`${note.headline} ${note.body} ${note.tip}`, allowed)) { diagMark('ia.descartada'); render(); return; }
+    setState((d) => {
+      const h = (d.history || []).find((x) => x.id === s.id);
+      if (h) h.aiNote = { ...note, at: new Date().toISOString() };
+    });
+    session = findSession();
+    render();
+  }
+
   function readOnlySections(s) {
     const fi = feelings().findIndex((x) => x.key === s.feeling);
     const fx = fi >= 0 ? feelings()[fi] : null;
     const changes = Array.isArray(s.levelChanges) ? s.levelChanges : [];
     return `
+      ${coachNoteHtml(s)}
       <section class="card sm-card sm-ro" style="--i:5">
         <div class="sm-card__head"><span class="sm-card__title">Sensación</span>
           <button class="btn btn--ghost sm-edit" data-act="edit"><span>Editar</span></button></div>
@@ -463,9 +540,26 @@ export function mount(el, { params = {} } = {}) {
         </div>`;
   }
 
+  /** Pulso de hoy frente a lo normal a tus velocidades (js/training/hr-model.js), o null. */
+  function hrOffsetOf(s) {
+    try {
+      const m = buildHrModel(getState().history || [], { exceptId: s.id });
+      return sessionHrOffset(s, m);
+    } catch { return null; }
+  }
+
+  function hrOffsetHtml(s) {
+    const o = hrOffsetOf(s);
+    if (!o || Math.abs(o.ppm) < 5) return '';
+    const high = o.ppm > 0;
+    return `<p class="sm-hroff ${high ? 'is-high' : 'is-low'}">${icon('heart', 15)}<span>${high
+      ? `Hoy tu pulso fue <b class="num">${o.ppm}</b> ppm más alto de lo normal a <b class="num">${fmt.speed(o.speed)}</b> km/h: señal de cansancio, mal descanso, calor o de que estás incubando algo. Escucha a tu cuerpo los próximos días.`
+      : `Hoy tu pulso fue <b class="num">${-o.ppm}</b> ppm más bajo de lo normal a <b class="num">${fmt.speed(o.speed)}</b> km/h: vas más en forma.`}</span></p>`;
+  }
+
   function hrImported(s) {
     const mins = Math.round(((s.hrSeries?.length || 0) * 10) / 60);
-    return `${hrStatsHtml(s, getState().profile)}
+    return `${hrOffsetHtml(s)}${hrStatsHtml(s, getState().profile)}
         ${hrMaxHintHtml(s, getState().profile)}
         <div class="whr-src">${icon('heart', 14)}<span>${mins ? `${mins} min de pulso` : 'Pulso'} · Apple Watch</span>
           <span class="whr-src__acts">

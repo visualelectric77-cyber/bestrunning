@@ -23,6 +23,7 @@ import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
 import { createHrCoach } from '../player/hr-coach.js';
+import { buildHrModel } from '../training/hr-model.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -2589,11 +2590,33 @@ export function mount(el, { params = {}, query = {} } = {}) {
   // camino que los botones − / + (el coach confirma la velocidad nueva). Sin pulso no hace nada. Se apaga con
   // localStorage 'ritmup.hrcoach' = 'off'.
   // (estado colgado de la propia función: las declaraciones de aquí abajo están después del return de mount)
+  /** Día «cargado»: a esta velocidad, ya estabilizado, el pulso va ≥ 8 ppm sobre tu normal (js/training/hr-model.js)
+   *  durante 2 min. Se avisa una vez por clase; el modo pulso ya se encarga de la velocidad. */
+  function fatigueCheck(st, s, now) {
+    if (st.warned) return;
+    const live = nb.liveHr?.();
+    if (live && Number(live.bpm) > 0) st.buf.push([now, Number(live.bpm)]);
+    st.buf = st.buf.filter((p) => now - p[0] <= 60000);
+    const seg = s.segment;
+    if (!seg || !['jog', 'run', 'fast'].includes(seg.zone) || s.segElapsed < 150 || st.buf.length < 6) { st.highSince = 0; return; }
+    if (st.model === undefined) st.model = buildHrModel(getState().history || []);
+    if (!st.model) return;
+    const avg = st.buf.reduce((a, p) => a + p[1], 0) / st.buf.length;
+    const over = Math.round(avg - st.model.at(Number(s.currentSpeed) || seg.speed));
+    if (over < 8) { st.highSince = 0; return; }
+    if (!st.highSince) st.highSince = now;
+    if (now - st.highSince < 120000) return;
+    st.warned = true;
+    diagMark('pulso.cargado', { ppm: over });
+    notify(`Hoy tu pulso va ${over} ppm más alto de lo normal a esta velocidad. Si no te encuentras bien, baja el ritmo: hoy cuenta igual.`, { icon: 'heart', duration: 8000 });
+  }
+
   function hrCoachTick(s) {
-    const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0 });
+    const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
     if (now - st.last < 1000) return;
     st.last = now;
+    try { fatigueCheck(st, s, now); } catch { /* nada */ }
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
     if (off || !engine || countingDown || s.inTestStage) return;

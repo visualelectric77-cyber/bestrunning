@@ -160,6 +160,7 @@ uniform vec4 uMisc;     // final 0..1, oro 0..1, pulso de ritmo, calidad (0 = ah
 uniform vec4 uBack2;    // (frag) z: longitud de la maqueta
 uniform vec4 uLines;    // separación de curvas, radio del acento cercano, intensidad del acento, intensidad gris
 uniform vec2 uRoute;    // maqueta final: tramo de la ruta dibujado (s rel. al ancla: salida, meta)
+uniform vec2 uFeel;     // sensación de velocidad: contraste de las señales cercanas, densidad
 uniform float uAnchor, uFrac;
 varying vec3 vW;
 varying vec3 vN;
@@ -236,11 +237,17 @@ void main() {
   // en la maqueta final, la ruta empieza en la salida y acaba en la meta (fuera de ella, la cresta sin luz)
   float route = mix(1.0, step(uRoute.x, vS) * step(vS, uRoute.y), finale);
   vec3 pathC = hue * (core * coreK + halo) * pk * uPath.w * route;
-  // marcas de distancia cada 4 u a ambos lados del camino (pasan a tu velocidad real)
+  // marcas de distancia cada 4 u a ambos lados del camino (pasan a tu velocidad real) y mojones bajos en el borde de
+  // la senda cada 8 u: el flujo cercano que da la sensación de velocidad (contraste y densidad: uFeel). Sin brillo:
+  // gris claro por debajo del umbral del bloom; de lejos se apagan (thin conserva la energía, sin centelleo)
   float fwS = fwidth(vS);
-  float tick = thin(abs(fract(vS * 0.25 + 0.5) - 0.5) * 4.0, 0.03, fwS);
-  tick *= smoothstep(0.16, 0.22, ax) * (1.0 - smoothstep(0.52, 0.6, ax));
-  col += uNeutral * tick * 0.03 * (1.0 - finale);
+  float tsp = 4.0 / uFeel.y;
+  float tick = thin(abs(fract(vS / tsp + 0.5) - 0.5) * tsp, 0.045, fwS);
+  tick *= smoothstep(0.14, 0.2, ax) * (1.0 - smoothstep(0.62, 0.7, ax));
+  float msp = 8.0 / uFeel.y;
+  float cairn = thin(abs(fract(vS / msp + 0.5) - 0.5) * msp, 0.16, fwS) * thin(abs(ax - 1.35), 0.07, max(fwidth(vX), 1e-4));
+  cairn *= 1.0 - smoothstep(0.2, 0.6, fwS);
+  col += uNeutral * (tick * (0.03 + 0.12 * uFeel.x) + cairn * 0.3 * uFeel.x) * (1.0 - finale);
 
   // cambio de tramo: UNA línea fina tendida sobre el relieve (se cruza justo en el segundo del cambio)
   float latG = exp(-ax / 460.0) * (1.0 - min(core, 1.0)) * smoothstep(0.02, 0.12, ax);
