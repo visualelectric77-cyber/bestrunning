@@ -3114,7 +3114,12 @@ const PAGES = {
       } else if (name === 'diag') {
         // Registro del final de las clases (js/core/diag.js), para pegarlo en un mensaje
         haptic('light');
-        const text = `${APP_VERSION}\n${diagText()}`;
+        // Cabecera: app del iPhone, capacidades y si hay IA (y por qué no)
+        const ns = (() => { try { return nativeStatus(); } catch { return null; } })();
+        const head = ns
+          ? `\napp ${ns.app || '?'} · caps ${(Array.isArray(ns.caps) ? ns.caps : []).join(',') || '-'} · IA ${ns.aiReason ? `no (${ns.aiReason})` : (ns.caps || []).includes('ai') ? 'sí' : '?'}`
+          : '\nnavegador (sin app del iPhone)';
+        const text = `${APP_VERSION}${head}\n${diagText()}`;
         Promise.resolve(navigator.clipboard?.writeText?.(text))
           .then(() => toast('Diagnóstico copiado: pégalo en un mensaje', { icon: 'copy' }))
           .catch(() => toast('No se ha podido copiar el diagnóstico', { kind: 'error' }));

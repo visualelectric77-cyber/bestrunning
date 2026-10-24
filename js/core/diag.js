@@ -33,7 +33,7 @@ export function diagMark(event, data) {
     const list = read();
     let extra = '';
     if (data && typeof data === 'object') {
-      extra = Object.entries(data).map(([k, v]) => `${k}=${typeof v === 'number' ? Math.round(v) : String(v).slice(0, 60)}`).join(' ');
+      extra = Object.entries(data).map(([k, v]) => `${k}=${typeof v === 'number' ? (Number.isInteger(v) || Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 10) / 10) : String(v).slice(0, 60)}`).join(' ');
     }
     list.push(`${stamp()} ${event}${extra ? ` ${extra}` : ''} @${(globalThis.location?.hash || '').split('?')[0]}`);
     write(list);

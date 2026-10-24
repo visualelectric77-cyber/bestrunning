@@ -382,7 +382,12 @@ export function createNativeBridge(opts = {}) {
     switch (type) {
       case 'native.hello':
       case 'native.status': {
-        const keep = status && type === 'native.status' ? { proto: status.proto, app: status.app } : {};
+        // native.status solo trae lo que cambia (reloj, Salud, copia): lo del saludo (versión, capacidades y el motivo
+        // de que no haya IA) se conserva. Antes se perdían caps y aiReason con el primer native.status y la IA, las
+        // métricas de Salud y los avisos de la mañana dejaban de ofrecerse sin decir nada.
+        const keep = status && type === 'native.status'
+          ? { proto: status.proto, app: status.app, ...(status.caps ? { caps: status.caps } : {}), ...(status.aiReason ? { aiReason: status.aiReason } : {}) }
+          : {};
         status = { ...keep, ...data };
         dispatch('br:native-status', status);
         return 'status';

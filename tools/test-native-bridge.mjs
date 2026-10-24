@@ -1234,10 +1234,11 @@ await section('Hoy', async () => {
   ok(noBackup?.message === 'no-backup', 'ack no-backup rechaza requestBackup() enseguida');
   ok(env.B.post('health.authorize', {}) === true, 'health.authorize');
   keepReal('health.authorize', env.ofType('health.authorize').pop());
-  env.B.receive({ v: 1, type: 'native.hello', seq: 1, boot: 'p4k8m2', at: now(), data: { proto: 1, app: '1.0 (1)', watch: { paired: true, installed: true, reachable: true, link: 'mirror', workout: 'idle' }, health: { auth: 'granted' } } });
+  env.B.receive({ v: 1, type: 'native.hello', seq: 1, boot: 'p4k8m2', at: now(), data: { proto: 1, app: '1.0 (1)', caps: ['haptic', 'ai', 'health-metrics'], aiReason: 'x', watch: { paired: true, installed: true, reachable: true, link: 'mirror', workout: 'idle' }, health: { auth: 'granted' } } });
   env.B.receive({ v: 1, type: 'native.status', seq: 2, boot: 'p4k8m2', at: now(), data: { watch: { paired: true, installed: false, reachable: false, link: 'none', workout: 'idle' }, health: { auth: 'denied' } } });
   const ns = env.B.nativeStatus();
   ok(ns.proto === 1 && ns.app === '1.0 (1)' && ns.watch.installed === false && ns.health.auth === 'denied', 'native.status actualiza el estado (y conserva proto/app)');
+  ok(JSON.stringify(ns.caps) === '["haptic","ai","health-metrics"]' && ns.aiReason === 'x', `native.status conserva caps y aiReason del saludo (dio ${JSON.stringify(ns.caps)} / ${ns.aiReason})`);
   ok(env.events.filter((x) => x.name === 'br:native-status').length === 2, 'evento br:native-status en cada cambio');
   const P = harness(env, W1);
   ok(P.nb.watchManaged() === false, 'watchManaged() = false sin la app del reloj');
