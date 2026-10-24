@@ -3,7 +3,8 @@ import { getState, setState, subscribe } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
-  icon, navBar, enableCollapsingHeader, intensityDots, profileChart, openSheet, toast, actionSheet, emptyState,
+  icon, navBar, enableCollapsingHeader, intensityDots, profileChart, openSheet, toast, actionSheet, emptyState, segmented,
+  confirmDialog,
 } from '../ui/components.js';
 import {
   planWeek, planDay, cycleInfo, alternativesFor, swapDays, setDayOverride, clearDayOverride, nextTestDate, CYCLE_WEEKS,
@@ -15,6 +16,10 @@ import { buildWorkout } from '../training/generator.js';
 import { exportPlanToCalendar } from '../integrations/ics.js';
 import { aiAvailable, aiRequest } from '../integrations/ai.js';
 import { planChanges } from '../training/plan-intent.js';
+import {
+  goalStatus, goalOf, goalIntro, goalBlock, makeGoal, setGoal, clearGoal, GOAL_DISTANCES, GOAL_STAGES, goalDistance,
+  parseGoalTime, fmtGoalTime, paceText, predictedFor, goalDateRange, raceDateText,
+} from '../training/goal.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, makeRng,
 } from '../core/utils.js';
@@ -79,7 +84,7 @@ export function seasonLine(si) {
 export function seasonChips(si) {
   if (!si) return '';
   const out = [];
-  if (si.isDeload) out.push('<span class="br-chip br-chip--deload">Descarga</span>');
+  if (si.isDeload && (!si.goal || si.goal.stage === 'build')) out.push('<span class="br-chip br-chip--deload">Descarga</span>');
   if (si.isTestWeek) out.push('<span class="br-chip br-chip--test">Test VAM</span>');
   if (si.event) out.push(`<span class="br-chip br-chip--event">${esc(si.event.name)}</span>`);
   const ad = ADAPT_LABEL[si.adapt?.mode];
@@ -233,7 +238,8 @@ export function openSwapSheet(dateKey, { onDone = null } = {}) {
 /* ───────────── Pintado ───────────── */
 
 function weekHeader(monday, ci, canPrev, canNext, isCurrent) {
-  const wk = ci ? `Semana ${ci.weekInCycle} de 4 · ${esc(ci.weekName || CYCLE_WEEKS[ci.weekInCycle - 1] || '')}` : '';
+  const wk = !ci ? '' : ci.goal && ci.goal.stage !== 'build' ? esc(ci.weekName || '')
+    : `Semana ${ci.weekInCycle} de 4 · ${esc(ci.weekName || CYCLE_WEEKS[ci.weekInCycle - 1] || '')}`;
   return `<div class="pn-week">
     <button type="button" class="btn-icon pn-week__nav" data-week="-1" aria-label="Semana anterior" ${canPrev ? '' : 'disabled'}>${icon('chevron-left', 20)}</button>
     <div class="pn-week__label" aria-live="polite">
@@ -247,13 +253,15 @@ function weekHeader(monday, ci, canPrev, canNext, isCurrent) {
 
 function cycleBar(ci) {
   if (!ci) return '';
+  // Al afinar, en la semana de carrera y al recuperar no hay ciclo de 4 semanas: lo cuenta la tarjeta del objetivo
+  if (ci.goal && ci.goal.stage !== 'build') return '';
   const w = ci.weekInCycle || 1;
   const segs = CYCLE_WEEKS.map((name, i) => {
     const n = i + 1;
     const cls = [n < w ? 'is-past' : '', n === w ? 'is-current' : '', n === 4 ? 'is-test' : ''].join(' ');
     return `<div class="pn-cycle__seg ${cls}"><span class="pn-cycle__track"><span class="pn-cycle__fill"></span></span><span class="pn-cycle__name">${esc(name)}</span></div>`;
   }).join('');
-  const blk = ci.mesoNumber ? `Bloque ${ci.mesoNumber} de 13` : `Ciclo ${ci.cycleIndex + 1}`;
+  const blk = ci.goal ? `Ciclo hacia tu ${ci.goal.label}` : ci.mesoNumber ? `Bloque ${ci.mesoNumber} de 13` : `Ciclo ${ci.cycleIndex + 1}`;
   return `<div class="pn-cycle" role="img" aria-label="${blk}, semana ${w} de 4: ${esc(ci.weekName || '')}">
     <div class="pn-cycle__head"><span class="eyebrow">${blk}</span><span class="pn-cycle__load">Carga <b class="num">${Math.round((ci.loadFactor || 1) * 100)}</b> %</span></div>
     <div class="pn-cycle__bar">${segs}</div>
@@ -262,6 +270,17 @@ function cycleBar(ci) {
 
 function seasonBlock(si) {
   if (!si) return '';
+  if (si.goal) {
+    const gw = si.goal;
+    const top = gw.stage === 'recovery' ? `Después de tu ${gw.label}` : `Plan ${gw.label}`;
+    const title = gw.stage === 'build' ? `${GOAL_STAGES.build} · ${CYCLE_WEEKS[(si.weekInCycle || 1) - 1]}` : GOAL_STAGES[gw.stage];
+    const text = si.event ? eventIntro(si.event.key) : goalIntro(gw, gw.stage === 'build' ? si.weekLine : '');
+    return `<div class="br-season" role="group" aria-label="${esc(`${top}. ${title}`)}">
+    <div class="br-season__top"><span class="eyebrow">${esc(top)}</span>${seasonChips(si)}</div>
+    <h2 class="br-season__title">${esc(title)}</h2>
+    <p class="br-season__intro">${esc(text.trim())}</p>
+  </div>`;
+  }
   const intro = si.event ? eventIntro(si.event.key) : `${si.themeIntro} ${si.weekLine || ''}`;
   const season = si.seasonIndex > 0 ? ` (temporada ${si.seasonIndex + 1})` : '';
   return `<div class="br-season" role="group" aria-label="${esc(seasonLine(si))}">
@@ -343,11 +362,14 @@ function dayRow(day, today, i, createdKey, state) {
         ${icon('plus', 14)}<span>Extra</span><b>${esc(s.title || 'Entrenamiento')}</b><span class="num">${fmt.dec1(s.distanceKm || 0)} km</span><span class="br-extra__go">${icon('chevron-right', 13)}</span></button>`).join('')}</div>`
     : '';
 
+  if (day.race && day.status !== 'done') return raceRow(day, today, i, liCls, rail, extras);
+
   if (!w || day.kind === 'rest') {
     const extra = day.status === 'done' && day.session;
     const sub = extra
       ? `Extra: ${esc(day.session.title || 'entrenamiento')} · ${fmt.dec1(day.session.distanceKm || 0)} km`
-      : day.isOverride ? 'Descanso elegido por ti' : 'Recupera y vuelve más fuerte';
+      : day.isOverride ? 'Descanso elegido por ti'
+        : safe(() => planDay(state, addDays(day.date, 1)).race, null) ? 'Víspera de tu carrera: piernas en alto' : 'Recupera y vuelve más fuerte';
     const label = `${capitalize(fmt.weekdayName(wd))} ${dnum}: descanso.${locked ? '' : ' Mantén pulsado para moverlo.'}`;
     return `<li class="${liCls}" style="--i:${i}">${rail}
       <div class="pn-card pn-card--rest${locked ? ' is-locked' : ''}" data-date="${day.date}" data-kind="rest" role="button" tabindex="0" aria-label="${esc(label)}">
@@ -392,6 +414,203 @@ function dayRow(day, today, i, createdKey, state) {
     </div>${extras}</li>`;
 }
 
+/* ───────────── Objetivo con fecha de carrera (js/training/goal.js) ───────────── */
+
+const timeText = (sec) => (sec ? fmtGoalTime(sec) : '');
+/** «5:00 /km · 12,0 km/h» */
+const paceLine = (paceSec) => `${paceText(paceSec)} /km · ${fmt.speed(3600 / paceSec)} km/h`;
+
+/** Día de la carrera en la semana: no es una clase; abre el objetivo. No se arrastra ni se intercambia. */
+function raceRow(day, today, i, liCls, rail, extras) {
+  const r = day.race;
+  const wd = day.weekday || weekdayOf(day.date);
+  const pace = r.targetSec ? Math.round(r.targetSec / r.km) : null;
+  const when = day.date === today ? '¡Hoy!' : daysBetween(today, day.date) === 1 ? 'Mañana' : '';
+  const meta = [when, r.targetSec ? `Objetivo ${timeText(r.targetSec)}` : '', pace ? `${paceText(pace)} /km` : ''].filter(Boolean);
+  const label = `${capitalize(fmt.weekdayName(wd))} ${parseKey(day.date).getDate()}: tu carrera de ${r.label}${r.targetSec ? `, objetivo ${timeText(r.targetSec)}` : ''}. Toca para editar el objetivo.`;
+  return `<li class="${liCls}" style="--i:${i}">${rail}
+    <div class="pn-card pn-card--rest pn-card--race is-locked" data-date="${day.date}" data-kind="race" role="button" tabindex="0" aria-label="${esc(label)}">
+      <span class="pn-card__icon" aria-hidden="true">${icon('flag', 18)}</span>
+      <div class="pn-card__body">
+        <div class="pn-card__eyebrow"><span>Carrera</span></div>
+        <div class="pn-card__title">Tu ${esc(r.label)}</div>
+        ${meta.length ? `<div class="pn-card__meta">${meta.map((m) => `<span>${esc(m)}</span>`).join('')}</div>` : ''}
+      </div>
+      <button type="button" class="pn-card__more" data-more="${day.date}" aria-label="Opciones del ${fmt.weekdayName(wd)}">${MORE_SVG}</button>
+    </div>${extras}</li>`;
+}
+
+/** Barra del bloque específico: una marca por semana y la bandera de meta al final. */
+function goalBar(gs) {
+  const b = gs.block;
+  const cur = gs.week ? Math.min(gs.week.weekOfBlock, b.weeks + 1) : gs.daysLeft < 0 ? b.weeks + 1 : 0;
+  const segs = Array.from({ length: b.weeks }, (_, i) => {
+    const n = i + 1;
+    const cls = [n < cur ? 'is-past' : '', n === cur ? 'is-current' : '', n > b.weeks - 1 - b.taper && n < b.weeks ? 'is-taper' : '', n === b.weeks ? 'is-race' : '']
+      .filter(Boolean).join(' ');
+    return `<span class="pn-goal__seg${cls ? ` ${cls}` : ''}"></span>`;
+  }).join('');
+  return `<div class="pn-goal__bar" aria-hidden="true"><span class="pn-goal__segs" style="--n:${b.weeks}">${segs}</span><span class="pn-goal__flag${cur >= b.weeks ? ' is-on' : ''}">${icon('flag', 14)}</span></div>`;
+}
+
+/** Pie de la barra: dónde estás del bloque y qué viene. */
+function goalCaption(gs) {
+  const b = gs.block;
+  const gw = gs.week;
+  if (gs.daysLeft < 0) return [`Fue el ${fmt.dateLong(gs.raceDate)}`, ''];
+  if (!gw) return [`Tu plan específico empieza el ${fmt.dateShort(b.start)}`, `${b.weeks} semanas`];
+  if (gw.stage === 'recovery') return ['Semana de recuperación', ''];
+  const left = `Semana ${gw.weekOfBlock} de ${gw.blockWeeks} · ${GOAL_STAGES[gw.stage]}`;
+  const taperStart = addDays(b.raceMonday, -b.taper * 7);
+  const right = gw.stage === 'build' && b.taper ? `Afinas el ${fmt.dateShort(taperStart)}` : gw.stage === 'taper' ? `Carrera el ${fmt.weekdayName(weekdayOf(gs.raceDate))}` : '';
+  return [left, right];
+}
+
+/** Tarjeta del objetivo en Mi plan (o una fila discreta para añadirlo). */
+function goalCardHtml(state, today) {
+  const gs = safe(() => goalStatus(state, today), null);
+  if (!gs) {
+    return `<div class="list pn-next pn-goal-add"><button type="button" class="list__row" data-goal-edit>${icon('flag', 20)}<span class="list__title">Objetivo de carrera</span><span class="list__value">5K · 10K · 21K</span><span class="list__chev" aria-hidden="true">${icon('chevron-right', 14)}</span></button></div>`;
+  }
+  const past = gs.daysLeft < 0;
+  const title = past ? `¿Qué tal tu ${gs.dist.label}?` : gs.countdown;
+  const sub = past ? 'Cuando quieras, prepara la siguiente.' : capitalize(fmt.dateLong(gs.raceDate));
+  const sub2 = !past && gs.targetSec ? `Objetivo ${timeText(gs.targetSec)} · ${paceLine(gs.paceSec)}` : '';
+  const [capL, capR] = goalCaption(gs);
+  return `<button type="button" class="card card--pressable pn-goal" data-goal-edit aria-label="${esc(`Objetivo: ${gs.title}. ${title}. Toca para editarlo.`)}">
+    <span class="pn-goal__top"><span class="eyebrow pn-goal__eyebrow">${icon('flag', 12)} Objetivo · ${esc(gs.dist.label)}</span><span class="pn-goal__edit">${past ? 'Nueva carrera' : 'Editar'}</span></span>
+    <span class="pn-goal__title">${esc(title)}</span>
+    <span class="pn-goal__sub">${esc(sub)}</span>
+    ${sub2 ? `<span class="pn-goal__sub">${esc(sub2)}</span>` : ''}
+    ${goalBar(gs)}
+    <span class="pn-goal__cap"><span>${esc(capL)}</span>${capR ? `<span>${esc(capR)}</span>` : ''}</span>
+  </button>`;
+}
+
+/** Explicación de cómo quedará el plan con esa carrera (en la hoja). */
+function goalPlanText(state, g, today) {
+  if (!g) return '';
+  const planStart = state.plan?.startDate ? mondayOf(state.plan.startDate) : null;
+  const b = safe(() => goalBlock(g, planStart), null);
+  if (!b) return '';
+  const d = goalDistance(g.distance);
+  const n = daysBetween(today, g.date);
+  const left = n < 14 ? `Faltan ${n} ${n === 1 ? 'día' : 'días'}` : `Faltan ${Math.floor(n / 7)} semanas`;
+  const parts = [];
+  if (b.build) parts.push(`${b.build} ${b.build === 1 ? 'semana' : 'semanas'} de construcción`);
+  if (b.taper) parts.push(`${b.taper === 1 ? 'una' : 'dos'} de puesta a punto`);
+  parts.push('la semana de carrera');
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}` : parts[0];
+  const start = b.start > mondayOf(today) ? ` Hasta el ${fmt.dateShort(b.start)} sigues con tu temporada.` : '';
+  const long = d.longMax && (Number(state.schedule?.weekendMinutes) || 50) < d.longMax && b.build >= 2 ? ` La tirada del finde sube hasta ${d.longMax} min.` : '';
+  return `${left}: ${list}.${start}${long}`;
+}
+
+/** Hoja para fijar, cambiar o quitar el objetivo. */
+export function openGoalSheet() {
+  const state = getState();
+  const today = todayKey();
+  const cur = goalOf(state);
+  const live = cur && cur.date >= today ? cur : null;
+  const { min, max } = goalDateRange(today);
+  let dist = live?.distance || cur?.distance || '10k';
+  let date = live?.date || addDays(mondayOf(addDays(today, 56)), 6);
+  let timeRaw = live?.targetSec ? fmtGoalTime(live.targetSec) : '';
+  let sheetEl = null;
+
+  const placeholder = (k) => ({ '5k': '25:00', '10k': '50:00', '21k': '1:50:00' }[k] || '50:00');
+  const hint = () => {
+    const pred = safe(() => predictedFor(dist, state.levels), null);
+    const sec = parseGoalTime(timeRaw, dist);
+    const out = [];
+    if (timeRaw && !sec) out.push(`<span class="pn-gsheet__err">Escribe el tiempo como ${placeholder(dist)}${dist === '21k' ? '' : ' (minutos y segundos)'}.</span>`);
+    else if (sec) out.push(`Ritmo de carrera <b class="num">${esc(paceLine(Math.round(sec / goalDistance(dist).km)))}</b>.`);
+    if (pred) out.push(`Previsión hoy: <b class="num">${fmtGoalTime(pred.fastSec)}–${fmtGoalTime(pred.slowSec)}</b>.`);
+    return out.join(' ');
+  };
+  const planText = () => esc(goalPlanText(state, makeGoal({ distance: dist, date }, today), today));
+  const refresh = () => {
+    if (!sheetEl) return;
+    const h = sheetEl.querySelector('[data-goal-hint]');
+    if (h) h.innerHTML = hint();
+    const p = sheetEl.querySelector('[data-goal-plan]');
+    if (p) p.textContent = goalPlanText(state, makeGoal({ distance: dist, date }, today), today);
+    const t = sheetEl.querySelector('#pn-goal-time');
+    if (t) t.placeholder = `Opcional · ${placeholder(dist)}`;
+  };
+
+  const actions = [
+    {
+      label: live ? 'Guardar cambios' : 'Adaptar mi plan',
+      kind: 'primary',
+      onClick(close) {
+        const sec = timeRaw ? parseGoalTime(timeRaw, dist) : null;
+        if (timeRaw && !sec) {
+          haptic('warning');
+          toast(`Revisa el tiempo objetivo (por ejemplo, ${placeholder(dist)})`, { icon: 'info', kind: 'warning' });
+          return;
+        }
+        if (!makeGoal({ distance: dist, date, targetSec: sec }, today)) {
+          haptic('warning');
+          toast('Elige una fecha entre mañana y dentro de un año', { icon: 'calendar', kind: 'warning' });
+          return;
+        }
+        setState((d) => { setGoal(d, { distance: dist, date, targetSec: sec }, today); });
+        haptic('success');
+        close();
+        toast(`Plan adaptado a tu ${goalDistance(dist).label} del ${raceDateText(date)}`, { icon: 'flag', kind: 'success' });
+      },
+    },
+  ];
+  if (cur) {
+    actions.push({
+      label: 'Quitar objetivo',
+      kind: 'destructive',
+      async onClick(close) {
+        const okd = await confirmDialog({ title: '¿Quitar el objetivo?', message: 'Tu plan vuelve a la temporada de siempre. Las sesiones hechas no cambian.', confirmText: 'Quitar', destructive: true });
+        if (!okd) return;
+        setState((d) => { clearGoal(d); });
+        haptic('light');
+        close();
+        toast('Objetivo quitado', { icon: 'refresh' });
+      },
+    });
+  }
+
+  openSheet({
+    title: live ? 'Tu objetivo' : 'Objetivo de carrera',
+    cls: 'pn-gsheet',
+    html: `<p class="pn-sheet__lead">Elige tu carrera y adaptamos las semanas que quedan: más ritmo de carrera, una puesta a punto al final y una semana suave antes del gran día. Tus horarios no cambian.</p>
+      <div class="st-group">
+        <div class="st-group__title">Distancia</div>
+        ${segmented({ name: 'pn-goal-dist', options: GOAL_DISTANCES.map((d) => ({ value: d.key, label: d.label })), value: dist })}
+      </div>
+      <div class="st-group pn-gsheet__fields">
+        <div class="list">
+          <label class="list__row st-row"><span class="st-row__label"><span class="list__title">Fecha</span></span><input id="pn-goal-date" class="st-input st-time" type="date" min="${min}" max="${max}" value="${esc(date)}"></label>
+          <label class="list__row st-row"><span class="st-row__label"><span class="list__title">Tiempo objetivo</span></span><input id="pn-goal-time" class="st-input" type="text" inputmode="numeric" autocomplete="off" enterkeyhint="done" maxlength="8" placeholder="Opcional · ${placeholder(dist)}" value="${esc(timeRaw)}"></label>
+        </div>
+        <p class="st-note" data-goal-hint>${hint()}</p>
+      </div>
+      <p class="pn-gsheet__plan" data-goal-plan>${planText()}</p>`,
+    actions,
+    onMount(el) {
+      sheetEl = el;
+      el.addEventListener('change', (e) => {
+        if (e.detail?.name === 'pn-goal-dist') { dist = String(e.detail.value); refresh(); return; }
+        if (e.target?.id === 'pn-goal-date' && e.target.value) { date = e.target.value; refresh(); }
+      });
+      el.addEventListener('input', (e) => {
+        if (e.target?.id === 'pn-goal-time') { timeRaw = String(e.target.value || '').trim(); refresh(); }
+        if (e.target?.id === 'pn-goal-date' && e.target.value) { date = e.target.value; refresh(); }
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target?.id === 'pn-goal-time') { e.preventDefault(); e.target.blur(); }
+      });
+    },
+  });
+}
+
 /* ── Plan hablado: «Cuéntale a tu coach» (IA del iPhone → js/training/plan-intent.js → confirmar) ── */
 function askCoachHtml() {
   return `<form class="card pn-ask" data-ask-coach autocomplete="off">
@@ -424,7 +643,7 @@ function view(state, monday, today, first) {
   const testDay = days.find((d) => d.kind === 'test' || d.workout?.isTest);
   if (testDay) {
     testNote = `<div class="card pn-note">${icon('gauge', 20)}<p><b>Semana de test.</b> Test VAM el ${esc(dayName(testDay.date))} ${parseKey(testDay.date).getDate()}: recalcula tus cuatro velocidades. Los días de alrededor son suaves.</p></div>`;
-  } else if (ci?.isDeload) {
+  } else if (ci?.isDeload && (!ci.goal || ci.goal.stage === 'build')) {
     testNote = `<div class="card pn-note">${icon('leaf', 20)}<p><b>Semana de descarga.</b> Menos carga (sobre un 65 %) para asimilar el trabajo del bloque y llegar fresco al siguiente.</p></div>`;
   } else if (monday === curMonday) {
     const nt = safe(() => nextTestDate(state, today), null);
@@ -438,6 +657,7 @@ function view(state, monday, today, first) {
   return `
     ${weekHeader(monday, ci, canPrev, canNext, monday === curMonday)}
     ${monday === curMonday && aiAvailable() ? askCoachHtml() : ''}
+    ${goalCardHtml(state, today)}
     ${block}
     ${weekSummary(days)}
     ${testNote}
@@ -632,7 +852,7 @@ function createDrag(root, { onSwap }) {
     }
     if (ok && t && t.locked) {
       haptic('warning');
-      toast('Ese día ya está hecho: no se puede cambiar', { icon: 'lock' });
+      toast(t.el.dataset.kind === 'race' ? 'El día de la carrera no se mueve' : 'Ese día ya está hecho: no se puede cambiar', { icon: t.el.dataset.kind === 'race' ? 'flag' : 'lock' });
     }
     d.card.classList.add('is-settling');
     d.card.style.transform = '';
@@ -732,6 +952,10 @@ async function openDayMenu(date, onSwap) {
   const day = safePlanDay(state, date);
   const w = day.workout;
   const opts = [];
+  if (day.race && day.status !== 'done') {
+    openGoalSheet();
+    return;
+  }
   if (day.status === 'done') {
     if (day.session?.id) opts.push({ label: 'Ver resumen', value: 'summary', icon: 'chart' });
     if (w) opts.push({ label: 'Ver clase', value: 'view', icon: 'eye' });
@@ -848,6 +1072,11 @@ export function mount(el, { query } = {}) {
   function openCard(card) {
     const date = card.dataset.date;
     const id = card.dataset.id;
+    if (card.dataset.kind === 'race') {
+      haptic('light');
+      openGoalSheet();
+      return;
+    }
     if (id && card.dataset.kind !== 'rest') {
       haptic('light');
       navigate(`#/workout/${idHref(id)}?date=${date}&from=plan`);
@@ -866,6 +1095,10 @@ export function mount(el, { query } = {}) {
     if (wk && !wk.disabled) return changeWeek(Number(wk.dataset.week));
     const ics = e.target.closest('[data-ics]');
     if (ics) return exportIcs(ics);
+    if (e.target.closest('[data-goal-edit]')) {
+      haptic('light');
+      return openGoalSheet();
+    }
     const more = e.target.closest('[data-more]');
     if (more) {
       haptic('light');

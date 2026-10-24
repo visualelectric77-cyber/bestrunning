@@ -67,6 +67,12 @@ import { diagMark } from '../core/diag.js';
  * @typedef {{ ref: string, savedAt: number, json: string }} BackupPayload
  * @typedef {{ type: string }} AudioSessionData
  * @typedef {{ reason: string }} AudioKickData   active | route | reset | interruption (iPhone → página)
+ * @typedef {{ from?: string }} StoreShowData   RITMUP Pro (página → iPhone): abre la hoja de la suscripción. Solo si
+ *   native.hello.caps trae 'store' (los productos han cargado de App Store). `from`: desde dónde, solo para el registro.
+ * @typedef {{ pro: boolean, product?: string, expires?: number, trial: boolean, available: boolean }} StoreStatusData
+ *   RITMUP Pro (iPhone → página, por on('store.status')): tras native.hello, en cada cambio y al cerrarse la hoja.
+ *   product: com.nachogarcia.bestrunning.pro.mensual | .pro.anual · expires: ms · trial: en los 7 días gratis ·
+ *   available: false → no enseñar nada de Pro. En la app nada se bloquea aunque pro sea false (ProGate.enforced).
  */
 
 export const PROTO = 1;

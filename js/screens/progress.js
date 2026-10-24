@@ -11,6 +11,9 @@ import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, ro
 import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
 import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integrations/watch-hr.js';
 import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integrations/session-music.js';
+import { aiAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
+import { readiness } from '../training/readiness.js';
+import { weekReportInput } from '../training/week-report.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -243,6 +246,60 @@ function weekCard(s, today) {
       ${statHtml('Distancia', `<span class="num">${fmt.dec1(wp.km || 0)}</span>`, 'km')}
     </div>
   </section>`;
+}
+
+/* ───────────── Informe de la semana (IA del iPhone) ───────────── */
+
+const WR_KEY = 'ritmup.weekReport';
+const loadWR = () => { try { return JSON.parse(localStorage.getItem(WR_KEY) || 'null'); } catch { return null; } };
+const saveWR = (v) => { try { localStorage.setItem(WR_KEY, JSON.stringify(v)); } catch { /* sin almacenamiento */ } };
+
+/** Datos de la semana para la IA (con el semáforo de fatiga si hay métricas de Salud). */
+function weekReportData(s) {
+  const level = safe(() => readiness(cachedHealthMetrics(), todayKey())?.level, null);
+  return safe(() => weekReportInput(s, new Date(), { readiness: level || undefined }), null);
+}
+
+/**
+ * Qué enseñar: el informe guardado si sigue valiendo (misma semana y mismos datos), «leyendo tu semana» si hay que
+ * pedirlo, o nada (sin IA y sin informe de esta semana, o sin sesiones).
+ * → { note } | { loading: true, data } | null
+ */
+function weekReportState(s) {
+  const data = weekReportData(s);
+  if (!data) return null;
+  const saved = loadWR();
+  if (saved?.sig === data.sig && saved.note?.body) return { note: saved.note };
+  if (aiAvailable()) return { loading: true, data };
+  return saved?.week === data.week && saved.note?.body ? { note: saved.note } : null;
+}
+
+function weekReportCard(st) {
+  if (!st) return '';
+  const head = `<div class="sm-card__head"><span class="sm-card__title">Tu semana</span><span class="sm-opt">IA en tu iPhone</span></div>`;
+  if (st.note) {
+    const n = st.note;
+    return `<section class="card sm-card sm-coach pg-wreport">
+      ${head}
+      ${n.headline ? `<p class="sm-coach__head">${esc(n.headline)}</p>` : ''}
+      <p class="sm-coach__body">${esc(n.body)}</p>
+      ${n.tip ? `<p class="sm-coach__tip">${icon('info', 15)}<span>${esc(n.tip)}</span></p>` : ''}
+    </section>`;
+  }
+  return `<section class="card sm-card sm-coach pg-wreport is-loading" aria-busy="true">
+      ${head}
+      <p class="sm-coach__wait"><span class="sm-coach__bar" aria-hidden="true"><i></i></span>Leyendo tu semana…</p>
+    </section>`;
+}
+
+/** Pide el informe a la IA (una vez por pantalla). Solo se guarda si todas sus cifras son de los datos. */
+async function askWeekReport(data) {
+  const out = await aiRequest('weeklyReport', data.input);
+  if (!out) return false;
+  const note = { headline: String(out.headline || '').slice(0, 80), body: String(out.body || '').slice(0, 400), tip: String(out.tip || '').slice(0, 160) };
+  if (!note.body || !numbersAreGrounded(`${note.headline} ${note.body} ${note.tip}`, data.allowed)) return false;
+  saveWR({ week: data.week, sig: data.sig, note, at: new Date().toISOString() });
+  return true;
 }
 
 function kpiGrid(s, history, animate) {
@@ -648,7 +705,7 @@ function historyLink(count) {
   </div>`;
 }
 
-function view(s, animate) {
+function view(s, animate, wr = null) {
   const history = Array.isArray(s.history) ? s.history.filter(Boolean) : [];
   const today = todayKey();
   const parts = [];
@@ -656,6 +713,7 @@ function view(s, animate) {
     parts.push(emptyHero());
   } else {
     parts.push(weekCard(s, today));
+    parts.push(weekReportCard(wr));
     parts.push(kpiGrid(s, history, animate));
     // La tarjeta de semana de arriba ya dice «X de Y sesiones»: el coach no lo repite
     const insight = safe(() => coachInsight(s, new Date(), { skipWeek: true }), '');
@@ -759,13 +817,26 @@ export function mount(el) {
   let stopCount = () => {};
   let selfState = null;
   let selfAt = 0;
+  let wrAsked = false;
+  let wrFailed = false;
+  let disposed = false;
 
   const render = () => {
     raf = 0;
     stopCount();
     const s = getState();
     const animate = first && !reducedMotion();
-    body.innerHTML = view(s, animate);
+    const wr = safe(() => weekReportState(s), null);
+    body.innerHTML = view(s, animate, wr?.loading && wrFailed ? null : wr);
+    // Informe de la semana: se pide una vez por pantalla; si no llega o no es fiable, la tarjeta se va
+    if (wr?.loading && !wrAsked) {
+      wrAsked = true;
+      askWeekReport(wr.data).then((okNote) => {
+        if (disposed) return;
+        if (!okNote) wrFailed = true;
+        if (!raf) raf = requestAnimationFrame(render);
+      }).catch(() => {});
+    }
     body.classList.toggle('stagger', first);
     if (animate) stopCount = countUp(body);
     first = false;
@@ -840,6 +911,7 @@ export function mount(el) {
   render();
 
   return () => {
+    disposed = true;
     unsub?.();
     stopCount();
     if (raf) cancelAnimationFrame(raf);

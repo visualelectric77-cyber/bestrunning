@@ -955,3 +955,91 @@
 /* Perfil › Mi semana › Avisos: con el aviso apagado, sus horas se atenúan (siguen editables) */
 .list:has(#st-ntf-on:not(:checked)) .st-row:has(#st-ntf-wd, #st-ntf-we),
 .list:has(#st-ntf-pre:not(:checked)) .st-row:has(#st-ntf-pre-t, #st-ntf-thu) { opacity: 0.45; transition: opacity var(--dur-fast) ease; }
+
+/* ════════════════════════ OBJETIVO CON FECHA DE CARRERA ════════════════════════
+   Hoy (cuenta atrás), Mi plan (tarjeta del bloque, día de la carrera) y la hoja para fijarlo. Monocromo: el ember
+   solo marca el objetivo (rótulo y bandera) y la semana actual; verde/amarillo solo en el punto de la previsión. */
+
+/* — Hoy: tarjeta de cuenta atrás — */
+.td-goal {
+  display: flex; flex-direction: column; align-items: stretch; width: 100%;
+  padding: var(--s-4) var(--s-5); color: var(--text); font: inherit; text-align: left;
+}
+.td-goal__top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.td-goal__eyebrow, .pn-goal__eyebrow, .td-race__eyebrow { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); }
+.td-goal__chev { display: inline-flex; color: var(--text-4); }
+.td-goal__title {
+  margin-top: 6px; font-size: var(--fs-headline); line-height: var(--lh-headline); font-weight: 400; letter-spacing: -0.012em;
+  color: var(--text); text-wrap: balance;
+}
+.td-goal__title b { font-weight: 600; }
+.td-goal__sub { margin-top: 2px; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); text-wrap: pretty; }
+.td-goal__stats {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: var(--s-3); padding-top: var(--s-3);
+  border-top: var(--hairline) solid var(--sep);
+}
+.td-goal__stats > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.td-goal__stats > span + span { padding-left: var(--s-3); box-shadow: inset var(--hairline) 0 0 var(--sep); }
+.td-goal__stats small { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-2); white-space: nowrap; }
+.td-goal__stats b {
+  font-family: var(--font-display); font-size: 20px; line-height: 1.1; font-weight: 700; letter-spacing: var(--num-track);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.td-goal__stats i { margin-left: 2px; font-family: var(--font); font-size: 11px; font-style: normal; font-weight: 600; letter-spacing: 0; color: var(--text-2); }
+.td-goal__pred {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: var(--s-3);
+  font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); text-wrap: pretty;
+}
+.td-goal__pred b { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.td-goal__dot { flex: none; width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: var(--ok); }
+.td-goal__pred--warn .td-goal__dot { background: var(--warn); }
+
+/* — Hoy: el día de la carrera — */
+.td-race__grid { margin-top: var(--s-5); }
+.td-race__grid .stat__value { font-size: 24px; }
+.td-day.is-race .td-day__dot { background: var(--accent); }
+
+/* — Mi plan: tarjeta del objetivo y fila para añadirlo — */
+.pn-goal-add .list__row { border: 0; font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.pn-goal {
+  display: flex; flex-direction: column; align-items: stretch; width: 100%;
+  padding: var(--s-5); color: var(--text); font: inherit; text-align: left;
+}
+.pn-goal__top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.pn-goal__edit { font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--accent); }
+.pn-goal__title {
+  margin-top: 6px; font-family: var(--font-display); font-size: var(--fs-title2); line-height: var(--lh-title2); font-weight: 700;
+  letter-spacing: -0.016em;
+}
+.pn-goal__sub { margin-top: 2px; font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pn-goal__bar { display: flex; align-items: center; gap: 8px; margin-top: var(--s-4); }
+.pn-goal__segs { flex: 1; display: grid; grid-template-columns: repeat(var(--n, 8), minmax(0, 1fr)); gap: 3px; }
+.pn-goal__seg { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.pn-goal__seg.is-past { background: rgba(235, 235, 245, 0.55); }
+.pn-goal__seg.is-current { background: var(--accent); }
+.pn-goal__flag { display: inline-flex; flex: none; color: var(--text-2); }
+.pn-goal__flag.is-on { color: var(--accent); }
+.pn-goal__cap {
+  display: flex; justify-content: space-between; gap: var(--s-3); margin-top: 8px;
+  font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-2);
+}
+.pn-goal__cap > span:last-child:not(:first-child) { text-align: right; }
+
+/* Día de la carrera en la semana: tarjeta llena (no es un descanso) con la bandera en ember */
+.pn-card--race { background: var(--surface-1); box-shadow: none; }
+.pn-card--race .pn-card__icon { color: var(--accent); }
+.pn-card--race .pn-card__eyebrow { color: var(--accent); }
+.pn-card--race .pn-card__title { font-weight: 600; color: var(--text); }
+.pn-card--race .pn-card__meta { margin-top: 3px; }
+
+/* — Hoja «Objetivo de carrera» — */
+.pn-gsheet .st-group + .st-group { margin-top: var(--s-5); }
+.pn-gsheet .st-group__title { margin-inline: var(--s-4); }
+.pn-gsheet__fields .st-note { min-height: var(--lh-footnote); }
+.pn-gsheet__fields .st-note b { font-weight: 600; }
+.pn-gsheet #pn-goal-time { font-variant-numeric: tabular-nums; }
+.pn-gsheet__err { color: var(--danger); }
+.pn-gsheet__plan { margin: var(--s-4) var(--s-4) 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); text-wrap: pretty; }
+.td-goal__nb { white-space: nowrap; }
+.pn-gsheet .st-row .list__title { white-space: nowrap; }
+.pn-gsheet .st-time { min-width: 0; max-width: 62%; }

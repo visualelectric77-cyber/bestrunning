@@ -256,6 +256,8 @@ export function mount(el, { params = {} } = {}) {
               </div>
             </section>
 
+            ${form ? feelCard(s) : ''}
+
             ${s.isTest ? testCard(s, st) : ''}
 
             <section class="card sm-card" style="--i:3">
@@ -284,7 +286,7 @@ export function mount(el, { params = {} } = {}) {
         <div class="sm-cta">
           ${form
             ? `<button class="btn btn--primary btn--lg btn--block sm-save" data-act="save" ${draft?.feeling ? '' : 'aria-disabled="true"'}>
-                 <span>${editing ? 'Guardar cambios' : 'Guardar'}</span></button>
+                 ${draft?.feeling ? '' : icon('arrow-up', 17)}<span data-save-lbl>${draft?.feeling ? (editing ? 'Guardar cambios' : 'Guardar') : 'Elige cómo te has sentido'}</span></button>
                ${editing ? '<button class="btn btn--plain btn--block" data-act="cancel-edit">Cancelar</button>' : ''}`
             : `<button class="btn btn--primary btn--lg btn--block" data-act="home"><span>Volver a Hoy</span></button>`}
         </div>
@@ -344,11 +346,16 @@ export function mount(el, { params = {} } = {}) {
     return `<div class="sm-adjs">${adj.map(([z, v]) => `<span class="sm-adj" style="--zc:${zoneColor(z)}">${esc(ZONES[z]?.short || z)} <b class="num">${v > 0 ? '+' : '−'}${fmt.speed(Math.abs(v))}</b> km/h</span>`).join('')}</div>`;
   }
 
-  function formSections(s) {
+  /**
+   * «¿Cómo te has sentido?»: va justo debajo de las cifras (antes iba al final y, sin verla, «Guardar» parecía no hacer
+   * nada). Sin elegir, la tarjeta dice que es el paso que falta para guardar.
+   */
+  function feelCard(s) {
     const f = draft || {};
+    const pending = !f.feeling;
     return `
-      <section class="card sm-card sm-feel" style="--i:5">
-        <div class="sm-card__head"><span class="sm-card__title">¿Cómo te has sentido?</span></div>
+      <section class="card sm-card sm-feel${pending ? ' is-pending' : ''}" style="--i:2">
+        <div class="sm-card__head"><span class="sm-card__title">¿Cómo te has sentido?</span>${pending ? '<span class="sm-feel__need">Falta para guardar</span>' : ''}</div>
         <div class="sm-faces" role="radiogroup" aria-label="Sensación">
           ${feelings().map((x, i) => `
             <button class="sm-face ${f.feeling === x.key ? 'is-picked' : ''}" role="radio" aria-checked="${f.feeling === x.key}" aria-label="${esc(x.label)}"
@@ -358,8 +365,12 @@ export function mount(el, { params = {} } = {}) {
             </button>`).join('')}
         </div>
         <p class="sm-feel__hint" data-feel-hint>${esc(feelHint(f.feeling, s))}</p>
-      </section>
+      </section>`;
+  }
 
+  function formSections(s) {
+    const f = draft || {};
+    return `
       ${pulseCard(s, f)}
 
       ${sessionMusicHtml(s, { variant: 'summary', index: 7 })}
@@ -735,7 +746,16 @@ export function mount(el, { params = {} } = {}) {
     });
     const hint = root.querySelector('[data-feel-hint]');
     if (hint) { hint.textContent = feelHint(key, session); hint.classList.remove('is-in'); void hint.offsetWidth; hint.classList.add('is-in'); }
-    root.querySelector('.sm-save')?.removeAttribute('aria-disabled');
+    const save = root.querySelector('.sm-save');
+    if (save?.hasAttribute('aria-disabled')) {
+      save.removeAttribute('aria-disabled');
+      save.querySelector('.icon')?.remove();
+      const lbl = save.querySelector('[data-save-lbl]');
+      if (lbl) lbl.textContent = editing ? 'Guardar cambios' : 'Guardar';
+    }
+    const card = root.querySelector('.sm-feel');
+    card?.classList.remove('is-pending');
+    card?.querySelector('.sm-feel__need')?.remove();
   }
 
   async function onClose() {

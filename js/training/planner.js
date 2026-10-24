@@ -7,6 +7,8 @@
 // familia dos sesiones seguidas, sin días duros consecutivos, carga semanal ≤ +10 % (salvo tras descarga), descarga
 // ≤ 70 % y 75-80 % del tiempo suave. Solo usa los campos de contrato de la plantilla (family, themes, intensity,
 // category y duraciones). Es determinista por semana (semilla) y se adapta a sesiones perdidas y sensaciones.
+// Con objetivo de carrera (state.plan.goal, js/training/goal.js), las últimas semanas antes de la carrera siguen su
+// propio bloque: construcción con ritmo de carrera, puesta a punto, semana de carrera (día marcado) y recuperación.
 import { clamp, todayKey, addDays, weekdayOf, mondayOf, daysBetween, weekDates, hashStr, makeRng, roundTo } from '../core/utils.js';
 import { TEMPLATES, getTemplate, templatesFor } from './templates.js';
 import { buildWorkout } from './generator.js';
@@ -14,6 +16,7 @@ import { DEFAULT_LEVELS } from './levels.js';
 import {
   SEASON_WEEKS, MESO_WEEKS, isTestWeekIndex, phaseOfMeso, themeOfMeso, eventOn, templateMeta,
 } from './season.js';
+import { goalOf, goalSig, goalWeekInfo, goalLongMinutes, goalIntro, goalDistance, GOAL_STAGES } from './goal.js';
 
 export const CYCLE_WEEKS = ['Arranque', 'Progresión', 'Pico', 'Descarga'];
 const WEEK_LF = [0.97, 1.0, 1.04, 0.8];
@@ -70,6 +73,15 @@ function sched(state) {
 const hasIncline = (state) => !!state?.treadmill?.hasIncline;
 const startMonday = (state) => mondayOf(isKey(state?.plan?.startDate) ? state.plan.startDate : todayKey());
 
+/* Objetivo con fecha de carrera (js/training/goal.js): semana del bloque específico o null. Sin objetivo, siempre null
+   y el plan es exactamente el de siempre. */
+const GOAL_LF = 1.03;                                       // factor de carga del bloque específico (como la fase Específico)
+const GOAL_STAGE_LF = { taper: 0.85, race: 0.8, recovery: 0.8 };
+function goalWeek(state, mondayKey) {
+  const g = goalOf(state);
+  return g ? goalWeekInfo(g, mondayKey, startMonday(state)) : null;
+}
+
 function allows(t, minutes) {
   if (!t) return false;
   return minutes >= Math.min(...t.durations) && minutes <= Math.max(...t.durations);
@@ -94,7 +106,7 @@ function calendar(state, dateKey, adj) {
   const theme = themeOfMeso(cycleIndex);
   const isTestWeek = isTestWeekIndex(weeks);
   const nominal = WEEK_LF[weekInCycle - 1] * phase.lf * (1 + Math.min(seasonIndex, 3) * 0.02);
-  return {
+  const out = {
     cycleIndex, weekInCycle, isDeload: weekInCycle === 4, weeksSinceStart: weeks,
     weekName: CYCLE_WEEKS[weekInCycle - 1] + (isTestWeek ? ' + Test' : ''),
     loadFactor: round2(clamp(nominal * (1 + adj), 0.5, 1.4)),
@@ -102,6 +114,28 @@ function calendar(state, dateKey, adj) {
     seasonIndex, seasonWeek: (((weeks % SEASON_WEEKS) + SEASON_WEEKS) % SEASON_WEEKS) + 1,
     mesoIndex, mesoNumber: mesoIndex + 1,
     phase: { key: phase.key, name: phase.name }, theme: { key: theme.key, name: theme.name }, isTestWeek,
+  };
+  // Bloque específico del objetivo: su propio ciclo (pico justo antes de afinar), sin test al afinar ni en carrera
+  const gw = goalWeek(state, mondayOf(key));
+  if (!gw) {
+    // Tras la semana de recuperación se vuelve a la temporada con una semana de arranque (ni pico ni otra descarga)
+    const g = goalOf(state);
+    if (g && weekInCycle !== 1 && daysBetween(mondayOf(g.date), mondayOf(key)) === 14 && mondayOf(key) > startMonday(state)) {
+      const n = WEEK_LF[0] * phase.lf * (1 + Math.min(seasonIndex, 3) * 0.02);
+      return { ...out, weekInCycle: 1, isDeload: false, weekName: CYCLE_WEEKS[0] + (isTestWeek ? ' + Test' : ''),
+        loadFactor: round2(clamp(n * (1 + adj), 0.5, 1.4)), nominalLoad: round2(n) };
+    }
+    return out;
+  }
+  const wic = gw.weekInCycle;
+  const test = gw.stage === 'build' && isTestWeek;
+  const gNominal = gw.stage === 'build' ? WEEK_LF[wic - 1] * GOAL_LF * (1 + Math.min(seasonIndex, 3) * 0.02) : GOAL_STAGE_LF[gw.stage];
+  return {
+    ...out, weekInCycle: wic, isDeload: wic === 4, isTestWeek: test,
+    weekName: (gw.stage === 'build' ? CYCLE_WEEKS[wic - 1] : GOAL_STAGES[gw.stage]) + (test ? ' + Test' : ''),
+    loadFactor: round2(clamp(gNominal * (1 + adj), 0.5, 1.4)),
+    nominalLoad: round2(gNominal),
+    goal: gw,
   };
 }
 
@@ -123,7 +157,9 @@ export function seasonInfo(state, dateKey = todayKey()) {
   const test = days.find((d) => d.role === 'T');
   const seasonStart = addDays(startMonday(state), Math.max(0, info.seasonIndex) * SEASON_WEEKS * 7);
   const weeksToTest = (() => {
-    for (let i = 0; i < 6; i++) if (isTestWeekIndex(info.weeksSinceStart + i)) return i;
+    for (let i = 0; i < 6; i++) {
+      if (info.goal || goalOf(state) ? cycleInfo(state, addDays(mondayOf(key), i * 7)).isTestWeek : isTestWeekIndex(info.weeksSinceStart + i)) return i;
+    }
     return null;
   })();
   return {
@@ -234,10 +270,14 @@ function adaptFor(hx, prev, monday, today) {
 
 const isHard = (r) => r === 'H' || r === 'T';
 
-function rolesFor(info, sch, adapt, prevWeek) {
+function rolesFor(info, sch, adapt, prevWeek, monday) {
+  const gw = info.goal || null;
   const pat = { ...PATTERNS[info.weekInCycle] };
-  if (info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
-  if (info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
+  // Con objetivo, el jueves es siempre la sesión de ritmo de carrera y el finde la tirada larga (sin intercambios)
+  if (!gw && info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
+  if (!gw && info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
+  // Semana pico antes de afinar: el finde es el ensayo de carrera (duro) y el jueves, ritmo controlado
+  if (gw && gw.isLastBuild && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
   const roles = {};
   for (let w = 1; w <= 7; w++) {
     if (w === 4) roles[w] = pat[4];
@@ -245,7 +285,7 @@ function rolesFor(info, sch, adapt, prevWeek) {
     else if (w <= 5) roles[w] = pat[w];
     else roles[w] = null;
   }
-  const demoteAll = info.phase.key === 'transicion' || adapt.mode === 'return';
+  const demoteAll = (info.phase.key === 'transicion' && !gw) || adapt.mode === 'return';
   for (let w = 1; w <= 7; w++) {
     if (roles[w] !== 'H') continue;
     if (demoteAll) roles[w] = 'M';
@@ -260,6 +300,19 @@ function rolesFor(info, sch, adapt, prevWeek) {
     roles[3] = 'E';
     roles[5] = 'E';
     if (info.isDeload) for (const w of [1, 2]) roles[w] = 'E';
+  }
+  // Semana de carrera y de recuperación: todo suave, descanso la víspera y el día siguiente a la carrera; en la de
+  // carrera, un único recordatorio de ritmo 3-5 días antes (el día de la carrera lo marca computeWeek)
+  if (gw && (gw.stage === 'race' || gw.stage === 'recovery')) {
+    const dd = (w) => daysBetween(gw.raceDate, addDays(monday, w - 1));
+    for (let w = 1; w <= 7; w++) {
+      if (!roles[w]) continue;
+      roles[w] = dd(w) === 0 || dd(w) === -1 || dd(w) === 1 ? null : 'E';
+    }
+    if (gw.stage === 'race') {
+      const q = [-3, -4, -5, -2].map((x) => [1, 2, 3, 4, 5, 6, 7].find((w) => dd(w) === x && roles[w])).find(Boolean);
+      if (q) roles[q] = 'M';
+    }
   }
   // Nunca dos días duros seguidos (también domingo → lunes)
   const prevLast = prevWeek ? prevWeek.days[7]?.role : null;
@@ -276,7 +329,19 @@ function rolesFor(info, sch, adapt, prevWeek) {
 
 function minutesFor(w, info, sch) {
   const long = w === 4 || w === sch.weekendDay;
-  const base = w === 4 ? sch.thursdayMinutes : w === sch.weekendDay ? sch.weekendMinutes : sch.weekdayMinutes;
+  let base = w === 4 ? sch.thursdayMinutes : w === sch.weekendDay ? sch.weekendMinutes : sch.weekdayMinutes;
+  const gw = info.goal;
+  if (gw) {
+    // Construcción: la tirada del finde crece hacia la distancia · Afinar: largos al 80 % (1.ª de dos) o 60 % ·
+    // Carrera: largos a la mitad y cortos como siempre · Recuperación: como una descarga
+    if (gw.stage === 'build' && w === sch.weekendDay) base = goalLongMinutes(gw, base);
+    if (gw.stage === 'taper') {
+      if (!long) return base;
+      const f = gw.taperWeeks === 2 && gw.taperIndex === 0 ? 0.8 : 0.6;
+      return Math.max(30, Math.min(base, roundTo(base * f, 5)));
+    }
+    if (gw.stage === 'race') return long ? Math.max(20, Math.min(base, roundTo(base * 0.5, 5))) : base;
+  }
   if (!info.isDeload) return base;
   // descarga: largos al 60 % (al 50 % si además hay test: la semana más ligera del bloque)
   if (long) return info.isTestWeek ? Math.max(25, Math.min(base, roundTo(base * 0.5, 5))) : Math.max(30, Math.min(base, roundTo(base * 0.6, 5)));
@@ -291,7 +356,8 @@ function computeWeek(state, W, cache, adapt) {
   const phase = phaseOfMeso(info.mesoIndex);
   const theme = themeOfMeso(info.cycleIndex);
   const prev = W > 0 ? cache[W - 1] : null;
-  const { roles, testDay } = rolesFor(info, sch, adapt, prev);
+  const gw = info.goal || null;
+  const { roles, testDay } = rolesFor(info, sch, adapt, prev, monday);
   const lf = info.nominalLoad;
   const rng = makeRng(hashStr(`season|${monday}|${adapt.sig}`));
 
@@ -317,6 +383,10 @@ function computeWeek(state, W, cache, adapt) {
   for (let w = 1; w <= 7; w++) {
     const date = addDays(monday, w - 1);
     const role = roles[w];
+    if (gw && gw.stage === 'race' && date === gw.raceDate) {
+      days[w] = { date, slot: 'race', kind: 'rest', role: null, minutes: 0, templateId: null, family: null, surprise: false, event: null, race: true };
+      continue;
+    }
     if (!role) {
       days[w] = { date, slot: 'rest', kind: 'rest', role: null, minutes: 0, templateId: null, family: null, surprise: false, event: null };
       continue;
@@ -326,7 +396,8 @@ function computeWeek(state, W, cache, adapt) {
     days[w] = { date, w, role, minutes, long, kind: role === 'T' ? 'test' : long ? 'long' : 'short', surprise: false, event: null };
     train.push(days[w]);
   }
-  const surpriseDay = [3, 5, 2, 1].map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
+  const surpriseDay = gw && gw.stage !== 'build' ? null
+    : [3, 5, 2, 1].map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
   let eventDay = null;
   for (let w = 1; w <= 7 && !eventDay; w++) {
     const ev = eventOn(addDays(monday, w - 1));
@@ -346,8 +417,12 @@ function computeWeek(state, W, cache, adapt) {
   const totalMin = train.reduce((a, d) => a + d.minutes, 0);
   const prevLoad = prev ? prev.load : null;
   const growth = 1 + Math.min(info.seasonIndex, 3) * 0.02;
+  // La 1.ª de dos semanas de puesta a punto recorta menos (≈ 75 %); el resto de descargas, como siempre
+  const firstTaper = gw && gw.stage === 'taper' && gw.taperWeeks === 2 && gw.taperIndex === 0;
+  const dRatio = firstTaper ? 0.75 : DELOAD_RATIO;
+  const [dMax, dHard] = firstTaper ? [0.81, 0.84] : [DELOAD_MAX, DELOAD_HARD];
   let target = info.isDeload
-    ? (prevLoad ? prevLoad * DELOAD_RATIO : totalMin * 0.92)
+    ? (prevLoad ? prevLoad * dRatio : totalMin * 0.92)
     : totalMin * phase.lpm[info.weekInCycle - 1] * growth;
   if (adapt.mode === 'tired') target *= 0.88;
   else if (adapt.mode === 'return') target *= 0.82;
@@ -365,14 +440,14 @@ function computeWeek(state, W, cache, adapt) {
   }
   if (prev && !prev.info.isDeload) {
     // vuelta tras parón: por debajo de lo que se perdió · fatiga: sin subir · sesiones perdidas: no se acumulan
-    const [soft, hard] = info.isDeload ? [DELOAD_MAX, DELOAD_HARD]
+    const [soft, hard] = info.isDeload ? [dMax, dHard]
       : adapt.mode === 'return' ? [0.92, 0.98]
         : adapt.mode === 'tired' ? [0.95, 1.0]
           : adapt.missed >= 2 ? [1.0, 1.03] : [GROWTH_MAX, GROWTH_HARD];
     cap = ref * soft;
     capHard = ref * hard;
     if (!info.isDeload) { cap = Math.min(cap, prevLoad * GROWTH_MAX); capHard = Math.min(capHard, prevLoad * GROWTH_HARD); }
-    if (info.isDeload) target = Math.min(target, ref * DELOAD_RATIO);
+    if (info.isDeload) target = Math.min(target, ref * dRatio);
   }
   if (cap && !info.isDeload) target = Math.min(target, cap * 0.98);
 
@@ -381,6 +456,10 @@ function computeWeek(state, W, cache, adapt) {
     const LPM = { E: 0.92, M: 1.25, H: 1.6, T: 2.2 };
     const SHARE = { E: 0.95, M: 0.78, H: 0.62, T: 0.5 };
     const kTarget = target / Math.max(1, train.reduce((a, d) => a + LPM[d.role] * d.minutes, 0));
+    // Objetivo: ritmo de carrera en las sesiones de calidad, tirada larga de fondo y ensayo de carrera en la semana pico
+    const gd = gw && gw.stage !== 'recovery' ? goalDistance(gw.distance) : null;
+    const simDay = gd && gw.isLastBuild && !info.isDeload ? sch.weekendDay : null;
+    const recovering = gw && gw.stage === 'recovery';
 
     // Candidatos por día
     const pools = [];
@@ -423,6 +502,12 @@ function computeWeek(state, W, cache, adapt) {
         if (d.w === 4 && KEY_THU.includes(m.family)) s += 2;
         if (d.w === sch.weekendDay && KEY_WE.includes(m.family)) s += 1;
         if (d.w === sch.weekendDay && phase.key === 'picos' && d.role === 'H' && m.family === 'reto') s += 3;
+        if (gd) {
+          if (d.role !== 'E' && (d.w === 4 || gw.stage !== 'build') && gd.thu.includes(m.family)) s += gw.stage === 'build' ? 3 : 5;
+          if (d.long && d.w === sch.weekendDay && gw.stage === 'build' && gd.long.includes(m.family)) s += 2.5;
+          if (d.w === simDay && gd.sim.includes(t.id)) s += 9;
+        }
+        if (recovering && m.intensity === 'easy') s += 2;
         const cn = estimate(t.id, d.minutes, 1, 1, incline);
         const dayTarget = kTarget * LPM[d.role] * d.minutes;
         s -= 6 * Math.min(1.5, Math.abs(cn.load - dayTarget) / dayTarget);
@@ -555,7 +640,8 @@ const MEMO = new Map();
 
 function settingsKey(state) {
   const s = sched(state);
-  return [startMonday(state), s.weekdayMinutes, s.thursdayMinutes, s.weekendDay, s.weekendMinutes, hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|');
+  const g = goalSig(state?.plan?.goal);
+  return [startMonday(state), s.weekdayMinutes, s.thursdayMinutes, s.weekendDay, s.weekendMinutes, hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '');
 }
 
 function weekPicks(state, W) {
@@ -591,6 +677,13 @@ function introFor(info, day, adapt) {
   if (day.event) return day.event.intro;
   if (day.role === 'T') return `Semana ${info.seasonWeek} de la temporada: test VAM. Medimos tu forma para recalcular tus cuatro velocidades.`;
   const parts = [];
+  if (info.goal) {
+    parts.push(day.surprise ? 'Sorpresa de la semana: hoy salimos un poco del guion, sin perder de vista tu carrera.'
+      : goalIntro(info.goal, info.goal.stage === 'build' ? WEEK_LINES[info.weekInCycle - 1] : ''));
+    if (adapt?.mode === 'tired') parts.push('Vienes de sesiones muy duras: esta semana aflojamos un poco.');
+    else if (adapt?.mode === 'return') parts.push('Volvemos con calma: nada de recuperar lo perdido de golpe.');
+    return parts.join(' ');
+  }
   if (day.surprise) parts.push(`Sorpresa de la semana: hoy salimos del guion del bloque «${theme.name}».`);
   else if (day.w === 1 || (info.isTestWeek && day.w === 2)) parts.push(`${phase.line} ${theme.intro}`);
   else parts.push(`Bloque «${theme.name}» · ${phase.name}.`);
@@ -652,8 +745,10 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
     const m = templateMeta(getTemplate(templateId));
     templateId = fallbackPick(state, dateKey, minutes, { family: m.family, intensity: m.intensity });
   }
+  const g = def.race && !isOverride ? goalOf(state) : null;
+  const race = g ? { distance: g.distance, label: goalDistance(g.distance).label, km: goalDistance(g.distance).km, date: g.date, targetSec: g.targetSec } : null;
   return {
-    date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info,
+    date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info, race,
     role: kind === 'rest' ? null : def.role ? ROLE_NAME[def.role] : 'easy',
     surprise: !isOverride && !!def.surprise,
     event: !isOverride && def.event ? { key: def.event.key, name: def.event.name } : null,
@@ -740,6 +835,7 @@ export function planDay(state, dateKey, now = new Date()) {
     surprise: r.surprise,
     event: r.event,
     intro: r.intro,
+    ...(r.race ? { race: r.race } : {}),
     season: {
       phase: r.info.phase, theme: r.info.theme, mesoNumber: r.info.mesoNumber, weekInMeso: r.info.weekInCycle,
       seasonWeek: r.info.seasonWeek, isTestWeek: r.info.isTestWeek,
@@ -872,6 +968,8 @@ export function nextTestDate(state, fromKey = todayKey()) {
   const info = cycleInfo(state, from);
   for (let w = Math.max(0, info.weeksSinceStart); w < Math.max(0, info.weeksSinceStart) + 260; w++) {
     if (!isTestWeekIndex(w)) continue;
+    const gwk = goalOf(state) ? goalWeek(state, addDays(startMonday(state), w * 7)) : null;
+    if (gwk && gwk.stage !== 'build') continue; // al afinar, en la semana de carrera y al recuperar no hay test
     const d = addDays(startMonday(state), w * 7 + 3);
     if (d >= from && !isDone(sessionFor(state?.history, d))) return d;
   }

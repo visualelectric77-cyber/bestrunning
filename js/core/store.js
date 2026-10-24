@@ -1,5 +1,6 @@
 // BestRunning · estado global persistente (localStorage) con suscripción.
 import { deepClone } from './utils.js';
+import { normalizeGoal } from '../training/goal.js';
 
 const STATE_KEY = 'br.state.v1';
 const ACTIVE_KEY = 'br.active.v1';
@@ -43,7 +44,8 @@ export function defaultState() {
       bestVam: null,
     },
     schedule: { weekdayMinutes: 20, thursdayMinutes: 50, weekendDay: 6, weekendMinutes: 50, reminderTime: '07:00' },
-    plan: { startDate: null, overrides: {} },
+    // goal: objetivo con fecha de carrera (js/training/goal.js) o null
+    plan: { startDate: null, overrides: {}, goal: null },
     treadmill: { hasIncline: false, maxIncline: 12, minSpeed: 1.0, maxSpeed: 18.0, announceLead: 10 },
     audio: {
       voiceEnabled: true, voiceURI: null, rate: 1.0, pitch: 1.0, volume: 1.0, beeps: true,
@@ -150,6 +152,9 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
   if (isPlainObject(st.plan)) {
     const sz = isPlainObject(st.plan.season) ? st.plan.season : {};
     st.plan.season = { v: 1, weeks: 52, mesoWeeks: 4, testEvery: 6, ...sz, startDate: st.plan.startDate || null };
+    // [objetivo] Objetivo con fecha de carrera: los estados antiguos no lo tienen (null = plan de siempre); uno corrupto
+    // o incompleto se descarta en vez de romper el plan.
+    st.plan.goal = normalizeGoal(st.plan.goal);
   }
   st.version = STATE_VERSION;
   return st;

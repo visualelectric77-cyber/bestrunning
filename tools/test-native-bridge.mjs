@@ -123,10 +123,15 @@ const SCHEMA = {
   'notify.config': { enabled: 'bool', weekdayTime: 'str', weekendTime: 'str', preRun: 'bool', preRunTime: 'str', thursdayPreRunTime: opt('str') },
   'notify.status': { authorized: 'bool', enabled: 'bool' },
   'plan.days': { days: arr({ dayKey: 'str', title: 'str', minutes: 'int', category: 'str', rest: 'bool', segments: opt(arr('any')) }) },
+  // RITMUP Pro (StoreKit 2): la página abre la hoja de la suscripción; el iPhone manda el estado (solo con 'store' en caps)
+  'store.show': { from: opt('str') },
+  'store.status': { pro: 'bool', product: opt('str'), expires: opt('int'), trial: 'bool', available: 'bool' },
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',
-  'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic', 'health.metrics.get', 'ai.request', 'notify.config', 'plan.days'];
+  'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic', 'health.metrics.get', 'ai.request', 'notify.config', 'plan.days',
+  'store.show'];
+const PRO_PRODUCTS = ['com.nachogarcia.bestrunning.pro.mensual', 'com.nachogarcia.bestrunning.pro.anual'];
 const HAPTIC_STYLES = ['light', 'medium', 'heavy', 'soft', 'rigid', 'selection', 'success', 'warning', 'error'];
 const ID_REQUIRED = new Set(['cmd', 'workout.summary', 'backup.get']);
 // Decimales máximos (§3.1): km/h 1 · km 3 · left/elapsed/remaining 1 · volumen 2
@@ -1331,6 +1336,10 @@ await section('Fixtures', async () => {
       const e = JSON.parse(readFileSync(join(NATIVE_FIX_DIR, f), 'utf8'));
       const errs = envErrors(e);
       ok(!errs.length, `native/Fixtures/${f} cumple el esquema de la página: ${errs.join(' · ')}`);
+      if (e.type === 'store.status') {
+        ok(!e.data.product || PRO_PRODUCTS.includes(e.data.product), `native/Fixtures/${f}: producto de RITMUP Pro conocido (${e.data.product})`);
+        ok(e.data.pro || (!e.data.product && !e.data.expires && !e.data.trial), `native/Fixtures/${f}: sin Pro no hay producto, caducidad ni prueba`);
+      }
     }
   }
   P2.nb.detach();
@@ -1380,6 +1389,20 @@ await section('Instancia por defecto', async () => {
     .every((k) => HAPTIC_STYLES.includes(HP.hapticStyle(k))), 'hapticStyle(): todos los nombres dan un estilo de iOS');
   ok((await NB.initNativeBridge({})) === true, 'initNativeBridge dos veces: sin efecto');
   ok(posted.filter((s) => s.includes('"type":"hello"')).length === 1, 'un solo hello por carga');
+
+  // RITMUP Pro (StoreKit 2): store.show sale por el puente con el esquema de Wire.swift y store.status llega a on()
+  const n0 = posted.length;
+  ok(NB.post('store.show', { from: 'settings' }) === true && NB.post('store.show') === true, 'store.show: post() aceptado');
+  const shows = posted.slice(n0).map((x) => JSON.parse(x)).filter((m) => m.type === 'store.show');
+  ok(shows.length === 2 && shows.every((m) => !envErrors(m).length), `store.show cumple Wire.swift: ${shows.map((m) => envErrors(m).join(' · ')).join(' | ')}`);
+  const got = [];
+  const off = NB.on('store.status', (d) => got.push(d));
+  const st = { pro: true, product: PRO_PRODUCTS[1], expires: now() + 7 * 86400000, trial: true, available: true };
+  const stEnv = { v: 1, type: 'store.status', seq: 4, boot: 'p4k8m2', at: now(), data: st };
+  ok(!envErrors(stEnv).length, `store.status de ejemplo cumple el esquema: ${envErrors(stEnv).join(' · ')}`);
+  BR.receive(JSON.stringify(stEnv));
+  ok(got.length === 1 && eq(got[0], st), `store.status llega a on('store.status') (${JSON.stringify(got)})`);
+  if (typeof off === 'function') off();
   delete globalThis.window;
 });
 

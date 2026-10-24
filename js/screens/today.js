@@ -19,6 +19,7 @@ import {
   openSwapSheet, seasonOf, seasonLine, seasonChips, sessionsOn, sessionRow, ensureSeasonStyles, eventIntro, altItem,
 } from './plan.js';
 import { eventOn } from '../training/season.js';
+import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
 import { readiness } from '../training/readiness.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
@@ -125,10 +126,10 @@ function weekStrip(days, today, selected, state) {
     const train = !!(d.workout && d.kind !== 'rest');
     const num = parseKey(d.date).getDate();
     const wd = d.weekday || weekdayOf(d.date);
-    const what = train ? d.workout.title : 'descanso';
+    const what = train ? d.workout.title : d.race ? `tu carrera de ${d.race.label}` : 'descanso';
     const stLabel = { done: 'hecho', missed: 'no realizado', today: 'hoy', upcoming: 'pendiente', rest: '', before: '' }[st] || '';
     const label = `${capitalize(fmt.weekdayName(wd))} ${num}: ${what}${stLabel ? ', ' + stLabel : ''}`;
-    return `<button type="button" class="td-day st-${st}${train ? ' has-train' : ''}${isToday ? ' is-today' : ''}${d.date === selected ? ' is-selected' : ''}"
+    return `<button type="button" class="td-day st-${st}${train ? ' has-train' : ''}${d.race ? ' is-race' : ''}${isToday ? ' is-today' : ''}${d.date === selected ? ' is-selected' : ''}"
         data-day="${d.date}" aria-pressed="${d.date === selected}" aria-label="${esc(label)}">
       <span class="td-day__wd">${fmt.weekdayShort(wd)}</span>
       <span class="td-day__mark num">${num}</span>
@@ -224,6 +225,15 @@ function nextTraining(state, fromKey) {
 function restHero(day, state, today, animate) {
   const rel = fmt.relativeDay(day.date, today);
   const line = REST_LINES[hashStr(day.date) % REST_LINES.length];
+  // Víspera de la carrera: nada de «entrenar igualmente»
+  const eve = safe(() => planDay(state, addDays(day.date, 1)), null);
+  if (eve?.race && !day.isOverride) {
+    return `<article class="card td-hero td-hero--rest${animate ? ' td-hero--in' : ''}">
+    <div class="td-hero__top"><span class="eyebrow">${esc(rel)} · Descanso</span></div>
+    <h2 class="td-hero__title">Mañana, tu ${esc(eve.race.label)}</h2>
+    <p class="td-hero__sub">Piernas en alto, mucha agua y cena de siempre. Deja preparados la ropa y el dorsal, y a dormir pronto.</p>
+  </article>`;
+  }
   const next = nextTraining(state, day.date);
   const nextHtml = next
     ? `<button type="button" class="td-rest__next" data-href="#/workout/${enc(next.workout.id)}?date=${next.date}&from=today">
@@ -249,6 +259,71 @@ function restHero(day, state, today, animate) {
   </article>`;
 }
 
+/** El día de la carrera: sin clase en la cinta; ritmo y objetivo a mano. */
+function raceHero(day, state, today, animate) {
+  const r = day.race;
+  const n = daysBetween(today, day.date);
+  const rel = fmt.relativeDay(day.date, today);
+  const title = n === 0 ? `Hoy es tu ${r.label}` : n === 1 ? `Mañana, tu ${r.label}` : `Tu ${r.label}`;
+  const sub = n === 0
+    ? 'Calienta 10–15 minutos muy suave, sal contenido el primer kilómetro y guarda fuerzas para el final. ¡A disfrutarla!'
+    : 'El día de tu carrera. Llega descansado: la semana es suave y la víspera, descanso.';
+  const pace = r.targetSec ? Math.round(r.targetSec / r.km) : null;
+  const grid = pace
+    ? `<div class="stat-grid td-race__grid">
+      ${stat({ label: 'Objetivo', value: fmtGoalTime(r.targetSec) })}
+      ${stat({ label: 'Ritmo', value: paceText(pace), unit: '/km' })}
+      ${stat({ label: 'En la cinta', value: fmt.speed(3600 / pace), unit: 'km/h' })}
+    </div>`
+    : '';
+  return `<article class="card td-hero td-hero--race${animate ? ' td-hero--in' : ''}">
+    <div class="td-hero__top"><span class="eyebrow td-race__eyebrow">${icon('flag', 12)} ${esc(rel)} · Carrera</span></div>
+    <h2 class="td-hero__title">${esc(title)}</h2>
+    <p class="td-hero__sub">${esc(sub)}</p>
+    ${grid}
+    <div class="td-hero__actions">
+      <button type="button" class="btn btn--secondary btn--lg btn--block" data-href="#/plan">Ver mi plan</button>
+    </div>
+  </article>`;
+}
+
+/** Cuenta atrás del objetivo: «Faltan 6 semanas» y debajo «10K del 15 de marzo», ritmo necesario y marca prevista. */
+function goalCard(state, today) {
+  const gs = safe(() => goalStatus(state, today, { keepDays: 3 }), null);
+  if (!gs || gs.daysLeft === 0 || gs.daysLeft === 1) return ''; // hoy y la víspera ya lo cuenta la tarjeta del día
+  const past = gs.daysLeft < 0;
+  const gw = gs.week;
+  const sub = past
+    ? 'Cuando quieras, fija tu próxima carrera en Mi plan.'
+    : !gw ? `Tu plan específico empieza el ${fmt.dateShort(gs.block.start)}. Hasta entonces, temporada de siempre.`
+      : gw.stage === 'build' ? `Semana ${gw.weekOfBlock} de ${gw.blockWeeks} de tu plan · Construcción`
+        : gw.stage === 'taper' ? 'Puesta a punto: menos volumen para llegar con las piernas frescas'
+          : 'Semana de carrera: todo suave y la víspera, descanso';
+  const head = past ? `<b>¿Qué tal tu ${esc(gs.dist.label)}?</b>` : `<b>${esc(gs.countdown)}</b><br><span class="td-goal__nb">${esc(gs.title)}</span>`;
+  const stats = !past && gs.paceSec
+    ? `<div class="td-goal__stats">
+        <span><small>Objetivo</small><b class="num">${fmtGoalTime(gs.targetSec)}</b></span>
+        <span><small>Ritmo</small><b class="num">${paceText(gs.paceSec)}<i>/km</i></b></span>
+        <span><small>En la cinta</small><b class="num">${fmt.speed(gs.speedKmh)}<i>km/h</i></b></span>
+      </div>`
+    : '';
+  const p = gs.predicted;
+  const v = gs.verdict;
+  const pred = !past && p
+    ? `<div class="td-goal__pred${v ? ` td-goal__pred--${v.level}` : ''}">
+        ${v ? '<span class="td-goal__dot" aria-hidden="true"></span>' : ''}
+        <span>Previsión hoy <b class="num">${fmtGoalTime(p.fastSec)}–${fmtGoalTime(p.slowSec)}</b>${v ? ` · ${esc(v.text)}` : ''}</span>
+      </div>`
+    : '';
+  const aria = past ? `¿Qué tal tu ${gs.dist.label}? Ver mi plan` : `${gs.countdown} para tu ${gs.title}. Ver mi plan`;
+  return `<button type="button" class="card card--pressable td-goal" data-href="#/plan" aria-label="${esc(aria)}">
+    <span class="td-goal__top"><span class="eyebrow td-goal__eyebrow">${icon('flag', 12)} Tu objetivo</span><span class="td-goal__chev" aria-hidden="true">${icon('chevron-right', 14)}</span></span>
+    <span class="td-goal__title">${head}</span>
+    <span class="td-goal__sub">${esc(sub)}</span>
+    ${stats}${pred}
+  </button>`;
+}
+
 function heroBlock(day, state, today, animate) {
   if (!day) {
     return emptyState({
@@ -259,6 +334,7 @@ function heroBlock(day, state, today, animate) {
     });
   }
   if (day.status === 'done' && day.session) return doneHero(day, today, animate);
+  if (day.race && !day.isOverride) return raceHero(day, state, today, animate);
   if (day.kind === 'rest' || !day.workout) return restHero(day, state, today, animate);
   return trainHero(day, state, today, animate);
 }
@@ -365,7 +441,7 @@ function installBanner() {
 function seasonBar(si) {
   if (!si) return '';
   return `<button type="button" class="td-season" data-href="#/plan" aria-label="${esc(`${seasonLine(si)}. Ver mi plan`)}">
-    <span class="td-season__line">Semana ${si.seasonWeek} de 52 · ${esc(si.phase.name)}</span>
+    <span class="td-season__line">${si.goal ? (si.goal.stage === 'recovery' ? `Tras tu ${esc(si.goal.label)} · Recuperación` : `Plan ${esc(si.goal.label)} · semana ${si.goal.weekOfBlock} de ${si.goal.blockWeeks}`) : `Semana ${si.seasonWeek} de 52 · ${esc(si.phase.name)}`}</span>
     ${seasonChips(si)}
     <span class="td-season__go">Mi plan${icon('chevron-right', 13)}</span>
   </button>`;
@@ -509,6 +585,7 @@ export function mount(el) {
       selected === today ? readinessBlock(today) : '',
       heroBlock(day, state, today, heroAnim),
       safe(() => sessionsBlock(state, day, selected, today), ''),
+      goalCard(state, today),
       speedsBlock(state, today),
       `<div class="td-duo">${weekCard(state, list || [], today)}${cycleCard(state, today)}</div>`,
       coachCard(state),
