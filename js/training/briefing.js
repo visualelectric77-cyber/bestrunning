@@ -13,6 +13,17 @@ const dayOf = (s) => String(s?.dayKey || s?.startedAt || '').slice(0, 10);
 const numsOf = (v) => (String(v ?? '').match(/\d+(?:[.,]\d+)?/g) || []).map((n) => Number(n.replace(',', '.')));
 
 /**
+ * ¿El texto del briefing vale? Cifras solo de los datos (eso lo mira numbersAreGrounded), al menos una cifra concreta
+ * (la velocidad o los minutos de hoy) y nada de palabras de las instrucciones o de los datos en bruto.
+ */
+export function briefingTextOk(text, allowed, grounded) {
+  const t = String(text || '');
+  if (!t.trim() || !grounded(t, allowed)) return false;
+  if (!/\d/.test(t)) return false;
+  return !/\b(amber|red|green|readiness|restingdelta|hrvpct|hrvsusual|daysago|json|green|level|estado|zones?|maxkmh)\b/i.test(t);
+}
+
+/**
  * → null (sin clase) o { key, input, allowed }.
  *   key: para guardar el briefing del día (misma clase, mismo día y mismo semáforo = mismo texto).
  *   opts.today 'AAAA-MM-DD' · opts.metrics: métricas de Salud (cachedHealthMetrics) o null · opts.now (ms).
@@ -51,7 +62,8 @@ export function briefingInput(state, workout, { today, metrics = null, now = Dat
     const r = readiness(metrics, today);
     if (r) {
       level = r.level;
-      input.readiness = { level: r.level };
+      // En palabras (el modelo pequeño del iPhone copiaba «amber/red» tal cual si le llegaban los códigos)
+      input.readiness = { estado: r.level === 'green' ? 'descansado' : r.level === 'amber' ? 'algo cargado' : 'muy cargado' };
       if (r.resting && Math.abs(r.resting.delta) >= 3) input.readiness.restingDelta = r.resting.delta;
       if (r.hrv && Math.abs(r.hrv.pct) >= 10) input.readiness.hrvPct = r.hrv.pct;
     }
@@ -79,10 +91,11 @@ export function briefingInput(state, workout, { today, metrics = null, now = Dat
     });
   }
 
-  // Objetivo de carrera, si lo hay
+  // Objetivo de carrera: solo la última semana (antes, el modelo pequeño se lo inventaba: «tu último entreno antes de
+  // tu 10K» con 7 semanas por delante). Hoy ya enseña la cuenta atrás.
   try {
     const gs = goalStatus(state, today);
-    if (gs && gs.daysLeft >= 0) input.goal = `${gs.countdown} para tu ${gs.title}`;
+    if (gs && gs.daysLeft >= 0 && gs.daysLeft <= 7) input.goal = `${gs.countdown} para tu ${gs.title}`;
   } catch { /* sin objetivo */ }
 
   const allowed = [
@@ -95,5 +108,6 @@ export function briefingInput(state, workout, { today, metrics = null, now = Dat
   ].filter((v) => v != null && Number.isFinite(Number(v)));
 
   const key = `${today}|${workout.id || input.title}|${minutes}|${level || '-'}`;
+  void level;
   return { key, input, allowed };
 }

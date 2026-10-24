@@ -1,5 +1,5 @@
 // RITMUP · tests del briefing antes de la clase (js/training/briefing.js): node tools/test-briefing.mjs
-import { briefingInput } from '../js/training/briefing.js';
+import { briefingInput, briefingTextOk } from '../js/training/briefing.js';
 import { numbersAreGrounded } from '../js/integrations/ai.js';
 
 let n = 0;
@@ -27,6 +27,11 @@ ok(r.input.last.length === 2 && r.input.last[0].daysAgo === 2 && r.input.last[0]
 ok(!r.input.readiness, 'sin métricas de Salud no hay semáforo');
 ok(numbersAreGrounded('Hoy 25 min: el grueso a 8,3 km/h y un cambio a 10,1.', r.allowed), 'cifras reales: vale');
 ok(!numbersAreGrounded('Hoy 30 min a 8,5 km/h.', r.allowed), 'cifras inventadas: se descarta');
+ok(!briefingTextOk('Si estás en amber o red, baja la velocidad con el botón menos.', r.allowed, numbersAreGrounded), 'texto con palabras de las instrucciones: fuera');
+ok(!briefingTextOk('¡Vamos a disfrutar de esta clase!', r.allowed, numbersAreGrounded), 'sin ninguna cifra concreta: fuera');
+ok(briefingTextOk('Rodaje con cabeza. Hoy el grueso a 8,3 km/h; si cuesta, baja con el botón menos.', r.allowed, numbersAreGrounded), 'texto bueno: vale');
+const rr = briefingInput(state, workout, { today, metrics: { resting: Array.from({ length: 35 }, (_, i) => [new Date(Date.parse(today) - (34 - i) * 864e5).toISOString().slice(0, 10), i >= 28 ? 56 : 52]), hrv: [] } });
+ok(rr.input.readiness?.estado === 'algo cargado', `el estado va en palabras (dio ${JSON.stringify(rr.input.readiness)})`);
 ok(r.key.startsWith('2026-10-26|rodaje~25|25|'), 'clave del día');
 ok(briefingInput(state, workout, { today: '2026-10-27' }).key !== r.key, 'otro día, otra clave');
 
@@ -37,7 +42,7 @@ const player = readFileSync(new URL('../js/screens/player.js', import.meta.url),
 const iLet = player.indexOf('let brief = null');
 const iRet = player.indexOf('\n  return cleanup;');
 ok(iLet > 0 && iRet > 0 && iLet < iRet, 'player.js: estado del briefing antes del return de mount');
-ok(/classBriefing/.test(player) && /numbersAreGrounded\(`\$\{note\.headline\} \$\{note\.body\}`/.test(player), 'player.js: pide classBriefing y comprueba las cifras');
+ok(/classBriefing/.test(player) && /briefingTextOk\(`\$\{n\.headline\} \$\{n\.body\}`/.test(player) && /for \(let i = 0; i < 3 && !note; i\+\+\)/.test(player), 'player.js: pide classBriefing, comprueba el texto y reintenta hasta 3 veces');
 
 console.log(`${bad ? '✗' : '✓'} briefing: ${n - bad}/${n} comprobaciones`);
 process.exit(bad ? 1 : 0);

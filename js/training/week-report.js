@@ -57,7 +57,10 @@ export function weekReportInput(state, now = new Date(), opts = {}) {
   if (prev.length) {
     const pKm = r2(prev.reduce((a, s) => a + (Number(s.distanceKm) || 0), 0));
     const pMin = Math.round(prev.reduce((a, s) => a + (Number(s.elapsedSec) || 0), 0) / 60);
-    input.vsPrev = { sessions: ses.length - prev.length, km: r2(km - pKm), minutes: minutes - pMin };
+    // Solo lo que cambia (un «0 km menos» confunde al modelo y al corredor)
+    const vs = { sessions: ses.length - prev.length, km: r2(km - pKm), minutes: minutes - pMin };
+    for (const k of Object.keys(vs)) if (!vs[k]) delete vs[k];
+    if (Object.keys(vs).length) input.vsPrev = vs;
   }
 
   const nums = [input.sessions, input.planned, input.minutes, input.km, input.avgKmh, input.longestMin,

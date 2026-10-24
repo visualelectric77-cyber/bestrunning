@@ -20,7 +20,7 @@ import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, se
 import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
-import { briefingInput } from '../training/briefing.js';
+import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
@@ -557,11 +557,21 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (briefAsked || !brief?.loading) return;
     briefAsked = true;
     const { data } = brief;
-    let out = null;
-    try { out = await aiRequest('classBriefing', data.input); } catch { out = null; }
-    if (disposed || engine) return;
-    const note = out ? { headline: String(out.headline || '').slice(0, 70), body: String(out.body || '').slice(0, 280) } : null;
-    if (!note?.body || !numbersAreGrounded(`${note.headline} ${note.body}`, data.allowed)) {
+    // El modelo pequeño del iPhone a veces se olvida de la cifra o se va por las ramas: hasta 3 intentos (2-3 s cada
+    // uno, mientras se lee la Preparación); si ninguno vale, la tarjeta se va sin decir nada
+    let note = null;
+    for (let i = 0; i < 3 && !note; i++) {
+      let out = null;
+      try { out = await aiRequest('classBriefing', data.input); } catch { out = null; }
+      if (disposed || engine) return;
+      if (!out) break; // sin IA, clase empezada o tiempo agotado: no se insiste
+      const n = { headline: String(out.headline || '').slice(0, 70), body: String(out.body || '').slice(0, 280) };
+      // Titular que solo repite el principio del texto: fuera el titular (queda el texto)
+      const h = n.headline.trim().toLowerCase().replace(/[.!¡¿?]+/g, '');
+      if (h && n.body.trim().toLowerCase().replace(/[.!¡¿?]+/g, '').startsWith(h)) n.headline = '';
+      if (n.body && briefingTextOk(`${n.headline} ${n.body}`, data.allowed, numbersAreGrounded)) note = n;
+    }
+    if (!note) {
       brief = null;
       paintBrief();
       return;

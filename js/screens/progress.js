@@ -294,12 +294,18 @@ function weekReportCard(st) {
 
 /** Pide el informe a la IA (una vez por pantalla). Solo se guarda si todas sus cifras son de los datos. */
 async function askWeekReport(data) {
-  const out = await aiRequest('weeklyReport', data.input);
-  if (!out) return false;
-  const note = { headline: String(out.headline || '').slice(0, 80), body: String(out.body || '').slice(0, 400), tip: String(out.tip || '').slice(0, 160) };
-  if (!note.body || !numbersAreGrounded(`${note.headline} ${note.body} ${note.tip}`, data.allowed)) return false;
-  saveWR({ week: data.week, sig: data.sig, note, at: new Date().toISOString() });
-  return true;
+  // Hasta 3 intentos: el modelo pequeño del iPhone a veces mete una cifra que no está en los datos
+  for (let i = 0; i < 3; i++) {
+    const out = await aiRequest('weeklyReport', data.input);
+    if (!out) return false;
+    const note = { headline: String(out.headline || '').slice(0, 80), body: String(out.body || '').slice(0, 400), tip: String(out.tip || '').slice(0, 160) };
+    const all = `${note.headline} ${note.body} ${note.tip}`;
+    if (!note.body || !numbersAreGrounded(all, data.allowed) || /\b(sessions|planned|minutes|avgKmh|longestMin|hrDelta|readiness|vsPrev|green|amber|red)\b/i.test(all)
+      || /fresco al lunes|Semana con más kilómetros|\b0 (km|min|clases)\b/i.test(all)) continue; // copia del ejemplo o un cero
+    saveWR({ week: data.week, sig: data.sig, note, at: new Date().toISOString() });
+    return true;
+  }
+  return false;
 }
 
 function kpiGrid(s, history, animate) {
