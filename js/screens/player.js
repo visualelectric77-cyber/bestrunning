@@ -24,7 +24,7 @@ import { briefingInput } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
-import { createHrCoach } from '../player/hr-coach.js';
+import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
@@ -2954,7 +2954,19 @@ export function mount(el, { params = {}, query = {} } = {}) {
       segElapsed: s.segElapsed, segRemaining: s.segRemaining,
       hr: live ? { bpm: Number(live.bpm), atMs: Number(live.at) || now } : null, target,
     });
-    if (!r) return;
+    // «Hoy te guío por tu pulso»: una vez por clase, cuando ya llega el pulso del reloj y la clase tiene tramos que el
+    // modo pulso puede ajustar (en un momento tranquilo: prioridad baja, se calla si hay otro aviso cerca)
+    const fresh = live && now - (Number(live.at) || 0) <= 15000 && Number(live.bpm) >= 40;
+    if (!st.onSaid && fresh && (s.totalElapsed || 0) >= 25 && hrModeUseful()) {
+      st.onSaid = true;
+      coachCall('say', 'hrOn', {});
+      diagMark('pulso.guia');
+    }
+    if (!r) {
+      const k = st.coach.okCheck?.(now);
+      if (k) { coachCall('say', 'hrOk', {}); diagMark('pulso.enzona', { ppm: k.avg }); }
+      return;
+    }
     let applied = 0;
     for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm' })) applied++;
     if (!applied) return;
@@ -2963,6 +2975,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(r.dir < 0
       ? `Pulso ${r.reason === 'alarm' ? 'muy alto' : 'alto'} (${r.avg}): bajamos ${delta} km/h`
       : `Vas sobrado (${r.avg} ppm): subimos ${delta} km/h`, { icon: 'heart', duration: 4200 });
+  }
+
+  /** ¿La clase tiene algún tramo que el modo pulso pueda ajustar (trote, carrera o rápido de ≥ 3 min)? */
+  function hrModeUseful() {
+    try { return (workout?.segments || []).some((g) => HR_COACH_ZONES.has(g.zone) && Number(g.sec) >= 180); } catch { return false; }
   }
 
   function doAdjust(dir, sayKind = 'adjust', sayVars = {}) {

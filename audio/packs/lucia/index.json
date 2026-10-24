@@ -239,6 +239,9 @@
   "hrhigh_2",
   "hrlow_1",
   "hrlow_2",
-  "hralarm_1"
+  "hralarm_1",
+  "hrok_1",
+  "hrok_2",
+  "hron_1"
  ]
 }

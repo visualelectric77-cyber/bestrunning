@@ -53,6 +53,8 @@ const GROUPS = {
   hrhigh: ['Vas alto de pulso. Bajamos a…', 'Tu corazón va acelerado. Bajamos a…'],
   hrlow: ['Vas sobrado. Sube a…', 'Tienes margen. Subimos a…'],
   hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
+  hrok: ['Pulso perfecto. Mantén este ritmo.', 'Vas en tu zona. Muy bien.'],
+  hron: ['Hoy te guío por tu pulso.'],
   // Arranque de cada tramo, seguido de la velocidad (y la duración si encaja).
   now_sprint: ['¡Ahora! ¡Sprint!', '¡Vamos, a tope!'],
   now_fast: ['¡Ahora! Correr rápido.', '¡Vamos, ritmo rápido!'],

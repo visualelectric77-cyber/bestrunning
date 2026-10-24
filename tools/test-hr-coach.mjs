@@ -89,5 +89,31 @@ ok(run({ bpm: 175, segSec: 200, sec: 200 }).every((r) => 200 - r.t >= 45), 'nunc
   ok(out.length >= 1 && out[0].dir === -1, 'con una lectura cada 5 s también baja');
 }
 
+// «Vas en tu zona»: solo tras 2 min seguidos en zona, una vez por tramo y 2 por clase; nunca ajusta nada
+{
+  const c = createHrCoach();
+  const says = [];
+  for (let seg = 0; seg < 4; seg++) {
+    for (let t = 0; t < 600; t++) {
+      const ms = 1_000_000 + seg * 10_000_000 + t * 1000;
+      const r = c.step({ nowMs: ms, running: true, segIndex: seg, zone: 'run', segSec: 600, segElapsed: t, segRemaining: 600 - t, hr: { bpm: 148, atMs: ms }, target });
+      ok(!r, 'en zona: step() no ajusta');
+      const k = c.okCheck(ms);
+      if (k) says.push({ seg, t, avg: k.avg });
+    }
+  }
+  ok(says.length === 2 && c.okCount === 2, `como mucho 2 «vas en tu zona» por clase (${says.length})`);
+  ok(says[0].seg === 0 && says[0].t >= 60 + 120 && says[1].seg !== says[0].seg, `tras 2 min en zona y uno por tramo (${JSON.stringify(says)})`);
+  ok(says[0].avg === 148, 'con el pulso medio');
+  const c2 = createHrCoach();
+  let any = 0;
+  for (let t = 0; t < 600; t++) {
+    const ms = 1_000_000 + t * 1000;
+    c2.step({ nowMs: ms, running: true, segIndex: 0, zone: 'run', segSec: 600, segElapsed: t, segRemaining: 600 - t, hr: { bpm: t % 120 < 60 ? 148 : 170, atMs: ms }, target });
+    if (c2.okCheck(ms)) any++;
+  }
+  ok(any === 0, 'si sale de zona antes de 2 min, no lo dice');
+}
+
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ modo pulso: ${n} comprobaciones`);
 process.exitCode = bad ? 1 : 0;

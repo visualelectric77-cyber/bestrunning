@@ -17,6 +17,12 @@ const ALARM_OVER = 15;        // > máximo + 15 ppm: bajar 0,3 sin esperar tanto
 const COOLDOWN_SEC = 90;
 const MAX_PER_CLASS = 8;
 const STALE_MS = 15000;       // lecturas de hace > 15 s no cuentan
+// «Vas en tu zona» (Lucía): tras ≥ 2 min seguidos en zona en un tramo largo, una vez por tramo, 2 por clase como mucho,
+// lejos de un ajuste (3 min) y de la anterior (5 min). Es solo un ánimo: nunca cambia la velocidad.
+const OK_IN_ZONE_SEC = 120;
+const OK_MAX_PER_CLASS = 2;
+const OK_AFTER_ADJUST_SEC = 180;
+const OK_GAP_SEC = 300;
 
 /**
  * Crea el estado del modo pulso de una clase.
@@ -30,13 +36,32 @@ export function createHrCoach() {
   let lastAdjustAt = -Infinity;
   let count = 0;
   let seg = -1;
+  let inSince = 0;            // ms desde que va en zona sin parar en este tramo (0 = no)
+  let lastAvg = 0;
+  let okSeg = -1;
+  let okCount = 0;
+  let lastOkAt = -Infinity;
 
   return {
     get count() { return count; },
+    get okCount() { return okCount; },
+    /**
+     * Después de step(): ¿toca decir «vas en tu zona»? → null o { ok: true, avg }. Solo un ánimo (no ajusta nada).
+     */
+    okCheck(nowMs) {
+      const now = Number(nowMs) || 0;
+      if (!inSince || now - inSince < OK_IN_ZONE_SEC * 1000) return null;
+      if (okSeg === seg || okCount >= OK_MAX_PER_CLASS) return null;
+      if (now - lastAdjustAt < OK_AFTER_ADJUST_SEC * 1000 || now - lastOkAt < OK_GAP_SEC * 1000) return null;
+      okSeg = seg;
+      okCount++;
+      lastOkAt = now;
+      return { ok: true, avg: Math.round(lastAvg) };
+    },
     step(o) {
       const now = Number(o?.nowMs) || 0;
-      if (!o?.running) { outSince = 0; outDir = 0; return null; }
-      if (o.segIndex !== seg) { seg = o.segIndex; outSince = 0; outDir = 0; buf = []; }
+      if (!o?.running) { outSince = 0; outDir = 0; inSince = 0; return null; }
+      if (o.segIndex !== seg) { seg = o.segIndex; outSince = 0; outDir = 0; inSince = 0; buf = []; }
       const hr = o.hr;
       if (hr && Number.isFinite(hr.bpm) && hr.bpm >= 40 && hr.bpm <= 230 && now - (Number(hr.atMs) || now) <= STALE_MS) {
         if (!buf.length || buf[buf.length - 1][0] !== hr.atMs) buf.push([Number(hr.atMs) || now, hr.bpm]);
@@ -44,10 +69,12 @@ export function createHrCoach() {
       buf = buf.filter((p) => now - p[0] <= AVG_SEC * 1000);
       const eligible = HR_COACH_ZONES.has(o.zone) && o.segSec >= MIN_SEG_SEC && o.segElapsed >= SETTLE_SEC
         && o.segRemaining >= TAIL_SEC && count < MAX_PER_CLASS && o.target && o.target.max > o.target.min;
-      if (!eligible || buf.length < 3) { outSince = 0; outDir = 0; return null; } // el reloj manda pulso cada ~5 s
+      if (!eligible || buf.length < 3) { outSince = 0; outDir = 0; inSince = 0; return null; } // el reloj manda pulso cada ~5 s
       const avg = buf.reduce((a, p) => a + p[1], 0) / buf.length;
+      lastAvg = avg;
       const dir = avg > o.target.max + MARGIN_HIGH ? -1 : avg < o.target.min - MARGIN_LOW ? 1 : 0;
-      if (!dir) { outSince = 0; outDir = 0; return null; }
+      if (!dir) { outSince = 0; outDir = 0; if (!inSince) inSince = now; return null; }
+      inSince = 0;
       if (dir !== outDir) { outDir = dir; outSince = now; }
       if (now - lastAdjustAt < COOLDOWN_SEC * 1000) return null;
       const alarm = dir < 0 && avg > o.target.max + ALARM_OVER;

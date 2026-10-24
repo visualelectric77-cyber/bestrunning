@@ -1345,6 +1345,15 @@ export function createCoach(workout, settings = {}) {
         const s = speedOf(v.speed);
         return go(packItem('adjust', c ? [c, ...(s ? [s] : [])] : (s ? [s] : null), 2, { replace: true }));
       }
+      case 'hrOk':
+      case 'hrOn': {
+        // Modo pulso: «Vas en tu zona. Muy bien.» (ánimo, nunca cambia nada) / «Hoy te guío por tu pulso.» (una vez,
+        // al llegar el pulso del reloj). Sin la frase grabada no se dice nada (no hay versión con la voz del sistema).
+        const g = kind === 'hrOk' ? 'hrok' : 'hron';
+        const ids = [1, 2].map((i) => `${g}_${i}`).filter((id) => avail.has(id));
+        if (!ids.length) return Promise.resolve();
+        return go(packItem(kind, [ids[Math.floor(Math.random() * ids.length)]], 1));
+      }
       case 'adjust': {
         // "Once coma seis." confirma el ajuste
         const s = speedOf(v.speed);
