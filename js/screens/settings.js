@@ -1480,6 +1480,11 @@ function aboutHtml(s) {
       <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="update"><span class="list__title">Buscar actualizaciones</span></div>
       <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="diag"><span class="list__title">Diagnóstico</span><span class="list__value">Copiar</span></div>
     `)}
+    ${group('', `
+      <a class="list__row st-row st-link" href="legal/privacidad.html"><span class="list__title">Política de privacidad</span><span class="list__chev">${icon('chevron-right', 14)}</span></a>
+      <a class="list__row st-row st-link" href="legal/terminos.html"><span class="list__title">Términos de uso</span><span class="list__chev">${icon('chevron-right', 14)}</span></a>
+      <a class="list__row st-row st-link" href="legal/soporte.html"><span class="list__title">Ayuda y contacto</span><span class="list__chev">${icon('chevron-right', 14)}</span></a>
+    `)}
     <div class="st-group">
       <div class="st-group__title">Créditos</div>
       <div class="card st-credits">
@@ -1488,7 +1493,7 @@ function aboutHtml(s) {
         <p><b>Voz del coach:</b> Lucía López, <b>voz generada con IA</b> (ElevenLabs v3 en Magnific, con licencia comercial), con la síntesis de voz de Apple como respaldo.</p>
         <p><b>Música:</b> electrónica de artistas de Pixabay (Pixabay Content License; lista completa en Perfil → Música), mezclada en directo por el motor DJ de la app.</p>
         <p><b>Escenarios 3D:</b> three.js (licencia MIT).</p>
-        <p><b>Código:</b> escrito con Claude Code (Opus 5.5) en una noche.</p>
+        <p><b>Código:</b> hecha con Claude Code (Opus 5.5).</p>
       </div>
     </div>
     <section class="card st-warn">
