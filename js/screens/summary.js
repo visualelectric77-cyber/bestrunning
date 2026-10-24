@@ -21,6 +21,7 @@ import {
 } from '../integrations/watch-hr.js';
 import { isNative, nativeStatus, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagMark } from '../core/diag.js';
+import { showWatchSync } from '../ui/watch-sync.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -131,8 +132,20 @@ export function mount(el, { params = {} } = {}) {
   };
   window.addEventListener('br:native-hr', onNativeHr);
 
+  // App nativa con el reloj: mientras el reloj guarda el entreno y manda el pulso (en clases largas tarda), un aviso
+  // que se mueve siempre. Solo en una sesión recién terminada que aún no tiene el resumen de Salud del reloj.
+  let hideSync = null;
+  try {
+    const ended = Date.parse(session?.endedAt || '');
+    if (session && isNative() && watchManaged() && !session.health?.uuid && Number.isFinite(ended) && Date.now() - ended < 5 * 60000) {
+      hideSync = showWatchSync(session.id);
+      diagMark('reloj.sincronizando');
+    }
+  } catch { /* sin aviso */ }
+
   return () => {
     disposed = true;
+    try { hideSync?.(); } catch { /* nada */ }
     window.removeEventListener('br:native-hr', onNativeHr);
     unsub();
     stopHr?.();
@@ -259,10 +272,10 @@ export function mount(el, { params = {} } = {}) {
     bind();
     countUp();
     hydrateSessionMusic(el, s, () => !disposed);
-    // Confeti sobrio solo con un récord personal real (no por terminar ni por la primera sesión)
+    // Vuelta de honor solo con un récord personal real (no por terminar ni por la primera sesión)
     if (!celebrated && !s.feeling && badges.some((b) => b.record)) {
       celebrated = true;
-      later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin confeti */ } }, 420);
+      later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin celebración */ } }, 420);
     }
     // Prepara la tarjeta en segundo plano: así compartir no pierde el gesto en iOS
     later(prepareCard, 900);
@@ -824,9 +837,9 @@ export function mount(el, { params = {} } = {}) {
       });
     } catch { sheet = null; }
     if (!sheet) toast(title, { icon: 'check' });
-    // Confeti sobrio solo con un avance real (subes de nivel o nueva VAM), no por un logro suelto
+    // Vuelta de honor solo con un avance real (subes de nivel o nueva VAM), no por un logro suelto
     if (ups.length || testRes?.vam) {
-      later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin confeti */ } }, 260);
+      later(() => { try { celebrate({ intensity: 1 }); } catch { /* sin celebración */ } }, 260);
     }
   }
 

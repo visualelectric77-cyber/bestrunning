@@ -1236,16 +1236,18 @@ export function actionSheet({ title = '', options = [] } = {}) {
   });
 }
 
-/* ═════════════ Confeti ═════════════ */
+/* ═════════════ Celebración: «vuelta de honor» ═════════════ */
 
-// v2: confeti sobrio (solo para un récord de verdad): blanco, ember y grises, menos piezas
-const CONFETTI_COLORS = ['#FFFFFF', '#FFFFFF', '#FF5A1F', '#FF5A1F', '#8E8E93', '#D1D1D6'];
+// RITMUP no usa confeti: un récord o una subida de nivel se celebran con el lenguaje de la marca. Unas calles de pista
+// curvas (la «r» del logo) se dibujan de abajo a arriba, las luces de ritmo ámbar las recorren con su estela y se
+// juntan en un destello cálido arriba. Solo blanco y ámbar, ≈ 2,4 s, sin tapar nada (pointer-events: none).
+const EMBER_RGB = '255, 90, 31';
 
 export function celebrate({ intensity = 1 } = {}) {
   if (!hasDOM) return;
   haptic('success');
   if (reducedMotion()) return;
-  const k = clamp(Number(intensity) || 1, 0.3, 3);
+  const k = clamp(Number(intensity) || 1, 0.6, 1.6);
   const canvas = document.createElement('canvas');
   canvas.className = 'confetti-canvas';
   canvas.setAttribute('aria-hidden', 'true');
@@ -1265,71 +1267,86 @@ export function celebrate({ intensity = 1 } = {}) {
   document.body.appendChild(canvas);
   window.addEventListener('resize', resize);
 
-  const rand = (a, b) => a + Math.random() * (b - a);
-  const parts = [];
-  const spawn = (n, x, y, angle, spread, power) => {
-    for (let i = 0; i < n; i++) {
-      const a = angle + rand(-spread, spread);
-      const v = power * rand(0.55, 1.05);
-      parts.push({
-        x, y,
-        vx: Math.cos(a) * v,
-        vy: Math.sin(a) * v,
-        w: rand(5, 8),
-        h: rand(8, 12),
-        rot: rand(0, Math.PI * 2),
-        vr: rand(-0.25, 0.25),
-        tilt: rand(0, Math.PI * 2),
-        vt: rand(0.05, 0.16),
-        shape: Math.random() < 0.3 ? 'ribbon' : 'rect',
-        color: CONFETTI_COLORS[(Math.random() * CONFETTI_COLORS.length) | 0],
-        drag: rand(0.982, 0.992),
-      });
-    }
+  // Calles: curvas paralelas que entran por abajo a la izquierda y salen arriba a la derecha (el giro de la «r»)
+  const LANES = 4;
+  const lane = (i, t) => {
+    const off = (i - (LANES - 1) / 2) * Math.min(W, 520) * 0.07;
+    const x0 = -W * 0.08 + off;
+    const y0 = H * 1.05;
+    const cx = W * 0.18 + off;
+    const cy = H * 0.18 + off * 0.6;
+    const x1 = W * 1.1;
+    const y1 = H * 0.2 + off;
+    const u = 1 - t;
+    return [u * u * x0 + 2 * u * t * cx + t * t * x1, u * u * y0 + 2 * u * t * cy + t * t * y1];
   };
-  const n = Math.round(60 * k);
-  const power = Math.min(W, 520) * 0.052 + 10;
-  spawn(n, -10, H * 0.78, -Math.PI / 3.1, 0.42, power);
-  spawn(n, W + 10, H * 0.78, -Math.PI + Math.PI / 3.1, 0.42, power);
-  if (k > 1.2) setTimeout(() => spawn(Math.round(30 * k), W / 2, -20, Math.PI / 2, 1.2, 6), 260);
+  const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+  const easeIn = (x) => Math.pow(Math.min(1, Math.max(0, x)), 2);
+  const lights = Array.from({ length: Math.round(LANES * 2 * k) }, (_, j) => ({ lane: j % LANES, delay: 0.16 + j * 0.06 }));
+  const bloom = [W * 0.72, H * 0.24];
 
   const start = performance.now();
-  let last = start;
   let raf = 0;
-  const G = 0.32;
+  const DUR = 2.4;
   const frame = (now) => {
-    const dt = Math.min(2.5, (now - last) / 16.67);
-    last = now;
+    const t = (now - start) / 1000;
     ctx.clearRect(0, 0, W, H);
-    let alive = 0;
-    for (const p of parts) {
-      p.vx *= Math.pow(p.drag, dt);
-      p.vy = p.vy * Math.pow(p.drag, dt) + G * dt;
-      p.x += (p.vx + Math.sin(p.tilt) * 0.6) * dt;
-      p.y += p.vy * dt;
-      p.rot += p.vr * dt;
-      p.tilt += p.vt * dt;
-      if (p.y > H + 30) continue;
-      alive++;
-      const age = (now - start) / 1000;
-      ctx.globalAlpha = age > 3.2 ? Math.max(0, 1 - (age - 3.2) / 0.8) : 1;
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot);
-      ctx.fillStyle = p.color;
-      const sy = Math.abs(Math.cos(p.tilt)) * 0.85 + 0.15; // giro 3D aparente
-      if (p.shape === 'circle') {
-        ctx.beginPath();
-        ctx.ellipse(0, 0, p.w * 0.45, p.w * 0.45 * sy, 0, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (p.shape === 'ribbon') {
-        ctx.fillRect(-p.w * 0.2, -p.h * 0.75 * sy, p.w * 0.4, p.h * 1.5 * sy);
-      } else {
-        ctx.fillRect(-p.w / 2, (-p.h / 2) * sy, p.w, p.h * sy);
+    const out = t > 1.7 ? Math.max(0, 1 - (t - 1.7) / 0.7) : 1;
+
+    // 1 · calles: se dibujan (0–0.6 s) y se apagan al final
+    const draw = ease(t / 0.6);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < LANES; i++) {
+      ctx.beginPath();
+      for (let s = 0; s <= 40; s++) {
+        const [x, y] = lane(i, (s / 40) * draw);
+        if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
-      ctx.restore();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 * out})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
-    if (alive > 0 && now - start < 4200) raf = requestAnimationFrame(frame);
+
+    // 2 · luces de ritmo con estela (aditivo)
+    ctx.globalCompositeOperation = 'lighter';
+    for (const L of lights) {
+      const p = easeIn((t - L.delay) / 0.95);
+      if (p <= 0 || p >= 1.05) continue;
+      const head = Math.min(1, p);
+      const tail = Math.max(0, head - 0.22);
+      for (let s = 0; s <= 14; s++) {
+        const tt = tail + ((head - tail) * s) / 14;
+        const [x, y] = lane(L.lane, tt);
+        const a = (s / 14) ** 2 * out;
+        ctx.fillStyle = `rgba(${EMBER_RGB}, ${0.55 * a})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2 + 3.2 * (s / 14), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const [hx, hy] = lane(L.lane, head);
+      const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 22);
+      g.addColorStop(0, `rgba(255, 245, 235, ${0.95 * out})`);
+      g.addColorStop(0.35, `rgba(${EMBER_RGB}, ${0.7 * out})`);
+      g.addColorStop(1, `rgba(${EMBER_RGB}, 0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(hx, hy, 22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 3 · destello cálido donde se juntan las luces (1.0–2.4 s)
+    const b = t < 1.05 ? 0 : t < 1.35 ? ease((t - 1.05) / 0.3) : out;
+    if (b > 0) {
+      const r = Math.min(W, H) * (0.22 + 0.1 * b);
+      const g = ctx.createRadialGradient(bloom[0], bloom[1], 0, bloom[0], bloom[1], r);
+      g.addColorStop(0, `rgba(${EMBER_RGB}, ${0.42 * b})`);
+      g.addColorStop(1, `rgba(${EMBER_RGB}, 0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    if (t < DUR) raf = requestAnimationFrame(frame);
     else cleanup();
   };
   const cleanup = () => {

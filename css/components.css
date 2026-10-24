@@ -2502,3 +2502,81 @@ input.field[inputmode='numeric'] {
     transition-duration: 1ms !important;
   }
 }
+
+/* ═════════════ Aviso «Sincronizando con tu Apple Watch» (js/ui/watch-sync.js) ═════════════ */
+/* La luz de la calle es transform puro (compositor): se mueve aunque la página esté ocupada */
+.wsync {
+  position: fixed;
+  z-index: 260;
+  left: 50%;
+  top: calc(var(--safe-t, env(safe-area-inset-top)) + 10px);
+  width: min(360px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: auto 3px;
+  column-gap: 10px;
+  row-gap: 9px;
+  align-items: center;
+  padding: 12px 16px 12px 12px;
+  border-radius: 22px;
+  background: rgba(28, 28, 30, 0.82);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  color: #fff;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(-50%, -14px, 0) scale(0.98);
+  transition: opacity 260ms var(--ease-out, ease-out), transform 360ms var(--ease-out, ease-out);
+}
+.wsync.is-in { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+.wsync.is-out { opacity: 0; transform: translate3d(-50%, -10px, 0) scale(0.98); }
+.wsync__ic {
+  grid-row: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 90, 31, 0.16);
+  color: #FF5A1F;
+  animation: wsyncPulse 1.6s ease-in-out infinite;
+}
+.wsync__txt { grid-row: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wsync__txt b { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.wsync__txt small { font-size: 13px; color: rgba(235, 235, 245, 0.62); }
+.wsync__track {
+  grid-column: 1 / -1;
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+}
+.wsync__track i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34%;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(255, 90, 31, 0), #FF5A1F 70%, #FFE3D6);
+  box-shadow: 0 0 10px rgba(255, 90, 31, 0.8);
+  will-change: transform;
+  animation: wsyncRun 1.25s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+.wsync.is-done .wsync__ic { animation: none; background: rgba(48, 209, 88, 0.16); color: #30D158; }
+.wsync.is-done .wsync__track i { animation: none; transform: translate3d(0, 0, 0); width: 100%; background: #30D158; box-shadow: none; }
+@keyframes wsyncRun {
+  from { transform: translate3d(-110%, 0, 0); }
+  to { transform: translate3d(310%, 0, 0); }
+}
+@keyframes wsyncPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wsync__track i { animation-duration: 2.6s; }
+  .wsync__ic { animation: none; }
+}
