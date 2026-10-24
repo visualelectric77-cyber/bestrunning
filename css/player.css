@@ -1789,3 +1789,29 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   .hud-bug, .hud-bug.is-off, .hud-note, .hud-note.is-off, .hud-tools, .hud-ctl { transform: none !important; }
   .hud-lt__sweep { display: none; }
 }
+
+/* Briefing del coach en la Preparación (IA del iPhone): tarjeta sobria, el acento solo en la chispa */
+.pl-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px var(--s-4) 15px;
+  border-radius: var(--r-card);
+  background: var(--surface-1);
+}
+.pl-brief__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 var(--fs-caption)/1 var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.pl-brief__mark { display: inline-flex; color: var(--accent); }
+.pl-brief__src { margin-left: auto; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-3); }
+.pl-brief__head { margin: 4px 0 0; font-size: 17px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; color: var(--text); text-wrap: balance; }
+.pl-brief__body { margin: 0; font-size: 15px; line-height: 1.42; color: var(--text-2); text-wrap: pretty; }
+.pl-brief__wait { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 0; font-size: 14px; color: var(--text-2); }
+.pl-brief:not(.is-loading) { animation: sm-fade-up 260ms var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) { .pl-brief:not(.is-loading) { animation: none; } }

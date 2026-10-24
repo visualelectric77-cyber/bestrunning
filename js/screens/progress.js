@@ -11,7 +11,7 @@ import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, ro
 import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
 import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integrations/watch-hr.js';
 import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integrations/session-music.js';
-import { aiAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
+import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { weekReportInput } from '../training/week-report.js';
 
@@ -270,7 +270,7 @@ function weekReportState(s) {
   if (!data) return null;
   const saved = loadWR();
   if (saved?.sig === data.sig && saved.note?.body) return { note: saved.note };
-  if (aiAvailable()) return { loading: true, data };
+  if (aiTaskAvailable('weeklyReport')) return { loading: true, data };
   return saved?.week === data.week && saved.note?.body ? { note: saved.note } : null;
 }
 

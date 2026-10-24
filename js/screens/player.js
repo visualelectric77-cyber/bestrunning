@@ -19,6 +19,8 @@ import { requestWakeLock, releaseWakeLock, isWakeLockSupported } from '../player
 import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, setPosition } from '../player/media-session.js';
 import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
+import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
+import { briefingInput } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
@@ -257,6 +259,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let snap = null;
   let planDate = DATE_RE.test(query?.date || '') ? query.date : null;
   let engine = null;
+  // Briefing del coach en la Preparación (ver initBrief): aquí arriba, antes del primer renderReady() (no después del
+  // return de mount: con `let` ahí, la Preparación lanzaba ReferenceError)
+  const BRIEF_KEY = 'ritmup.briefing';
+  let brief = null;            // null | { loading: true, data } | { note }
+  let briefAsked = false;
   let coach = null;
   let root = null;
   let refs = {};
@@ -515,8 +522,58 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   /* ═════════════════ Render: preparación ═════════════════ */
+  /* ───────── Briefing del coach (IA del iPhone) en la Preparación ─────────
+     Dos frases sobre la clase de hoy según cómo llegas (Salud) y tus últimas sesiones. Solo en la app nativa con
+     Apple Intelligence; se guarda el del día (misma clase y mismo semáforo). Al pulsar Empezar el iPhone corta lo que
+     se esté generando (la IA nunca durante la clase) y la tarjeta simplemente no llega: nada toca el audio. */
+  function initBrief(st) {
+    if (brief || workout?.isTest) return;
+    let data = null;
+    try { data = briefingInput(st, workout, { today: todayKey(), metrics: cachedHealthMetrics() }); } catch { data = null; }
+    if (!data) return;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(BRIEF_KEY) || 'null'); } catch { saved = null; }
+    if (saved?.key === data.key && saved.note?.body) brief = { note: saved.note };
+    else if (aiTaskAvailable('classBriefing')) brief = { loading: true, data };
+  }
+  function briefHtml() {
+    if (!brief) return '<div data-slot="brief" hidden></div>';
+    const eyebrow = `<div class="pl-brief__eyebrow"><span class="pl-brief__mark" aria-hidden="true">${icon('sparkles', 13)}</span>Tu coach<span class="pl-brief__src">IA en tu iPhone</span></div>`;
+    if (brief.note) {
+      return `<section class="pl-brief" data-slot="brief" style="--i:3">${eyebrow}
+        ${brief.note.headline ? `<p class="pl-brief__head">${esc(brief.note.headline)}</p>` : ''}
+        <p class="pl-brief__body">${esc(brief.note.body)}</p>
+      </section>`;
+    }
+    return `<section class="pl-brief is-loading" data-slot="brief" style="--i:3" aria-busy="true">${eyebrow}
+        <p class="pl-brief__wait"><span class="sm-coach__bar" aria-hidden="true"><i></i></span>Preparando tu clase…</p>
+      </section>`;
+  }
+  function paintBrief() {
+    const slot = root?.querySelector?.('[data-slot="brief"]');
+    if (slot && !engine && !disposed) slot.outerHTML = briefHtml();
+  }
+  async function askBrief() {
+    if (briefAsked || !brief?.loading) return;
+    briefAsked = true;
+    const { data } = brief;
+    let out = null;
+    try { out = await aiRequest('classBriefing', data.input); } catch { out = null; }
+    if (disposed || engine) return;
+    const note = out ? { headline: String(out.headline || '').slice(0, 70), body: String(out.body || '').slice(0, 280) } : null;
+    if (!note?.body || !numbersAreGrounded(`${note.headline} ${note.body}`, data.allowed)) {
+      brief = null;
+      paintBrief();
+      return;
+    }
+    try { localStorage.setItem(BRIEF_KEY, JSON.stringify({ key: data.key, note, at: Date.now() })); } catch { /* sin almacenamiento */ }
+    brief = { note };
+    paintBrief();
+  }
+
   function renderReady() {
     const st = getState();
+    initBrief(st);
     const segs = workout.segments;
     const first = segs[0];
     const firstSpeed = fmt.speed(first?.speed || 0);
@@ -570,6 +627,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
               ${readyStat('Kcal', fmt.int(workout.estKcal || 0), '')}
               ${readyStat('Vel. máx.', fmt.speed(workout.maxSpeed || 0), 'km/h')}
             </div>
+            ${briefHtml()}
             ${labYt ? readyYtHtml() : ''}
             ${ytBg === 'youtube' ? '<div data-slot="scene" hidden></div>' : readySceneHtml()}
             <section class="pl-ready__group" style="--i:3">
@@ -649,6 +707,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // La escena 3D (renderer, escenario, shaders) se crea YA, oculta, mientras lees la preparación: así el trabajo
     // pesado del hilo principal no cae en la cuenta 3-2-1 ni en los primeros segundos de carrera
     later(initScene, 450);
+    if (brief?.loading) later(askBrief, 350);
     nb.ready();
     if (!healthListening && isNative()) {
       // El permiso de Salud cambia (hoja respondida, vuelta de Ajustes): se repinta solo ese aviso

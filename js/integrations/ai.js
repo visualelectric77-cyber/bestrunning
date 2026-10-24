@@ -3,7 +3,7 @@
 // sin Apple Intelligence, todo devuelve null y la app sigue igual que siempre (sin IA).
 //
 // Protocolo (native/Shared/Wire.swift):
-//   página → iPhone  ai.request {id, task: 'sessionSummary'|'planIntent', input}
+//   página → iPhone  ai.request {id, task: 'sessionSummary'|'planIntent'|'weeklyReport'|'classBriefing', input}
 //   iPhone → página  ai.result {id, ok, output | error}
 //   página → iPhone  health.metrics.get {days}
 //   iPhone → página  health.metrics {resting: [[dayKey, bpm]], hrv: [[dayKey, ms]], at}
@@ -21,6 +21,21 @@ const caps = () => {
 /** ¿Hay IA del iPhone disponible ahora? */
 export function aiAvailable() {
   return isNative() && caps().includes('ai');
+}
+
+/** Build de la app nativa («1.0 (12)» → 12), 0 si no se sabe. */
+export function nativeBuild() {
+  const m = /\((\d+)\)/.exec(String(nativeStatus()?.app || ''));
+  return m ? Number(m[1]) : 0;
+}
+
+// Tareas que llegaron después de la build 9: una app más vieja contesta «unknown-task» y la tarjeta saldría «cargando»
+// para luego irse. Solo se ofrecen si la app ya las sabe hacer.
+const TASK_MIN_BUILD = { weeklyReport: 11, classBriefing: 12 };
+
+/** ¿Esta app del iPhone sabe hacer esta tarea de IA (y hay IA ahora)? */
+export function aiTaskAvailable(task) {
+  return aiAvailable() && nativeBuild() >= (TASK_MIN_BUILD[task] || 0);
 }
 
 let seq = 0;
