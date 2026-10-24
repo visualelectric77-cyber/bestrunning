@@ -860,9 +860,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
           if (refs.ytHint) refs.ytHint.hidden = !on;
           if (refs.ytTitle) refs.ytTitle.hidden = !!on;
         },
+        // El vídeo empieza a sonar: puede cambiar la sesión de audio de WebKit → se reafirma y se despierta la voz
+        onPlaying: () => ytReassert('yt-play'),
       });
     } catch { yt = null; }
     if (!yt) { ytFail('crear'); return; }
+    ytBoost(true);
     // Restaurada a medias o empezada antes de que llegue el reproductor: arranca con la clase
     if (engine?.getState().status === 'running') ytCall('play');
   }
@@ -877,6 +880,24 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!c) return;
     try { c.stop?.(); } catch { /* nada */ }
     try { c.destroy?.(); } catch { /* nada */ }
+    ytBoost(false);
+    ytReassert('yt-end', false); // ya: la sesión (y la marca para que la próxima clase despierte la salida al empezar)
+    later(() => ytReassert('yt-end'), 300);
+  }
+
+  /**
+   * Audio sagrado con YouTube: el iframe es otro reproductor dentro de la página y puede dejar la sesión de audio de
+   * WebKit distinta de la que pide la clase sin que navigator.audioSession lo diga (la voz de Lucía dejó de oírse con
+   * el vídeo sonando). Se vuelve a pedir la sesión y se despierta la salida del coach (audio-engine.reassertAudio).
+   */
+  function ytReassert(why, wake = true) {
+    if (why === 'yt-play') ytBoost(true);
+    try { audioMod?.reassertAudio?.(why, { wake }); } catch { /* sin audio */ }
+  }
+
+  /** Con el vídeo, la voz sube ~4 dB (en iPhone el vídeo no se deja bajar desde la página); sin él, como siempre. */
+  function ytBoost(on) {
+    try { audioMod?.setVoiceBoost?.(on ? 1.6 : 1); } catch { /* sin audio */ }
   }
 
   /**

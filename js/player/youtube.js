@@ -145,7 +145,7 @@ export function liveHtml(pick) {
  * destruye solo (la clase sigue sin él).
  *   host: el nodo vacío donde va el iframe (dentro de .pl-yt)
  *   pick: resultado de parseYouTubeUrl (+ title)
- *   on: { onFail(reason), onTitle(title), onNeedsTap(bool) }
+ *   on: { onFail(reason), onTitle(title), onNeedsTap(bool), onPlaying() (cada vez que el vídeo empieza a sonar) }
  * Devuelve { play, pause, stop, destroy, next, setShuffle, shuffle, hasList }.
  */
 export function createYouTubeBackground(host, pick, on = {}) {
@@ -156,6 +156,7 @@ export function createYouTubeBackground(host, pick, on = {}) {
   let shuffle = false;
   let loopSet = false;
   let skipErrs = 0;
+  let playing = false;        // último estado visto: sonando (para avisar onPlaying una vez por arranque)
   let duckPrev = null;        // volumen antes de agacharse (null = sin agachar)
   let relT = null;
   let stuckT = null;
@@ -254,6 +255,10 @@ export function createYouTubeBackground(host, pick, on = {}) {
           if (dead) return;
           const s = Number(e?.data);
           if (s === ST.PLAYING) {
+            // Un vídeo MUDO sonando puede dejar la sesión de audio de WebKit en «ambient» y con el modo silencio calla
+            // al coach (pasó con la 1.5.1). YouTube puede arrancarlo mudo por su cuenta (autoplay): se le quita.
+            if (call('isMuted') === true) call('unMute');
+            if (!playing) { playing = true; safe(() => on.onPlaying?.()); }
             skipErrs = 0;
             clearTimeout(tapT);
             tapT = null;
@@ -264,9 +269,12 @@ export function createYouTubeBackground(host, pick, on = {}) {
             noteTitle();
             // el usuario lo puso en marcha con la clase en pausa: se respeta (es su vídeo)
           } else if (s === ST.ENDED && !hasList && want) {
+            playing = false;
             // Vídeo suelto más corto que la clase: vuelve a empezar (la lista lo hace sola con setLoop)
             call('seekTo', pick.start > 0 ? pick.start : 0, true);
             call('playVideo');
+          } else if (s === ST.PAUSED || s === ST.ENDED) {
+            playing = false;
           } else if (s === ST.CUED || s === ST.UNSTARTED) {
             noteTitle();
           }

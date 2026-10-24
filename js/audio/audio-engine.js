@@ -97,7 +97,7 @@ function buildGraph() {
     comp.attack.value = 0.003;
     comp.release.value = 0.15;
     master = ctx.createGain();
-    master.gain.value = 1;
+    master.gain.value = boost;
     master.connect(comp);
     comp.connect(ctx.destination);
   } catch {
@@ -332,6 +332,41 @@ export function kickAudio(reason = '') {
   return true;
 }
 
+/**
+ * Otro reproductor de la página (el iframe de YouTube) empezó, volvió a sonar o se fue: puede haber cambiado la sesión
+ * de audio de WebKit sin que navigator.audioSession.type de esta página lo diga (sigue leyendo 'playback') y dejar la
+ * voz muda o con el modo silencio callándola. Se vuelve a pedir el tipo (pasando por 'auto' para que WebKit lo
+ * aplique de verdad) y, con `wake`, se despierta la salida con suspend/resume (~0,1 s), nunca a mitad de una frase.
+ */
+let tainted = false;            // un reproductor ajeno tocó el audio: la siguiente clase despierta la salida en Empezar
+let reassertAt = -Infinity;
+let reassertT = null;
+export function reassertAudio(reason = '', { wake = true } = {}) {
+  tainted = true;
+  try {
+    const s = globalThis.navigator?.audioSession;
+    const t = effectiveType();
+    if (s) { s.type = 'auto'; s.type = t; }
+  } catch { /* API no disponible */ }
+  if (!wake || !ctx || ctx.state === 'closed' || !unlocked) return false;
+  if (ctx.state !== 'running') {
+    lastResumeAt = nowMs();
+    try { ctx.resume().catch(() => {}); } catch { /* nada */ }
+    return true;
+  }
+  if (nowMs() - reassertAt < 1500) return false;
+  clearTimeout(reassertT);
+  const go = () => {
+    reassertT = null;
+    if (!ctx || ctx.state === 'closed') return;
+    if (isBusy()) { reassertT = setTimeout(go, 700); return; }
+    reassertAt = nowMs();
+    restart(`reassert:${reason}`);
+  };
+  go();
+  return true;
+}
+
 function scheduleIdle() {
   clearTimeout(idleTimer);
   if (!ctx || !idleAllowed()) return;
@@ -360,7 +395,15 @@ export async function ensureAudioRunning() {
 export async function unlockAudio() {
   setSessionType(effectiveType());
   let resuming = null;
+  const existed = !!ctx && ctx.state === 'running';
   const c = createContext();
+  // La clase anterior llevó un vídeo de YouTube: la salida se despierta aquí, dentro del gesto de Empezar, para que
+  // nada de aquel reproductor deje esta clase sin voz (se pide otra vez el tipo de sesión y suspend/resume).
+  if (c && existed && tainted) {
+    tainted = false;
+    try { const s = globalThis.navigator?.audioSession; if (s) { s.type = 'auto'; s.type = effectiveType(); } } catch { /* nada */ }
+    try { c.suspend().catch(() => {}); resuming = c.resume(); } catch { resuming = null; } // los dos dentro del gesto
+  }
   if (c) {
     try {
       const buf = c.createBuffer(1, 1, c.sampleRate || 44100);
@@ -400,6 +443,17 @@ export function applyAudioSettings(audioSettings = {}) {
   if (unlocked) setSessionType(effectiveType());
   if (!idleAllowed()) clearTimeout(idleTimer);
   if (playback?.gain) { try { playback.gain.gain.value = cfg.volume; } catch { /* nada */ } }
+}
+
+/**
+ * Refuerzo de la voz y los pitidos (ganancia antes del compresor, 1–2). Con YouTube: en iPhone el volumen del vídeo no
+ * se puede bajar desde la página, así que la voz sube ~4 dB para que no la tape la música (el compresor frena los picos).
+ */
+let boost = 1;
+export function setVoiceBoost(g = 1) {
+  boost = Math.min(2, Math.max(1, Number(g) || 1));
+  try { if (master && master !== ctx?.destination) master.gain.value = boost; } catch { /* nada */ }
+  return boost;
 }
 
 /* ───────────── Pitidos ───────────── */
