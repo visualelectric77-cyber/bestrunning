@@ -232,8 +232,8 @@ body:has(.pl--live.pl--yt) #toast-root { top: auto; bottom: calc(var(--safe-b) +
     grid-template-columns: minmax(0, 1fr) var(--yt-side);
     grid-template-rows: minmax(0, 1fr) auto;
     grid-template-areas: "video hud" "ytbar hud";
-    --speed-fs: clamp(56px, 15dvh, 96px);
-    --cd-fs: 34px;
+    --speed-fs: clamp(50px, 13.5dvh, 90px);
+    --cd-fs: 32px;
     --top-h: 34px;
   }
   /* pegado al panel (justify end + 12 px): centrado en su columna se metía 23 pt en la zona de la isla */
@@ -261,8 +261,8 @@ body:has(.pl--live.pl--yt) #toast-root { top: auto; bottom: calc(var(--safe-b) +
   .pl--yt .hud-tools { position: static; grid-area: top; justify-self: end; align-self: center; gap: 8px; z-index: 3; }
   .pl--yt .hud-tools .hud-btn { width: 36px; height: 36px; }
   .pl--yt .hud-tools__sp { display: none; }
-  /* perfil y kcal fuera: en el panel caben la velocidad, el tramo, lo que queda, el pulso y los controles */
-  .pl--yt .hud-strip { display: none; }
+  /* el perfil de bloques SÍ va (es lo que más orienta en la clase): fino, dentro de «Queda», con su avance */
+  .pl--yt .hud-strip { display: block; height: 18px; margin-top: 8px; }
   .pl--yt .hud-lt { padding: 10px 14px 10px; }
   .pl--yt .hud-lt__nt { font-size: 16px; }
   .pl--yt .hud-info { padding: 8px 14px; }
