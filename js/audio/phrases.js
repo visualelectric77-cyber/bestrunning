@@ -209,6 +209,14 @@ const BANK = {
     '¡Diez y se acaba!',
     '¡Diez segundos, vamos!',
   ],
+  // Carrera en la cinta y Halloween (también los graba Lucía: voice-pack.js; esto es la voz del sistema de respaldo)
+  raceLine: ['A la línea de salida. Respira hondo: en un minuto, salimos.'],
+  raceStart: ['¡Salida! Tu carrera empieza ahora. Primer kilómetro, contenido.', '¡Pistoletazo de salida! Encuentra tu ritmo y no te dejes llevar.'],
+  raceHalf: ['¡Mitad de carrera! Mantén el ritmo, vas muy bien.', 'Ya llevas la mitad. Cabeza fría y piernas firmes.'],
+  raceLastKm: ['¡Último kilómetro! Ahora es tuyo: dalo todo.', '¡Último kilómetro! Si te queda algo, este es el momento.'],
+  raceFinish: ['¡Meta! ¡Lo has conseguido! Enhorabuena, qué carrera.', '¡Cruzas la meta! Disfrútalo: te lo has ganado.'],
+  halloween: ['¡Corre, que te alcanzan!', 'Algo se mueve en la niebla. ¡Acelera!', 'No mires atrás. ¡Sigue corriendo!', 'Las calabazas te observan. ¡Vamos!'],
+  halloweenFinish: ['¡Has sobrevivido a la noche de Halloween! Gran trabajo.'],
   halfWorkout: [
     '¡Mitad del entrenamiento! Lo que queda ya es cuesta abajo.',
     'Ecuador de la clase, {name}. Vas como un reloj.',

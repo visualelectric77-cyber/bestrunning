@@ -31,7 +31,7 @@ const pct = (x) => `${Math.round(x * 100)} %`;
 const ICONS = new Set(('home calendar grid chart person play pause stop skip-forward skip-back plus minus close check chevron-right '
   + 'chevron-left chevron-down flame bolt heart timer route trophy gear speaker speaker-off lock unlock refresh shuffle drag share '
   + 'download upload watch mountain star info trash edit sparkles leaf gauge target arrow-up arrow-down music bell moon sun medal crown '
-  + 'repeat list clock').split(' '));
+  + 'repeat list clock flag').split(' '));
 const TM = { hasIncline: false, maxIncline: 12, minSpeed: 1.0, maxSpeed: 18.0, announceLead: 10 };
 const START = mondayOf('2026-09-07');
 
@@ -81,7 +81,8 @@ const structSig = (w) => w.segments.map((s) => `${s.zone}:${s.sec}:${s.speed}:${
 const ids = TEMPLATES.map((t) => t.id);
 ok(TEMPLATES.length >= 30, `≥ 30 plantillas (hay ${TEMPLATES.length})`);
 ok(new Set(ids).size === ids.length, 'ids de plantilla únicos');
-for (const c of Object.keys(CATEGORIES)) ok(TEMPLATES.some((t) => t.category === c), `categoría ${c} con plantillas`);
+// 'race' no tiene plantillas: sus clases salen de js/training/race.js (la carrera del objetivo, medida en km)
+for (const c of Object.keys(CATEGORIES).filter((k) => k !== 'race')) ok(TEMPLATES.some((t) => t.category === c), `categoría ${c} con plantillas`);
 for (const [k, c] of Object.entries(CATEGORIES)) ok(c.key === k && c.name && /^#[0-9A-F]{6}$/i.test(c.color) && ICONS.has(c.icon), `categoría ${k} bien formada`);
 const SPEC_IDS = ['pyramid', 'minute-on', 'sprint-30-60', 'ladder-up', 'over-under', 'golden-minutes', 'two-one', 'countdown', 'cruise', 'sandwich',
   'threshold-3x4', 'progressive', 'cruise-2x6', 'long-progressive', 'long-blocks', 'long-surges', 'negative-split', 'long-ladder', 'aerobic-base',

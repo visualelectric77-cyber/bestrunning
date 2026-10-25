@@ -1,6 +1,7 @@
 // BestRunning · generador de clases (sin DOM).
 // Convierte una plantilla + contexto en un Workout completo, con id reversible
 // 'plantilla~minutos~semilla(base36)~carga×100' para poder reconstruirlo desde la URL.
+import { isRaceTemplate, buildRaceWorkout, RACE_PREFIX } from './race.js';
 import { round1, roundTo, clamp, hashStr, makeRng, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, kcalPerMinute, clampSpeed } from './levels.js';
 import { getTemplate } from './templates.js';
@@ -186,11 +187,18 @@ export function buildWorkout(templateId, {
     isTest,
     seed: sd,
     loadFactor: load,
+    ...(t.event ? { event: t.event } : {}),
   };
 }
 
 export function workoutFromId(id, state) {
   const p = parseWorkoutId(id);
+  // Carrera en la cinta (js/training/race.js): la «semilla» son las décimas de km/h del ritmo de carrera
+  if (p && isRaceTemplate(p.templateId)) {
+    return buildRaceWorkout(p.templateId.slice(RACE_PREFIX.length), {
+      speed: p.seed / 10, levels: state?.levels, weightKg: Number(state?.profile?.weightKg) || 78,
+    });
+  }
   if (!p || !getTemplate(p.templateId)) return null;
   return buildWorkout(p.templateId, {
     minutes: p.minutes,

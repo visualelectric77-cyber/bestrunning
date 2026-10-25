@@ -403,6 +403,9 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
   const jitter = new Map(lib.map((t) => [t.id, rng.next()]));
   const byId = new Map(lib.map((t) => [t.id, t]));
   const targets = segmentTargets(segs, energy);
+  // Halloween: el DJ busca primero lo oscuro (dark/melodic techno, minimal, psytrance) sin romper el tempo del tramo
+  const darkBias = workout?.event === 'halloween' ? 2.5 : 0;
+  const isDark = (t) => /dark|techno|mystic|midnight|minimal|psytrance|trance|veiled|night/i.test(`${t.id} ${t.title || ''} ${t.genre || ''}`);
   const starts = [];
   let acc = 0;
   for (const s of segs) { starts.push(acc); acc += s.sec; }
@@ -451,6 +454,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       const eff = g.bpm * rate;
       let s = -Math.abs(eff / target - 1) * 40 - Math.abs(rate - 1) * 8;
       if (preferred(t, zone)) s += 1;
+      if (darkBias && isDark(t)) s += darkBias;
       if (INTENSE.has(zone)) {
         s += g.hasDrops ? (energy === 'max' ? 1.4 : 0.5) : 0;
         s += g.meanEnergy * 0.6;

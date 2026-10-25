@@ -1590,6 +1590,78 @@ export function defineExtraTemplates({ T, frame, W, numberReps, choose, r5, roun
   /* ═════════════ Eventos de temporada ═════════════ */
 
   T({
+    id: 'halloween-night', title: 'La noche de las calabazas', subtitle: 'Cementerio, casa encantada y huida a medianoche', category: 'challenge',
+    family: 'reto', themes: [TH.mixto, TH.velocidad], intensity: 'hard', durations: MID, event: 'halloween', focus: 'Halloween duro',
+    description: 'Clase de Halloween, dura y oscura: cruzas el cementerio a ritmo firme, subes la escalera de la casa encantada peldaño a peldaño y a medianoche te toca huir. No mires atrás.',
+    coachNotes: ['El cementerio se cruza sin prisa pero sin pausa: ritmo firme.', 'En la casa encantada cada peldaño sube: no te guardes nada para el siguiente.', 'A medianoche se huye: brazos rápidos y no mires atrás.'],
+    build: (ctx) => frame(ctx, (k, B) => {
+      const out = [k.flex({ label: 'Entrada al bosque' })];
+      const tomb = r5(clamp(B * 0.22, 240, 600));
+      out.push(k.run(tomb, { off: 0.2, label: 'El cementerio', block: 'El cementerio', cue: 'Entramos en el cementerio: ritmo firme y mirada al frente' }));
+      out.push(k.jog(60, { label: 'Entre las lápidas', block: 'El cementerio' }));
+      const steps = k.long ? 5 : 4;
+      for (let i = 0; i < steps; i++) {
+        const z = i < 2 ? k.run : k.fast;
+        out.push(W(z(60, { off: round1(0.2 + i * 0.3), label: `Planta ${i + 1}`, block: 'La casa encantada',
+          cue: i === 0 ? 'La casa encantada: cada planta, un poco más rápido' : i === steps - 1 ? 'Última planta: ya casi estás arriba' : '' })));
+        out.push(k.rec(45, { label: 'Pasillo oscuro', block: 'La casa encantada' }));
+      }
+      const used = 120 + tomb + 60 + steps * 105 + 120;
+      const rest = 60;
+      const n = clamp(Math.floor((B - used) / (30 + rest)), 4, 10);
+      for (let i = 0; i < n; i++) {
+        out.push(W(k.sprint(30, { label: 'Huida', block: 'Medianoche',
+          cue: i === 0 ? 'Son las doce: ¡corre y no mires atrás!' : i === n - 1 ? k.cue('last') : i === Math.floor(n / 2) ? 'Te siguen los pasos: no aflojes' : '' })));
+        if (i < n - 1) out.push(k.rec(rest, { label: 'Escondido', block: 'Medianoche' }));
+      }
+      out.push(k.flex({ label: 'Salida del bosque' }));
+      return numberReps(out);
+    }, { quality: true }),
+  });
+
+  T({
+    id: 'halloween-thirteen', title: 'Trece sustos', subtitle: 'Trece cambios bruscos en la oscuridad', category: 'intervals',
+    family: 'series-cortas', themes: [TH.velocidad, TH.explosividad], intensity: 'hard', durations: ALL, event: 'halloween', focus: 'Explosividad',
+    description: 'Clase de Halloween: trece sustos, trece cambios bruscos de ritmo. Entre susto y susto, trote para que vuelva el pulso. El decimotercero es el peor.',
+    coachNotes: ['Cada susto es un cambio brusco: arranca rápido, sin pensarlo.', 'Entre sustos, trote suave y respira hondo.', 'El decimotercero es el peor: dalo todo.'],
+    build: (ctx) => frame(ctx, (k, B) => {
+      const work = k.long ? 40 : 30;
+      const rest = r5(clamp((B - 240 - 13 * work) / 12, 30, 120));
+      const out = [k.flex({ label: 'Silencio en el bosque' })];
+      for (let i = 0; i < 13; i++) {
+        const z = i === 12 ? k.sprint : i % 4 === 3 ? k.sprint : k.fast;
+        out.push(W(z(work, { label: `Susto ${i + 1}`, block: 'Trece sustos',
+          cue: i === 0 ? 'Primer susto: arranca rápido, sin pensarlo' : i === 12 ? 'El decimotercero, el peor: ¡todo!' : i === 6 ? k.cue('mind') : '' })));
+        if (i < 12) out.push(k.rec(rest, { label: 'Respira', block: 'Trece sustos' }));
+      }
+      out.push(k.flex({ label: 'Trote de soltura' }));
+      return numberReps(out);
+    }, { quality: true }),
+  });
+
+  T({
+    id: 'halloween-hunt', title: 'Te persiguen', subtitle: 'Algo corre detrás de ti en la niebla', category: 'fartlek',
+    family: 'fartlek', themes: [TH.fartlek, TH.mixto], intensity: 'hard', durations: MID, event: 'halloween', focus: 'Cambios de ritmo',
+    description: 'Clase de Halloween: corres por el bosque y algo te sigue entre la niebla. Cuando se acerca, aceleras; cuando lo pierdes, recuperas. Cada vez se acerca un poco más rápido.',
+    coachNotes: ['Cuando se acerca, acelera de verdad: no hay sitio para dudar.', 'Cuando lo pierdes, recupera sin pararte.', 'Al final, la recta del claro: ahí se le deja atrás para siempre.'],
+    build: (ctx) => frame(ctx, (k, B) => {
+      const out = [k.flex({ label: 'Niebla' })];
+      const round = 150 + 90 + 60;
+      const n = clamp(Math.floor((B - 240 - 90) / round), 2, 8);
+      for (let i = 0; i < n; i++) {
+        const block = `Persecución ${i + 1}`;
+        out.push(k.run(150, { off: round1(-0.2 + i * 0.1), label: 'Entre los árboles', block, cue: i === 0 ? 'Algo se mueve entre los árboles: ritmo vivo' : '' }));
+        out.push(W(k.fast(90, { off: round1(i * 0.15), label: '¡Se acerca!', block, cue: i === 0 ? '¡Se acerca! Acelera' : i === n - 1 ? 'Última vez: que no te alcance' : '' })));
+        out.push(k.rec(60, { label: 'Lo has perdido', block }));
+      }
+      out.push(W(k.sprint(45, { label: 'La recta del claro', block: 'El claro', cue: 'La recta del claro: déjalo atrás para siempre' })));
+      out.push(k.flex({ label: 'Trote de soltura' }));
+      return numberReps(out);
+    }, { quality: true }),
+  });
+
+
+  T({
     id: 'xmas-bells', title: 'Las doce campanadas', subtitle: 'Doce campanadas rápidas para despedir el año', category: 'challenge',
     family: 'reto', themes: [TH.mixto, TH.velocidad], intensity: 'hard', durations: ALL, event: 'navidad', focus: 'Velocidad festiva',
     description: 'Clase de Navidad: en los días largos suenan primero los cuartos y después las doce campanadas, cada una un cambio rápido. Una uva, un cambio: entra en el año nuevo corriendo.',

@@ -1,7 +1,7 @@
-// RITMUP · marcas estimadas (5K, 10K, media) y FC máxima medida. Lógica pura, sin DOM.
+// RITMUP · marcas estimadas (5K, 10K, 15K, media) y FC máxima medida. Lógica pura, sin DOM.
 //
 // Marcas: a partir de la VAM (velocidad aeróbica máxima, km/h) con la fracción de VAM que un corredor popular
-// sostiene en cada distancia (tablas clásicas de Léger/Mercier y Billat): 5K 88–95 %, 10K 83–90 %, 21,1K 76–83 %.
+// sostiene en cada distancia (tablas clásicas de Léger/Mercier y Billat): 5K 88–95 %, 10K 83–90 %, 15K 79–86 %, 21,1K 76–83 %.
 // Se da como RANGO (el extremo rápido es con buen día y buen entrenamiento específico) y nunca como promesa.
 //
 // FC máxima medida: si el reloj registra un pulso sostenido (≥ 2 lecturas de 10 s) por encima de la FC máxima con la
@@ -10,6 +10,7 @@
 export const RACES = [
   { key: '5k', label: '5K', km: 5, lo: 0.88, hi: 0.95 },
   { key: '10k', label: '10K', km: 10, lo: 0.83, hi: 0.9 },
+  { key: '15k', label: '15K', km: 15, lo: 0.79, hi: 0.86 },
   { key: '21k', label: 'Media maratón', km: 21.0975, lo: 0.76, hi: 0.83 },
 ];
 

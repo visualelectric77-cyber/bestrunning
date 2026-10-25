@@ -4,7 +4,7 @@ import { predictRaces, fmtRaceTime, measuredHrMax, raisedHrMax } from '../js/tra
 let n = 0; let bad = 0;
 const ok = (c, m) => { n++; if (!c) { bad++; console.log(`  ✗ ${m}`); } };
 const r = predictRaces(16);
-ok(r.length === 3 && r[0].key === '5k' && r[2].key === '21k', 'tres distancias');
+ok(r.length === 4 && r[0].key === '5k' && r[2].key === '15k' && r[3].key === '21k', 'cuatro distancias (5K, 10K, 15K y media)');
 ok(r.every((x) => x.fastSec < x.slowSec), 'rango rápido < lento');
 ok(r[0].fastSec > 18 * 60 && r[0].slowSec < 23 * 60, `5K con VAM 16: ${fmtRaceTime(r[0].fastSec)}–${fmtRaceTime(r[0].slowSec)}`);
 ok(r[1].fastSec > r[0].slowSec, '10K más lento que 5K');

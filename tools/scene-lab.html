@@ -242,10 +242,29 @@ fillDurations(P.get('minutes') || P.get('m') || 20);
 $('seed').value = P.get('seed') || 1;
 
 function makeWorkout(templateId, minutes, seed) {
-  return buildWorkout(templateId, {
+  // ?race=5&raceKmh=11 → clase de carrera sintética (calentamiento, carrera de N km a ritmo fijo, vuelta a la calma)
+  // con workout.race = { key, km, label, start, end } (contrato del escenario «carrera»); ?event=halloween → workout.event
+  const raceKm = num(P.get('race'), 0);
+  if (raceKm > 0) {
+    const v = num(P.get('raceKmh'), 11);
+    const raceSec = Math.round((raceKm / v) * 3600);
+    const segs = [
+      { zone: 'warmup', speed: 7.2, incline: 0, sec: 120, label: 'Calentamiento', cue: '', block: 'Calentamiento' },
+      { zone: 'jog', speed: 8.3, incline: 0, sec: 120, label: 'A la salida', cue: '', block: 'Calentamiento' },
+      { zone: v >= 12.5 ? 'fast' : 'run', speed: v, incline: 0, sec: raceSec, label: `Carrera ${raceKm}K`, cue: '', block: 'Carrera', race: true },
+      { zone: 'cooldown', speed: 6.5, incline: 0, sec: 180, label: 'Vuelta a la calma', cue: '', block: 'Vuelta a la calma' },
+    ];
+    const total = segs.reduce((a, s) => a + s.sec, 0);
+    return { id: `lab-race-${raceKm}`, templateId: 'lab-race', title: `Carrera ${raceKm}K`, category: 'race', minutes: Math.round(total / 60),
+      totalSec: total, segments: segs, isTest: false, estDistanceKm: raceKm + 0.8, maxSpeed: v,
+      race: { key: `${raceKm}k`, km: raceKm, label: `${raceKm}K`, start: 240, end: 240 + raceSec } };
+  }
+  const wk = buildWorkout(templateId, {
     minutes: Number(minutes), levels: FAKE.levels, seed: Number(seed) || 1, loadFactor: 1, hasIncline: false,
     treadmill: FAKE.treadmill, weightKg: FAKE.profile.weightKg,
   });
+  if (wk && P.get('event')) wk.event = P.get('event');
+  return wk;
 }
 const startsOf = (wk) => { const out = []; let a = 0; for (const s of wk.segments) { out.push(a); a += s.sec; } return out; };
 const segIdxAt = (st, t) => { let i = 0; while (i + 1 < st.length && st[i + 1] <= t) i++; return i; };

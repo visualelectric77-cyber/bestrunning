@@ -752,7 +752,7 @@ section('Pack grabado: coach en tiempo real');
   ok(said.length > 5 && said.every((c) => c.voice === 'pack' || (c.voice === 'tts' && !c.clips)), `avisos notificados con el pack (${said.length})`);
   const dyn = async (kind, vars) => { const n = said.length; await coach.say(kind, vars); await tick(); return said.slice(n); };
   eq((await dyn('km', { km: 3, pace: '5:13' }))[0]?.clips?.join(), 'km_3', 'say km con el pack');
-  eq((await dyn('km', { km: 14 })).length, 0, 'km fuera del pack ⇒ se omite');
+  eq((await dyn('km', { km: 22 })).length, 0, 'km fuera del pack ⇒ se omite');
   eq((await dyn('adjust', { speed: '11,6' }))[0]?.clips?.join(), 's_116', 'say adjust ⇒ "Once coma seis."');
   const res = (await dyn('resume', { speed: '8,3' }))[0];
   ok(res && /^resume_\d$/.test(res.clips[0]) && res.clips[1] === 's_83', `say resume + velocidad (${res?.clips})`);

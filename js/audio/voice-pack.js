@@ -36,7 +36,7 @@ for (let i = 2; i <= 12; i++) REPS.push({ id: `rep_${i}`, text: `Serie ${numberW
 REPS.push({ id: 'rep_last', text: '¡Última serie!' });
 
 const KMS = [{ id: 'km_1', text: '¡Primer kilómetro!' }];
-for (let k = 2; k <= 12; k++) KMS.push({ id: `km_${k}`, text: `¡Kilómetro ${numberWords(k, 0)}!` });
+for (let k = 2; k <= 21; k++) KMS.push({ id: `km_${k}`, text: `¡Kilómetro ${numberWords(k, 0)}!` }); // hasta 21: la media maratón en la cinta
 
 const STAGES = [];
 for (let n = 1; n <= 16; n++) STAGES.push({ id: `stage_${n}`, text: `Escalón ${numberWords(n, 0)}.` });
@@ -81,6 +81,17 @@ const GROUPS = {
   intro_hills: ['¡Hoy toca cuestas! Piernas fuertes y zancada corta.'],
   intro_test: ['Hoy toca test. Escalones de un minuto hasta donde llegues.'],
   watch: ['Recuerda iniciar Cinta de correr en tu reloj.'],
+  // Carrera en la cinta (js/training/race.js): línea de salida, salida, mitad, último km y meta (los km, desde la salida)
+  intro_race: ['¡Hoy es tu día de carrera! Calienta suave: lo bueno empieza en la salida.'],
+  raceline: ['A la línea de salida. Respira hondo: en un minuto, salimos.'],
+  racestart: ['¡Salida! Tu carrera empieza ahora. Primer kilómetro, contenido.', '¡Pistoletazo de salida! Encuentra tu ritmo y no te dejes llevar.'],
+  racehalf: ['¡Mitad de carrera! Mantén el ritmo, vas muy bien.', 'Ya llevas la mitad. Cabeza fría y piernas firmes.'],
+  racelastkm: ['¡Último kilómetro! Ahora es tuyo: dalo todo.', '¡Último kilómetro! Si te queda algo, este es el momento.'],
+  racefinish: ['¡Meta! ¡Lo has conseguido! Enhorabuena, qué carrera.', '¡Cruzas la meta! Disfrútalo: te lo has ganado.'],
+  // Halloween (clases con event 'halloween'): intro, ánimos en los tramos duros y final
+  intro_halloween: ['Es noche de Halloween. Hoy se corre en la oscuridad, y sin mirar atrás.'],
+  halloween: ['¡Corre, que te alcanzan!', 'Algo se mueve en la niebla. ¡Acelera!', 'No mires atrás. ¡Sigue corriendo!', 'Las calabazas te observan. ¡Vamos!'],
+  halloweenfinish: ['¡Has sobrevivido a la noche de Halloween! Gran trabajo.'],
   // Final y estados
   finish: ['¡Entrenamiento completado! Enhorabuena, gran trabajo.', '¡Terminado! Hoy has sumado un poquito más.', '¡Lo has conseguido! Estira un poco y bebe agua.'],
   // final de una sesión que NO se completó (terminada antes o con tramos saltados): nunca «completado»
@@ -168,6 +179,11 @@ const FALLBACK_GROUPS = {
   recover: ['breath'],
   mind: ['form'],
   breath: ['form'],
+  racehalf: ['halfworkout'],
+  racelastkm: ['lastblock'],
+  racefinish: ['finish'],
+  halloween: ['hard'],
+  halloweenfinish: ['finish'],
 };
 
 /**
@@ -239,7 +255,7 @@ export function composeCue(kind, vars = {}, { pick = (l) => l[0], available = nu
       break;
     }
     case 'km': {
-      const id = vars.km >= 1 && vars.km <= 12 ? `km_${Math.round(vars.km)}` : null;
+      const id = vars.km >= 1 && vars.km <= 21 ? `km_${Math.round(vars.km)}` : null;
       if (!id) return null;
       seq = [id];
       break;
@@ -268,6 +284,13 @@ export function composeCue(kind, vars = {}, { pick = (l) => l[0], available = nu
     case 'testPrompt': seq = [choose('testprompt')]; break;
     case 'testEnd': seq = [choose('testend')]; break;
     case 'watch': seq = [choose('watch')]; break;
+    case 'raceLine': seq = [choose('raceline')]; break;
+    case 'raceStart': seq = [choose('racestart')]; break;
+    case 'raceHalf': seq = [choose('racehalf')]; break;
+    case 'raceLastKm': seq = [choose('racelastkm')]; break;
+    case 'raceFinish': seq = [choose('racefinish')]; break;
+    case 'halloween': seq = [choose('halloween')]; break;
+    case 'halloweenFinish': seq = [choose('halloweenfinish')]; break;
     case 'music': {
       // vars.mood: 'drop' | 'energy' | 'flow'
       const ids = (MUSIC_CUES[vars.mood] || MUSIC_CUES.energy).filter((id) => !available || available.has(id));

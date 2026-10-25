@@ -22,7 +22,7 @@ import { attachPlayer, isNative, post as nativePost } from '../integrations/nati
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
-import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../player/scene-pick.js';
+import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
 import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
@@ -418,6 +418,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
   }
 
+  /* ── Carrera en la cinta (workout.race, js/training/race.js): los km cuentan desde la SALIDA, no desde el
+     calentamiento; avisos de salida, mitad, último km y meta con el tiempo de carrera. ── */
+  const race = workout.race && Number(workout.race.km) > 0 ? workout.race : null;
+  const raceIdx = race ? workout.segments.findIndex((x) => x.race) : -1;
+  const raceRun = race ? { startKm: null, startT: null, nextKm: 1, half: false, last: false, done: false, said: false } : null;
+  let raceResult = null;
+  const planKmBefore = (i) => workout.segments.slice(0, i).reduce((a, x) => a + (x.speed * x.sec) / 3600, 0);
   // Reloj: estado de la clase en directo, sus órdenes (cmd) y su pulso. Inerte fuera de la app nativa.
   nb = attachPlayer({
     workout,
@@ -774,7 +781,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (visuals.quality === 'off') return '<div data-slot="scene" hidden></div>';
     const pick = themePick();
     const auto = resolveTheme(AUTO_THEME, workout);
-    const name = (id) => SCENE_NAMES[id] || id;
+    const name = (id) => SCENE_NAMES[id] || SPECIAL_SCENES[id] || id;
     const thumb = (id) => `<img src="./assets/scenes/${encodeURIComponent(id)}.jpg" width="240" height="428" alt="" decoding="async">`;
     const opt = (id, label, inner, on) => `<button type="button" class="pl-scn__opt${id === AUTO_THEME ? ' pl-scn__opt--auto' : ''}" role="radio" aria-checked="${on}" data-act="scene" data-scene="${id}">
         <span class="pl-scn__thumb">${inner}</span>
@@ -2078,6 +2085,54 @@ export function mount(el, { params = {}, query = {} } = {}) {
   /* ───────── Bugs de retransmisión: entran deslizando arriba a la derecha 3 s y salen (§16) ───────── */
   // kind: 'rep' | 'stage' | 'km' | 'halfway' | 'record' | 'vam'. Un bug nuevo de un tipo sustituye a los de ese
   // tipo que esperaban y despide ya el que está en pantalla (tras ⏭ rápidos no se ven series que ya pasaron).
+  /* Carrera en la cinta: estado en la carga de la clase (race, raceIdx, raceRun, raceResult, planKmBefore) */
+  function raceSegment(s, info) {
+    if (!raceRun || info?.reason === 'restart') return;
+    if (s.segIndex === raceIdx - 1 && !raceRun.said) { raceRun.said = true; coachCall('say', 'raceLine', {}); }
+    if (s.segIndex === raceIdx && raceRun.startKm == null) {
+      raceRun.startKm = s.distanceKm;
+      raceRun.startT = s.totalElapsed;
+      coachCall('say', 'raceStart', {});
+      showBug({ lbl: 'Salida', val: race.label, kind: 'race' });
+    }
+  }
+  function raceTick(s) {
+    if (!raceRun || raceRun.done || s.segIndex < raceIdx) return;
+    if (raceRun.startKm == null) { // sesión recuperada a mitad de carrera: la salida del plan
+      raceRun.startKm = planKmBefore(raceIdx);
+      raceRun.startT = race.start;
+      raceRun.said = true;
+    }
+    if (s.segIndex > raceIdx) {
+      raceRun.done = true;
+      const sec = Math.max(0, Math.round(s.totalElapsed - raceRun.startT));
+      raceResult = { key: race.key, km: race.km, label: race.label, sec };
+      coachCall('say', 'raceFinish', {});
+      showBug({ lbl: 'Meta', val: fmt.clock(sec), sub: race.label, color: '#ffd60a', kind: 'race' });
+      return;
+    }
+    const d = s.distanceKm - raceRun.startKm;
+    if (!raceRun.last && d >= race.km - 1) {
+      raceRun.last = true;
+      raceRun.nextKm = Math.max(raceRun.nextKm, Math.ceil(race.km - 1) + 1);
+      coachCall('say', 'raceLastKm', {});
+      showBug({ lbl: 'Último km', val: race.label, kind: 'race' });
+      return;
+    }
+    if (!raceRun.half && race.km >= 5 && d >= race.km / 2) {
+      raceRun.half = true;
+      if (Math.abs(race.km / 2 - Math.round(race.km / 2)) < 0.01) raceRun.nextKm = Math.max(raceRun.nextKm, Math.round(race.km / 2) + 1);
+      coachCall('say', 'raceHalf', {});
+      showBug({ lbl: 'Mitad', val: `${fmt.dec1(race.km / 2)} km`, color: '#ffffff', kind: 'halfway' });
+      return;
+    }
+    if (d >= raceRun.nextKm && raceRun.nextKm < race.km - 1 + 1e-6) {
+      const k = raceRun.nextKm++;
+      coachCall('say', 'km', { km: k });
+      showBug({ lbl: 'KM', val: k, sub: race.label, kind: 'km' });
+    }
+  }
+
   function showBug({ lbl, val, sub = '', color = '', kind = '' }) {
     if (!refs.bugs || finale) return;
     if (kind) for (let i = bugQ.length - 1; i >= 0; i--) if (bugQ[i].kind === kind) bugQ.splice(i, 1);
@@ -2452,6 +2507,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       try { hrCoachTick(s); } catch (err) { reportOnce(err); }
       // Durante un salto (skip / «No puedo más») la música se reubica después con musicSeek
       try { musicTick(s); } catch (err) { reportOnce(err); }
+      try { raceTick(s); } catch (err) { reportOnce(err); }
       guardSession();
     }
     try { nb.tick(s); } catch (err) { reportOnce(err); }
@@ -2487,6 +2543,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     applySegment(s, info);
     if (relay) mo('afterSegment', info || {});
     if (!info?.silent) {
+      try { raceSegment(s, info); } catch (err) { reportOnce(err); }
       sweep();
       const prev = cache.segSpeed;
       const up = prev != null && s.currentSpeed > prev;
@@ -2507,11 +2564,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (disposed) return;
     forwardToScene(type, data);
     try { nb.event(type, data || {}); } catch (err) { reportOnce(err); }
-    if (type === 'km' && !data?.silent) {
+    if (type === 'km' && race) {
+      // carrera: el motor cuenta desde el calentamiento; los km de carrera los avisa raceTick
+    } else if (type === 'km' && !data?.silent) {
       coachCall('say', 'km', { km: data.km, pace: data.pace });
       showBug({ lbl: 'KM', val: data.km, sub: data.pace ? `${data.pace} /km` : '', kind: 'km' });
     } else if (type === 'halfway') {
-      if (performance.now() - testEndAt > 2500) {
+      if (!race && performance.now() - testEndAt > 2500) {
         // la mitad de la clase (no la posición de llegada tras un ⏭) y la distancia que llevas de verdad
         const s = engine?.getState();
         const half = Math.round((s?.totalSec || workout.totalSec || 0) / 2);
@@ -2570,7 +2629,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       sceneEvent('segment', { index: idx, reason: d.reason || 'auto' });
       if (testStage) sceneEvent('testStage', { stage });
     } else if (type === 'km') {
-      if (!d.silent) sceneEvent('km', { km: d.km });
+      if (!d.silent && !race) sceneEvent('km', { km: d.km });
     } else if (type === 'halfway') {
       if (performance.now() - testEndAt > 2500) sceneEvent('halfway');
     } else if (type === 'pause' || type === 'resume') {
@@ -3501,6 +3560,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // Campos de la fase 2 (§12, §13): el pulso lo añade luego el resumen con el Atajo del Watch
     for (const k of ['hrMin', 'hrSeries', 'hrZones']) if (session[k] === undefined) session[k] = null;
     session.music = { tracks: playedTracks(s.totalElapsed) };
+    // Carrera en la cinta: tu tiempo oficial (de la salida a la meta) para el resumen y tu historial
+    if (raceResult) session.race = { ...raceResult };
     // Fin anticipado, tiempo saltado, rangos saltados y línea de tiempo (progresión, perfil «Real» y pulso del Watch)
     mark(false, s.totalElapsed);
     session.finishedEarly = !!s.finishedEarly;

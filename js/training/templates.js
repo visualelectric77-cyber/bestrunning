@@ -22,6 +22,8 @@ export const CATEGORIES = {
     description: 'Sesiones suaves para asimilar el trabajo y volver más fuerte.' },
   challenge: { key: 'challenge', name: 'Retos', color: '#FFD60A', icon: 'trophy',
     description: 'Pruebas para medirte y celebrar todo lo que has avanzado.' },
+  race: { key: 'race', name: 'Carrera', color: '#FF5A1F', icon: 'flag',
+    description: 'Tu carrera en la cinta: salida, un arco en cada kilómetro y la meta con tu tiempo.' },
   test: { key: 'test', name: 'Test', color: '#7D7AFF', icon: 'gauge',
     description: 'Test escalonado para medir tu VAM y recalcular tus velocidades.' },
 };
@@ -29,7 +31,7 @@ export const CATEGORIES = {
 /* ───────────── Contrato de temporada ─────────────
  * Cada plantilla declara además: family (estructura, para no repetir familia dos sesiones seguidas), themes (temas de
  * mesociclo a los que encaja, con los nombres exactos de THEMES), intensity ('easy' | 'moderate' | 'hard') y, si es
- * de un evento de temporada, event ('navidad' | 'verano' | 'aniversario'). El planificador de temporada solo usa estos
+ * de un evento de temporada, event ('navidad' | 'verano' | 'aniversario' | 'halloween'). El planificador de temporada solo usa estos
  * campos + category + durations. */
 
 /** Temas de mesociclo (nombres visibles; el planificador los usa tal cual). */
@@ -43,7 +45,7 @@ const TH = {
 export const FAMILIES = ['piramide', 'escalera', 'series-cortas', 'series-largas', 'tempo', 'progresivo', 'fartlek', 'cuestas', 'umbral',
   'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica'];
 export const INTENSITIES = ['easy', 'moderate', 'hard'];
-export const EVENT_KEYS = ['navidad', 'verano', 'aniversario'];
+export const EVENT_KEYS = ['navidad', 'verano', 'aniversario', 'halloween'];
 
 /* ───────────── Herramientas de construcción (privadas) ───────────── */
 

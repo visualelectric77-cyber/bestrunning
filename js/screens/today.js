@@ -20,6 +20,7 @@ import {
 } from './plan.js';
 import { eventOn } from '../training/season.js';
 import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
+import { raceSpeedFor, raceWorkoutId } from '../training/race.js';
 import { readiness } from '../training/readiness.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
@@ -264,10 +265,18 @@ function raceHero(day, state, today, animate) {
   const r = day.race;
   const n = daysBetween(today, day.date);
   const rel = fmt.relativeDay(day.date, today);
+  const onBelt = r.where === 'cinta';
   const title = n === 0 ? `Hoy es tu ${r.label}` : n === 1 ? `Mañana, tu ${r.label}` : `Tu ${r.label}`;
-  const sub = n === 0
-    ? 'Calienta 10–15 minutos muy suave, sal contenido el primer kilómetro y guarda fuerzas para el final. ¡A disfrutarla!'
-    : 'El día de tu carrera. Llega descansado: la semana es suave y la víspera, descanso.';
+  const sub = onBelt
+    ? n === 0
+      ? `Tu ${r.label} en la cinta, como una carrera de verdad: línea de salida, un arco en cada kilómetro y la meta con tu tiempo.`
+      : 'El día de tu carrera en la cinta. Llega descansado: la semana es suave y la víspera, descanso.'
+    : n === 0
+      ? 'Calienta 10–15 minutos muy suave, sal contenido el primer kilómetro y guarda fuerzas para el final. ¡A disfrutarla!'
+      : 'El día de tu carrera. Llega descansado: la semana es suave y la víspera, descanso.';
+  // En la cinta: la clase de carrera al ritmo del objetivo (o al de tu marca prevista)
+  const beltKmh = onBelt ? raceSpeedFor(r.distance, { targetSec: r.targetSec, levels: state.levels }) : null;
+  const beltId = beltKmh ? raceWorkoutId(r.distance, beltKmh) : null;
   const pace = r.targetSec ? Math.round(r.targetSec / r.km) : null;
   const grid = pace
     ? `<div class="stat-grid td-race__grid">
@@ -275,14 +284,23 @@ function raceHero(day, state, today, animate) {
       ${stat({ label: 'Ritmo', value: paceText(pace), unit: '/km' })}
       ${stat({ label: 'En la cinta', value: fmt.speed(3600 / pace), unit: 'km/h' })}
     </div>`
-    : '';
+    : beltKmh
+      ? `<div class="stat-grid td-race__grid">
+      ${stat({ label: 'Distancia', value: r.label })}
+      ${stat({ label: 'Ritmo', value: paceText(3600 / beltKmh), unit: '/km' })}
+      ${stat({ label: 'En la cinta', value: fmt.speed(beltKmh), unit: 'km/h' })}
+    </div>`
+      : '';
+  const action = beltId && n === 0
+    ? `<button type="button" class="btn btn--primary btn--lg btn--block" data-href="#/workout/${enc(beltId)}?date=${day.date}&from=today">${icon('flag', 16)} Empezar mi ${esc(r.label)}</button>`
+    : '<button type="button" class="btn btn--secondary btn--lg btn--block" data-href="#/plan">Ver mi plan</button>';
   return `<article class="card td-hero td-hero--race${animate ? ' td-hero--in' : ''}">
-    <div class="td-hero__top"><span class="eyebrow td-race__eyebrow">${icon('flag', 12)} ${esc(rel)} · Carrera</span></div>
+    <div class="td-hero__top"><span class="eyebrow td-race__eyebrow">${icon('flag', 12)} ${esc(rel)} · ${onBelt ? 'Carrera en la cinta' : 'Carrera'}</span></div>
     <h2 class="td-hero__title">${esc(title)}</h2>
     <p class="td-hero__sub">${esc(sub)}</p>
     ${grid}
     <div class="td-hero__actions">
-      <button type="button" class="btn btn--secondary btn--lg btn--block" data-href="#/plan">Ver mi plan</button>
+      ${action}
     </div>
   </article>`;
 }

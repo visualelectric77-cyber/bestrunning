@@ -1,6 +1,7 @@
 // RITMUP · objetivo con fecha de carrera (sin DOM). Lógica pura que comparten el planificador, Hoy y Mi plan.
 //
-// El objetivo vive en state.plan.goal = { v, distance: '5k'|'10k'|'21k', date: 'YYYY-MM-DD', targetSec|null, setOn }.
+// El objetivo vive en state.plan.goal = { v, distance: '5k'|'10k'|'15k'|'21k', date: 'YYYY-MM-DD', targetSec|null, setOn,
+//   where: 'calle'|'cinta' } (where: la carrera se corre en la calle o EN LA CINTA; en la cinta, el día de la carrera es una clase: js/training/race.js).
 // Con objetivo, las últimas semanas antes de la carrera forman un BLOQUE ESPECÍFICO que sustituye al ciclo normal:
 //   · Construcción: ciclos de 3 semanas de carga + 1 de descarga contados HACIA ATRÁS desde la puesta a punto (la
 //     semana pico cae justo antes de afinar), clases de ritmo de carrera el jueves y la tirada del finde que crece
@@ -26,6 +27,8 @@ export const GOAL_DISTANCES = [
     thu: ['series-largas', 'series-cortas', 'piramide', 'escalera'], long: ['progresivo', 'resistencia', 'reto'], sim: ['reto-5k', 'ghost-time-trial', 'last-km'] },
   { key: '10k', label: '10K', name: '10K', km: 10, maxWeeks: 10, taper: 1, longMax: 60, minSec: 26 * 60, maxSec: 2 * 3600,
     thu: ['umbral', 'series-largas', 'tempo'], long: ['resistencia', 'progresivo'], sim: ['challenge-10k', 'ghost-time-trial', 'last-km'] },
+  { key: '15k', label: '15K', name: '15K', km: 15, maxWeeks: 10, taper: 1, longMax: 60, minSec: 40 * 60, maxSec: 3 * 3600,
+    thu: ['umbral', 'tempo', 'series-largas'], long: ['resistencia', 'progresivo'], sim: ['challenge-10k', 'long-cruise', 'ghost-time-trial'] },
   { key: '21k', label: '21K', name: 'media maratón', km: 21.0975, maxWeeks: 12, taper: 2, longMax: 60, minSec: 58 * 60, maxSec: 4 * 3600,
     thu: ['tempo', 'umbral', 'progresivo'], long: ['resistencia', 'progresivo'], sim: ['the-hour', 'long-cruise', 'steady-state'] },
 ];
@@ -51,6 +54,7 @@ export function normalizeGoal(g) {
     date: g.date,
     targetSec: Number.isFinite(t) && t >= d.minSec && t <= d.maxSec ? t : null,
     setOn: isKey(g.setOn) ? g.setOn : null,
+    where: g.where === 'cinta' ? 'cinta' : 'calle',
   };
 }
 
@@ -102,7 +106,7 @@ export function goalWeekInfo(goal, mondayKey, planStartMonday = null) {
     stage, k, weekInCycle, buildIndex, buildWeeks: blk.build, isLastBuild: stage === 'build' && k - blk.taper === 1,
     taperWeeks: blk.taper, taperIndex: stage === 'taper' ? blk.taper - k : null,
     weekOfBlock: stage === 'recovery' ? blk.weeks + 1 : blk.weeks - k, blockWeeks: blk.weeks, blockStart: blk.start,
-    distance: d.key, label: d.label, raceDate: g.date, raceWeekday: weekdayOf(g.date), targetSec: g.targetSec,
+    distance: d.key, label: d.label, raceDate: g.date, raceWeekday: weekdayOf(g.date), targetSec: g.targetSec, where: g.where,
   };
 }
 
@@ -165,9 +169,9 @@ export function parseGoalTime(text, distanceKey = '10k') {
   let sec;
   if (parts.length === 3) sec = parts[0] * 3600 + parts[1] * 60 + parts[2];
   else if (parts.length === 2) {
-    // «1:45» en la media es h:mm; en 5K/10K, mm:ss
-    sec = d.key === '21k' && parts[0] <= 4 ? parts[0] * 3600 + parts[1] * 60 : parts[0] * 60 + parts[1];
-  } else sec = d.key === '21k' && parts[0] <= 4 ? parts[0] * 3600 : parts[0] * 60;
+    // «1:45» en la media y en el 15K es h:mm; en 5K/10K, mm:ss
+    sec = (d.key === '21k' || d.key === '15k') && parts[0] <= 4 ? parts[0] * 3600 + parts[1] * 60 : parts[0] * 60 + parts[1];
+  } else sec = (d.key === '21k' || d.key === '15k') && parts[0] <= 4 ? parts[0] * 3600 : parts[0] * 60;
   if (parts.slice(1).some((p) => p > 59)) return null;
   return sec >= d.minSec && sec <= d.maxSec ? sec : null;
 }
@@ -237,8 +241,8 @@ export function goalDateRange(today) {
 }
 
 /** Objetivo nuevo listo para guardar (o null si los datos no valen). */
-export function makeGoal({ distance, date, targetSec = null }, today) {
-  const g = normalizeGoal({ distance, date, targetSec, setOn: today });
+export function makeGoal({ distance, date, targetSec = null, where = 'calle' }, today) {
+  const g = normalizeGoal({ distance, date, targetSec, setOn: today, where });
   if (!g || !isKey(today)) return null;
   const { min, max } = goalDateRange(today);
   return g.date >= min && g.date <= max ? g : null;
@@ -250,10 +254,10 @@ export function makeGoal({ distance, date, targetSec = null }, today) {
  * Guarda el objetivo. Si solo cambia el tiempo objetivo se conserva `setOn` (el bloque no se mueve); si cambia la
  * distancia o la fecha, el bloque vuelve a contar desde hoy (nunca reescribe semanas pasadas).
  */
-export function setGoal(draft, { distance, date, targetSec = null }, today) {
+export function setGoal(draft, { distance, date, targetSec = null, where = 'calle' }, today) {
   if (!draft.plan || typeof draft.plan !== 'object') draft.plan = { startDate: null, overrides: {} };
   const prev = normalizeGoal(draft.plan.goal);
-  const next = makeGoal({ distance, date, targetSec }, today);
+  const next = makeGoal({ distance, date, targetSec, where }, today);
   if (!next) return false;
   if (prev && prev.distance === next.distance && prev.date === next.date && prev.setOn) next.setOn = prev.setOn;
   draft.plan.goal = next;

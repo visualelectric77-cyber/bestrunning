@@ -41,3 +41,6 @@ assets/media/._*
 
 # Kit de la App Store (capturas, ficha y notas para la revisión): privado
 docs/app-store/
+
+# Plan de promoción y borradores de posts: privado
+docs/promo/

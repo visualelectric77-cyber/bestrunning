@@ -98,6 +98,8 @@ export const EVENTS = [
     intro: 'Especial de Navidad: corre con espíritu navideño y quema el turrón con una sonrisa.' },
   { key: 'verano', name: 'Verano', from: '07-01', to: '08-31', families: ['fartlek', 'series-cortas', 'musica'], themes: ['fartlek', 'musica', 'juego'],
     intro: 'Especial de Verano: sesión con chispa. Ventilador, agua a mano y a disfrutar.' },
+  { key: 'halloween', name: 'Halloween', from: '10-31', to: '10-31', single: true, families: ['reto', 'series-cortas', 'fartlek'], themes: ['velocidad', 'explosividad', 'mixto'],
+    intro: 'Especial de Halloween: clase dura y oscura entre calabazas. No mires atrás.' },
   { key: 'aniversario', name: 'Aniversario RITMUP', from: '10-18', to: '10-18', single: true, families: ['reto', 'piramide'], themes: ['records', 'fantasma'],
     intro: '¡Aniversario de RITMUP! Hoy celebramos con un reto especial: un año más corriendo juntos.' },
 ];

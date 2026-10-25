@@ -516,14 +516,15 @@ export function openGoalSheet() {
   let dist = live?.distance || cur?.distance || '10k';
   let date = live?.date || addDays(mondayOf(addDays(today, 56)), 6);
   let timeRaw = live?.targetSec ? fmtGoalTime(live.targetSec) : '';
+  let where = live?.where || cur?.where || 'calle';
   let sheetEl = null;
 
-  const placeholder = (k) => ({ '5k': '25:00', '10k': '50:00', '21k': '1:50:00' }[k] || '50:00');
+  const placeholder = (k) => ({ '5k': '25:00', '10k': '50:00', '15k': '1:15:00', '21k': '1:50:00' }[k] || '50:00');
   const hint = () => {
     const pred = safe(() => predictedFor(dist, state.levels), null);
     const sec = parseGoalTime(timeRaw, dist);
     const out = [];
-    if (timeRaw && !sec) out.push(`<span class="pn-gsheet__err">Escribe el tiempo como ${placeholder(dist)}${dist === '21k' ? '' : ' (minutos y segundos)'}.</span>`);
+    if (timeRaw && !sec) out.push(`<span class="pn-gsheet__err">Escribe el tiempo como ${placeholder(dist)}${dist === '21k' || dist === '15k' ? '' : ' (minutos y segundos)'}.</span>`);
     else if (sec) out.push(`Ritmo de carrera <b class="num">${esc(paceLine(Math.round(sec / goalDistance(dist).km)))}</b>.`);
     if (pred) out.push(`Previsión hoy: <b class="num">${fmtGoalTime(pred.fastSec)}–${fmtGoalTime(pred.slowSec)}</b>.`);
     return out.join(' ');
@@ -550,15 +551,15 @@ export function openGoalSheet() {
           toast(`Revisa el tiempo objetivo (por ejemplo, ${placeholder(dist)})`, { icon: 'info', kind: 'warning' });
           return;
         }
-        if (!makeGoal({ distance: dist, date, targetSec: sec }, today)) {
+        if (!makeGoal({ distance: dist, date, targetSec: sec, where }, today)) {
           haptic('warning');
           toast('Elige una fecha entre mañana y dentro de un año', { icon: 'calendar', kind: 'warning' });
           return;
         }
-        setState((d) => { setGoal(d, { distance: dist, date, targetSec: sec }, today); });
+        setState((d) => { setGoal(d, { distance: dist, date, targetSec: sec, where }, today); });
         haptic('success');
         close();
-        toast(`Plan adaptado a tu ${goalDistance(dist).label} del ${raceDateText(date)}`, { icon: 'flag', kind: 'success' });
+        toast(`Plan adaptado a tu ${goalDistance(dist).label}${where === 'cinta' ? ' en la cinta' : ''} del ${raceDateText(date)}`, { icon: 'flag', kind: 'success' });
       },
     },
   ];
@@ -585,6 +586,11 @@ export function openGoalSheet() {
         <div class="st-group__title">Distancia</div>
         ${segmented({ name: 'pn-goal-dist', options: GOAL_DISTANCES.map((d) => ({ value: d.key, label: d.label })), value: dist })}
       </div>
+      <div class="st-group">
+        <div class="st-group__title">Dónde la corres</div>
+        ${segmented({ name: 'pn-goal-where', options: [{ value: 'calle', label: 'En la calle' }, { value: 'cinta', label: 'En la cinta' }], value: where })}
+        <p class="st-note">En la cinta, el día de la carrera es una clase especial: salida, un arco en cada kilómetro y la meta con tu tiempo.</p>
+      </div>
       <div class="st-group pn-gsheet__fields">
         <div class="list">
           <label class="list__row st-row"><span class="st-row__label"><span class="list__title">Fecha</span></span><input id="pn-goal-date" class="st-input st-time" type="date" min="${min}" max="${max}" value="${esc(date)}"></label>
@@ -598,6 +604,7 @@ export function openGoalSheet() {
       sheetEl = el;
       el.addEventListener('change', (e) => {
         if (e.detail?.name === 'pn-goal-dist') { dist = String(e.detail.value); refresh(); return; }
+        if (e.detail?.name === 'pn-goal-where') { where = e.detail.value === 'cinta' ? 'cinta' : 'calle'; return; }
         if (e.target?.id === 'pn-goal-date' && e.target.value) { date = e.target.value; refresh(); }
       });
       el.addEventListener('input', (e) => {

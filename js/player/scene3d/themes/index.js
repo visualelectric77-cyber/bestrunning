@@ -16,6 +16,8 @@ export const THEMES = [
   { id: 'cordillera', name: 'Cordillera', description: 'Tu clase como una cordillera nocturna: cada intervalo, una cumbre.', loader: () => import('./cordillera.js') },
   { id: 'estadio', name: 'Estadio', description: 'Pista de atletismo de noche con luces de ritmo a tu velocidad.', loader: () => import('./estadio.js') },
   { id: 'blank', name: 'Grafito', description: 'Suelo de grafito y horizonte limpio. Sobrio y el más ligero.', loader: () => import('./blank.js') },
+  { id: 'carrera', name: 'Carrera', description: 'Gran carrera de ciudad de noche: salida, arcos de cada kilómetro y meta con tu tiempo.', hidden: true, loader: () => import('./carrera.js') },
+  { id: 'halloween', name: 'Noche de Halloween', description: 'Un camino entre calabazas encendidas bajo la luna llena.', hidden: true, loader: () => import('./halloween.js') },
   { id: 'legacy', name: 'Hypertrack v1', description: 'Autopista de neón original (oculta).', hidden: true, loader: () => import('./legacy.js') },
 ];
 

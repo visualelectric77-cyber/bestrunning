@@ -4,6 +4,8 @@ import { haptic } from '../core/haptics.js';
 import { icon, navBar, enableCollapsingHeader, workoutCard, chip, segmented, emptyState, photo } from '../ui/components.js';
 import { CATEGORIES, TEMPLATES, templatesFor } from '../training/templates.js';
 import { buildWorkout, workoutId } from '../training/generator.js';
+import { buildRaceWorkout, raceSpeedFor } from '../training/race.js';
+import { goalOf } from '../training/goal.js';
 import { todayKey, esc, hashStr, debounce } from '../core/utils.js';
 
 const DURATIONS = [20, 30, 45, 60];
@@ -30,7 +32,7 @@ const hrefFor = (w) => `#/workout/${encodeURIComponent(w.id)}?from=library`;
 
 function visibleCats(state) {
   const hasIncline = !!state.treadmill?.hasIncline;
-  return Object.keys(CATEGORIES).filter((k) => k !== 'hills' || hasIncline);
+  return Object.keys(CATEGORIES).filter((k) => k !== 'race' && (k !== 'hills' || hasIncline)); // las carreras tienen su propia fila
 }
 
 function validCat(cat, state) {
@@ -120,6 +122,7 @@ const BANNER = {
   recovery: ['cat-recovery', '72% 30%'],
   challenge: ['hero-man', '58% 55%'],
   test: ['cat-tempo', '42% 28%'],
+  race: ['hero-man', '50% 40%'],
 };
 const bannerImg = (k) => {
   const [name, pos] = BANNER[k] || ['hero-man', '58% 55%'];
@@ -136,6 +139,27 @@ function featured(state, minutes) {
     <h2 class="list-header lb-featured__label">Destacada de hoy</h2>
     ${workoutCard(w, { variant: 'hero', href: hrefFor(w), photo: true })}
   </section>`;
+}
+
+/** Carreras en la cinta (5K, 10K, 15K y media) al ritmo de tu objetivo o de tu marca prevista. */
+function raceSection(state) {
+  const g = goalOf(state);
+  const ws = ['5k', '10k', '15k', '21k'].map((k) => {
+    const v = raceSpeedFor(k, { targetSec: g && g.distance === k ? g.targetSec : null, levels: state.levels });
+    return v ? buildRaceWorkout(k, { speed: v, levels: state.levels, weightKg: Number(state.profile?.weightKg) || 78 }) : null;
+  }).filter(Boolean);
+  if (!ws.length) return '';
+  const c = CATEGORIES.race;
+  return `<section class="lb-section" aria-label="${esc(c.name)}">
+        <div class="lb-banner" data-cat="race">
+          ${bannerImg('race')}
+          <div class="lb-banner__text">
+            <h2 class="lb-section__title">Carreras<span class="lb-section__count num">${ws.length}</span></h2>
+          </div>
+        </div>
+        <p class="lb-section__desc">${esc(c.description)}</p>
+        <div class="hscroll lb-carousel">${ws.map(tile).join('')}</div>
+      </section>`;
 }
 
 function allView(state, minutes) {
@@ -160,7 +184,7 @@ function allView(state, minutes) {
   if (!sections.length) {
     return emptyState({ icon: 'grid', title: 'Sin clases para esta duración', text: 'Prueba con otra duración.' });
   }
-  return featured(state, minutes) + sections.join('');
+  return featured(state, minutes) + raceSection(state) + sections.join('');
 }
 
 function categoryView(state, cat, minutes) {

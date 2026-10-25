@@ -2,8 +2,8 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.8.5';
-const BUILD = '3ecba28dd3';
+const VERSION = '1.9.0';
+const BUILD = 'b4d5396b57';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
@@ -80,6 +80,12 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/aurora/sky.js',
   './js/player/scene3d/themes/aurora/tags.js',
   './js/player/scene3d/themes/blank.js',
+  './js/player/scene3d/themes/carrera.js',
+  './js/player/scene3d/themes/carrera/arches.js',
+  './js/player/scene3d/themes/carrera/city.js',
+  './js/player/scene3d/themes/carrera/common.js',
+  './js/player/scene3d/themes/carrera/graphics.js',
+  './js/player/scene3d/themes/carrera/runners.js',
   './js/player/scene3d/themes/cordillera.js',
   './js/player/scene3d/themes/cordillera/glsl.js',
   './js/player/scene3d/themes/cordillera/profile.js',
@@ -90,6 +96,12 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/estadio/shaders.js',
   './js/player/scene3d/themes/estadio/stadium.js',
   './js/player/scene3d/themes/estadio/track.js',
+  './js/player/scene3d/themes/halloween.js',
+  './js/player/scene3d/themes/halloween/common.js',
+  './js/player/scene3d/themes/halloween/forest.js',
+  './js/player/scene3d/themes/halloween/ground.js',
+  './js/player/scene3d/themes/halloween/pumpkins.js',
+  './js/player/scene3d/themes/halloween/sky.js',
   './js/player/scene3d/themes/index.js',
   './js/player/scene3d/themes/legacy.js',
   './js/player/scene3d/themes/legacy/gates.js',
@@ -124,6 +136,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/training/planner.js',
   './js/training/progression.js',
   './js/training/race-predict.js',
+  './js/training/race.js',
   './js/training/readiness.js',
   './js/training/season.js',
   './js/training/stats.js',
@@ -161,10 +174,14 @@ const ASSETS = /*ASSETS:START*/[
   './assets/scenes/aurora.jpg',
   './assets/scenes/blank-poster.jpg',
   './assets/scenes/blank.jpg',
+  './assets/scenes/carrera-poster.jpg',
+  './assets/scenes/carrera.jpg',
   './assets/scenes/cordillera-poster.jpg',
   './assets/scenes/cordillera.jpg',
   './assets/scenes/estadio-poster.jpg',
   './assets/scenes/estadio.jpg',
+  './assets/scenes/halloween-poster.jpg',
+  './assets/scenes/halloween.jpg',
   './audio/manifest.json',
   './audio/music/library.json',
   './audio/packs/eva/index.json',

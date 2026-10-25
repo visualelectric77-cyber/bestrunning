@@ -624,12 +624,20 @@ function buildPackSchedule(workout, opts, base, avail) {
   const picker = createPicker(rng);
   const clipSec = typeof pack?.clipSec === 'function' ? pack.clipSec : null;
   const isTest = !!workout?.isTest || segs.some((s) => s.stage > 0);
-  const category = String(opts?.category ?? workout?.category ?? '');
+  const category = String(opts?.category ?? (workout?.event === 'halloween' ? 'halloween' : workout?.category) ?? '');
   const { starts, total } = startsOf(segs);
   const { trans, fixedTimes, nextFixedAfter } = transitionsOf(segs, starts, total, lead);
   const segAt = (t) => indexAt(starts, segs, t);
   const has = (id) => !!id && avail.has(id);
-  const cc = (kind, vars = {}, pf = picker.pick) => composeCue(kind, vars, { pick: pf, available: avail });
+  // Halloween: los ánimos de los tramos duros y el final hablan de la noche (si el pack los tiene; si no, los de siempre)
+  const spooky = workout?.event === 'halloween';
+  const cc = (kind, vars = {}, pf = picker.pick) => {
+    if (spooky && ((kind === 'motivation' && vars.hard) || kind === 'finish')) {
+      const h = composeCue(kind === 'finish' ? 'halloweenFinish' : 'halloween', {}, { pick: pf, available: avail });
+      if (h) return h;
+    }
+    return composeCue(kind, vars, { pick: pf, available: avail });
+  };
   const seqSec = (ids) => ceil1(clipSequenceSec(ids, clipSec));
   const ttsSec = (text) => ceil1(estimateCueSec(text));
   const tts = (kind, segIndex) => {
@@ -964,6 +972,8 @@ const PACK_SAY = {
   hydration: ['hydration', {}], halfWorkout: ['halfWorkout', {}], lastBlock: ['lastBlock', {}], halfSegment: ['halfSegment', {}],
   last30: ['last30', {}], last10: ['last10', {}], cooldown: ['cooldown', {}], recover: ['recover', {}], watch: ['watch', {}],
   testPrompt: ['testPrompt', {}],
+  raceLine: ['raceLine', {}], raceStart: ['raceStart', {}], raceHalf: ['raceHalf', {}], raceLastKm: ['raceLastKm', {}],
+  raceFinish: ['raceFinish', {}], halloween: ['halloween', {}], halloweenFinish: ['halloweenFinish', {}],
 };
 
 /**

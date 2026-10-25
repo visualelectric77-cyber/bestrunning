@@ -488,7 +488,7 @@ function computeWeek(state, W, cache, adapt) {
         const fl = famLast.get(m.family);
         const famFresh = !fl || daysBetween(fl, d.date) > 14;
         if (d.event) {
-          if (t.event === d.event.key) s += 14;
+          if (t.event === d.event.key) s += t.event === 'halloween' ? 30 : 14; // Halloween: siempre su clase, aunque el día toque suave
           else if (d.event.families.includes(m.family) || m.themes.some((x) => d.event.themes.includes(x))) s += 4;
         } else if (d.surprise) {
           s += themeHit || famHit ? -3 : 1.5;
@@ -746,7 +746,7 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
     templateId = fallbackPick(state, dateKey, minutes, { family: m.family, intensity: m.intensity });
   }
   const g = def.race && !isOverride ? goalOf(state) : null;
-  const race = g ? { distance: g.distance, label: goalDistance(g.distance).label, km: goalDistance(g.distance).km, date: g.date, targetSec: g.targetSec } : null;
+  const race = g ? { distance: g.distance, label: goalDistance(g.distance).label, km: goalDistance(g.distance).km, date: g.date, targetSec: g.targetSec, where: g.where } : null;
   return {
     date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info, race,
     role: kind === 'rest' ? null : def.role ? ROLE_NAME[def.role] : 'easy',

@@ -25,6 +25,24 @@ const BY_CATEGORY = {
 
 const isScene = (id) => typeof id === 'string' && SCENE_IDS.includes(id);
 
+/** Mundos especiales (ocultos en Ajustes): la carrera del objetivo y los eventos de temporada con escenario propio. */
+export const SPECIAL_SCENES = { carrera: 'Carrera', halloween: 'Noche de Halloween' };
+const EVENT_SCENE = { halloween: 'halloween' };
+const isSpecial = (id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SPECIAL_SCENES, id);
+
+/**
+ * Mundo especial de una clase o null: la carrera (workout.race o categoría 'race') va siempre en la Carrera y las clases
+ * de evento con escenario propio, en el suyo (Halloween). Mandan sobre el escenario de siempre; solo la elección hecha
+ * en Preparación para esa clase los cambia.
+ */
+export function specialTheme(workout) {
+  const w = workout && typeof workout === 'object' ? workout : null;
+  if (!w) return null;
+  if (w.race || w.category === 'race') return { id: 'carrera', reason: 'tu día de carrera' };
+  const ev = typeof w.event === 'string' ? EVENT_SCENE[w.event] : null;
+  return ev ? { id: ev, reason: 'especial de Halloween' } : null;
+}
+
 /**
  * Escenario que corresponde a una clase.
  * @param {{ category?: string, isTest?: boolean, templateId?: string } | null} workout
@@ -57,6 +75,10 @@ export function autoTheme(workout, fallback = BASE_THEME) {
  * @returns {{ id: string, auto: boolean, reason: string }}
  */
 export function resolveTheme(pref, workout, override = null) {
+  if (isSpecial(override)) return { id: override, auto: false, reason: '' };
+  const sp = specialTheme(workout);
+  if (sp && !isScene(override) && override !== AUTO_THEME) return { id: sp.id, auto: true, reason: sp.reason };
+  if (sp && override === AUTO_THEME) return { id: sp.id, auto: true, reason: sp.reason };
   const choice = override === AUTO_THEME || isScene(override) ? override : (pref === AUTO_THEME || isScene(pref) ? pref : AUTO_THEME);
   if (choice !== AUTO_THEME) return { id: choice, auto: false, reason: '' };
   const a = autoTheme(workout, isScene(pref) ? pref : BASE_THEME);

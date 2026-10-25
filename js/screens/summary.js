@@ -237,10 +237,15 @@ export function mount(el, { params = {} } = {}) {
                 : ring({ value: pct, size: 18, stroke: 2.5, track: 'var(--surface-3)' })}<span>${esc(status)}</span></div>
               <h1 class="sm-hero__title">${esc(s.title || 'Entrenamiento')}</h1>
               <p class="sm-hero__sub">${esc(sub)}</p>
-              <div class="sm-hero__big sm-stat" data-count="${Number(km)}" data-kind="km" data-final="${esc(fmt.km(km))}">
+              ${s.race && Number(s.race.sec) > 0
+                ? `<div class="sm-hero__big sm-stat" data-count="${Number(s.race.sec)}" data-kind="clock" data-final="${esc(fmt.clock(s.race.sec))}">
+                <span class="sm-hero__num">${esc(fmt.clock(s.race.sec))}</span>
+                <span class="sm-hero__unit">Tu ${esc(s.race.label || '')} · ${esc(fmt.pace(Number(s.race.km) / (Number(s.race.sec) / 3600)))} /km</span>
+              </div>`
+                : `<div class="sm-hero__big sm-stat" data-count="${Number(km)}" data-kind="km" data-final="${esc(fmt.km(km))}">
                 <span class="sm-hero__num">${esc(fmt.km(km))}</span>
                 <span class="sm-hero__unit">Kilómetros</span>
-              </div>
+              </div>`}
               ${badges.length ? `<div class="sm-badges">${badges.map((b) => `<span class="sm-badge${b.record ? '' : ' is-muted'}">${icon(b.icon, 15)}${esc(b.text)}</span>`).join('')}</div>` : ''}
             </section>
             </div>
