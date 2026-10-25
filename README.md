@@ -1,48 +1,54 @@
-# BestRunning
+<p align="center"><img src="assets/icons/icon-512.png" width="120" alt="RITMUP"></p>
 
-**Tu entrenador personal de cinta.** BestRunning es una app web progresiva (PWA) para entrenar en cinta de
-correr con el iPhone: clases guiadas con un coach de voz que te avisa de cada cambio de velocidad, música
-electrónica mezclada a tu ritmo, escenarios 3D a pantalla completa con rótulos de retransmisión y un plan
-semanal que se adapta a ti.
+# RITMUP
 
-Funciona sin conexión, no tiene servidor ni cuentas y todos tus datos se quedan en tu iPhone. Está pensada para
-el iPhone 18 Pro Max (Safari / iOS 26), en vertical y en horizontal, y también se ve en la tele por AirPlay.
+**Tu cinta, a otro ritmo.** Clases guiadas para correr en cualquier cinta, la de tu gimnasio o la de casa, con coach
+de voz, música que cambia contigo, mundos 3D, tu Apple Watch y la IA de tu iPhone.
 
-## Qué incluye
+- **Web (PWA):** https://visualelectric77-cyber.github.io/bestrunning/
+- **App de iPhone y Apple Watch:** en revisión en la App Store (muy pronto).
 
-**Entrenar**
-- **Plan semanal personalizado**: de lunes a viernes 20 min, el jueves una sesión larga (45–60 min) y un día
-  largo el fin de semana. Ciclos de 4 semanas (Base → Construcción → Pico → Descarga + Test VAM).
-- **Más de 30 clases**: intervalos, tempo, resistencia, fartlek, cuestas, recuperación, retos y el **Test VAM**
-  por escalones (termina con «No puedo más» y recalcula tus velocidades).
-- **Tus cuatro marchas** (trotar 8,3 · correr 10,1 · rápido 11,5 · sprint 13,0 km/h de partida) suben poco a
-  poco según cómo te sienten las sesiones. Si te saltas tramos o terminas antes, la app no te sube de nivel.
+> El repositorio y la dirección conservan el nombre antiguo del proyecto («bestrunning») a propósito: la app nativa
+> carga esta web desde esa dirección.
 
-**Durante la clase**
-- **HUD de retransmisión**: velocidad gigante y nítida, zona en su color, cuenta atrás del tramo, «Siguiente»,
-  mini perfil de la clase, distancia, kcal y zona de pulso objetivo. Los controles aparecen al tocar la pantalla.
-  Los momentos (KM, MITAD, SERIE 3/8, RÉCORD) entran como rótulos discretos arriba a la derecha.
-- **Escenarios 3D** (Perfil → Pantalla de entreno → Escenario): **Aurora** (recomendado), **Cordillera** (cada
-  intervalo es una cumbre que ves venir), **Estadio** (pista de atletismo con luces de ritmo) y **Grafito**
-  (el más ligero). El mundo se mueve a la velocidad real de tu cinta. Calidad Auto/Alta/Ahorro/Sin 3D.
-- **Coach de voz** «Eva» (voz grabada) que avisa 10 s antes de cada cambio, con cuenta atrás 3-2-1 y pitidos.
-  Si falta alguna grabación, usa la voz del iPhone.
-- **Música DJ BestRunning**: electrónica elegida por BPM para cada tramo y mezclada a compás en cada cambio.
-  También puedes usar tu Spotify o Apple Music («Mi música»).
-- **Modo TV** para AirPlay: aún más mínimo (velocidad, zona, cuenta atrás y siguiente).
-- **Luces de tu récord**: si ya hiciste esa clase, una hilera de luces en el suelo corre a ritmo de tu mejor sesión; al superarla se vuelve dorada, y el chip te dice si vas por delante («+35 m») o por detrás.
+## Qué hace
 
-**Después**
-- **Resumen**: anillo de cumplimiento, plan frente a real (los tramos saltados aparecen atenuados), tiempo por
-  zonas, sensaciones, récords y logros, música que sonó y tarjeta para compartir.
-- **Pulso del Apple Watch**: un Atajo lee de Salud el pulso de la sesión y lo pinta sobre el perfil (una web no
-  puede leer el reloj en directo).
-- **Progreso**: semana, kilómetros, horas, rachas, calendario, evolución de velocidades, VO₂máx estimado.
-- **Copia de seguridad** de todos tus datos en un archivo JSON (Perfil → Datos).
+- **Una coach que te guía**: Lucía te habla durante toda la clase y te avisa 10 segundos antes de cada cambio, con
+  cuenta atrás 3-2-1. **Tú marcas la velocidad**: RITMUP no se conecta a la cinta, así que funciona con cualquiera.
+- **Más de 100 clases**: intervalos, tempo, cuestas, fartlek, recuperación, retos y un test para calcular tus
+  velocidades.
+- **Música DJ**: electrónica elegida por ritmo para cada tramo y mezclada a compás en cada cambio. También con tu
+  Spotify, Apple Music o un vídeo de YouTube (beta).
+- **Mundos 3D** (Aurora, Cordillera, Estadio) que corren a la velocidad de tu cinta, y tu récord corriendo contigo.
+- **Apple Watch**: pulso en directo, modo por pulso (si se dispara, te baja el ritmo) y la clase en la muñeca.
+- **IA en tu iPhone, sin nube** (Apple Intelligence): cómo llegas hoy, consejo antes de empezar, resumen de la clase e
+  informe semanal.
+- **Un plan hasta tu carrera**: semana a semana hasta tu 5K, 10K o media maratón.
+- **Todo conectado**: Isla Dinámica, pantalla de bloqueo, widget, Siri y Apple Salud.
+- **Tus datos son tuyos**: sin cuentas, sin anuncios, sin rastreo. Todo se guarda en el iPhone
+  ([privacidad](https://visualelectric77-cyber.github.io/bestrunning/legal/privacidad.html)).
 
-Capturas y vídeo de la versión final (solo en tu disco, no se suben a GitHub): `docs/capturas/final/`.
+## Cómo está hecha
 
-## Probarla en el ordenador
+RITMUP la ha dirigido **Nacho Garcia** (año y medio haciendo vibecoding, sin escribir código a mano) y todo el
+código, el diseño y las pruebas los ha escrito **[Claude Code](https://claude.com/claude-code) con Claude Opus 5.5**.
+Del primer prototipo a enviarla a la App Store: 7 días, 39 versiones de la web y 14 builds de la app nativa.
+
+Son dos piezas:
+
+| Pieza | Qué es | Dónde |
+|---|---|---|
+| **Web (PWA)** | Toda la experiencia de clase: coach, motor DJ, mundos 3D (three.js), plan, progreso. HTML, CSS y JavaScript sin dependencias ni compilación; funciona sin conexión. | Este repositorio |
+| **App nativa** | Swift / SwiftUI para iPhone y Apple Watch: carga esta web y añade HealthKit, el pulso del reloj en directo, Live Activities (Isla Dinámica), widgets, Siri y la IA del iPhone (Foundation Models). | Repositorio privado |
+
+Hay pruebas automáticas para el motor de la clase, el audio, la música, el plan, el pulso y la IA
+(`tools/test-*.mjs`, millones de comprobaciones).
+
+*RITMUP no está afiliada a Anthropic ni a Apple. No es un dispositivo médico.*
+
+## Desarrollo
+
+### Probarla en el ordenador
 
 No hace falta instalar nada más que [Node.js](https://nodejs.org) (versión 18 o superior):
 
@@ -71,7 +77,7 @@ OfflineAudioContext una Pirámide 20′ (a 48 kHz, como el iPhone), unos Bloques
 (red lenta, decodificación lenta, JS dormido, reloj parado) con el plan y el motor reales y mide huecos, clics, baches
 relativos y sonoridad (informe y WAV de 3 cambios en `docs/audio-tests/`; `transiciones.mp3` para escucharlos).
 
-## Antes de publicar (cada vez que cambies algo)
+### Antes de publicar (cada vez que cambies algo)
 
 ```bash
 node tools/check-imports.mjs                     # todos los imports existen
@@ -83,78 +89,6 @@ node tools/precache.mjs --bump patch             # nueva versión y lista offlin
 saltes el precache**: si no, los iPhone que ya tengan la app instalada seguirán con la versión anterior. Al abrir la
 app aparecerá «Nueva versión disponible · Toca para actualizar» (nunca a mitad de un entrenamiento).
 
-## Publicarla en GitHub Pages, paso a paso
-
-1. **Crea el repositorio.** Entra en [github.com](https://github.com) (crea una cuenta si no la tienes) →
-   botón **New** → nombre `bestrunning` → **Public** → *sin* README, .gitignore ni licencia → **Create
-   repository**.
-   - Con una cuenta gratuita, GitHub Pages solo funciona con repositorios **públicos**: el código se puede ver,
-     pero tus entrenamientos **nunca** se suben (viven solo en el iPhone). Con GitHub Pro también vale privado.
-2. **Sube el proyecto** desde la Terminal del Mac, dentro de la carpeta (el `.gitignore` ya deja fuera los
-   `._*` del disco externo, las fuentes de música, las tomas de voz, las capturas y `.claude/`):
-
-   ```bash
-   cd /Volumes/PortableSSD/BESTRUNING
-   git init
-   git add .
-   git commit -m "BestRunning 1.1.0"
-   git branch -M main
-   git remote add origin https://github.com/<tu-usuario>/bestrunning.git
-   git push -u origin main
-   ```
-
-   La primera subida tarda un poco (unos 260 MB, casi todo la música: 55 pistas, 246 MB). Si `git push` pide contraseña, usa un
-   *token* de GitHub (Settings → Developer settings → Personal access tokens) o instala
-   [GitHub Desktop](https://desktop.github.com).
-3. **Activa Pages.** En el repositorio: **Settings** → **Pages** → *Build and deployment* → *Source*: **Deploy
-   from a branch** → rama **main**, carpeta **/ (root)** → **Save**.
-4. **Espera 1–2 minutos** (pestaña **Actions** para ver el progreso). Tu app estará en
-   `https://<tu-usuario>.github.io/bestrunning/`.
-
-Todas las rutas son relativas y hay un `.nojekyll`, así que funciona tal cual dentro de la subcarpeta.
-
-Para publicar cambios más adelante: los tres comandos de «Antes de publicar» y después
-
-```bash
-git add .
-git commit -m "Nueva versión"
-git push
-```
-
-## Instalarla en el iPhone
-
-1. Abre la dirección de tu app en **Safari** (tiene que ser Safari).
-2. Pulsa **Compartir** (el cuadrado con la flecha) → **Añadir a pantalla de inicio** → **Añadir**.
-3. Abre BestRunning desde el icono: pantalla completa, como una app nativa, y sin conexión.
-4. La primera vez, con wifi, deja la app abierta un minuto: descarga la voz de Eva para usarla sin conexión. La
-   música se guarda al escucharla o con **Perfil → Música → Descargar música para usar sin conexión**.
-
-Consejos para entrenar:
-- **Bloqueo automático en «Nunca»** (Ajustes → Pantalla y brillo) mientras entrenas: la app intenta mantener la
-  pantalla encendida, pero iOS puede apagarla.
-- Con **Música DJ**, el coach se oye aunque el iPhone esté en silencio. Con **Mi música** (Spotify/Apple Music)
-  quita el modo silencio para oír al coach.
-- Al empezar, inicia en el Apple Watch el entrenamiento **Cinta de correr**; al terminar puedes importar el
-  pulso desde el resumen (la app te guía para instalar el Atajo).
-
-## Voz grabada con ElevenLabs (opcional)
-
-La voz «Eva» está grabada con [ElevenLabs](https://elevenlabs.io) (voz Eva Dorado) y vive en
-`audio/packs/eva/`. El guion completo está en `js/audio/voice-pack.js`. Para generar las frases que faltan:
-
-```bash
-pbpaste > ~/.config/bestrunning/elevenlabs.key        # tu clave de la API (nunca se escribe en el proyecto)
-node tools/voice/generate-pack.mjs --dry-run           # cuenta caracteres: no gasta créditos
-node tools/voice/generate-pack.mjs --style v3          # genera solo lo que falta (gasta créditos)
-node tools/voice/generate-pack.mjs --style v3 --only countdown_1 --force   # regrabar una frase
-node tools/precache.mjs --bump patch
-```
-
-Pendiente ahora mismo: unos 55 clips del guion (saludos de inicio por tipo de clase, km 9–12, escalones 13–16,
-algunas duraciones, la frase final para sesiones no completadas `finishpartial_*`) y regrabar `countdown_1`
-(dice «Dos, uno… ¡vamos!», falta «Tres»). Mientras tanto la app los sustituye por frases equivalentes o calla.
-Si grabas tomas largas en la web de ElevenLabs, `python3 tools/voice/split-takes.py` las corta en clips y las
-verifica con whisper. Más detalles en [`docs/VOCES.md`](docs/VOCES.md).
 
 ## Música DJ
 
@@ -186,6 +120,7 @@ Agrupadas por tramo según su BPM medido:
 - **Sprint** (12): [BHAIRAV (Psytrance)](https://pixabay.com/music/techno-trance-bhairav-166323/) — BUZZPSY · [Dancing in Goa](https://pixabay.com/music/techno-trance-dancing-in-goa-236476/) — TwoWingbeats · [Hard core Techno](https://pixabay.com/music/techno-trance-hard-core-techno-380591/) — DJDoblina · [Modern Drum And Bass](https://pixabay.com/music/drum-n-bass-modern-drum-and-bass-592435/) — BerryDeep · [Hard Aggressive Techno](https://pixabay.com/music/techno-trance-hard-aggressive-techno-421103/) — DELOSound · [Rapid Drum and Bass](https://pixabay.com/music/drum-n-bass-rapid-drum-and-bass-full-369486/) — catch22music · [Drum & Bass](https://pixabay.com/music/drum-n-bass-drum-amp-bass-dnb-music-dampb-drum-and-bass-488391/) — Watermello · [Information Flow (Liquid Jungle Breakbeat DnB)](https://pixabay.com/music/drum-n-bass-information-flow-liquid-jungle-breakbeat-drum-and-bass-358432/) — Musinova · [Jump Up (Sport Drum&Bass)](https://pixabay.com/music/drum-n-bass-jump-up-sport-drumampbass-425803/) — ArtIssizm · [Plastique (174 bpm a#min)](https://pixabay.com/music/beats-plastique-174-bpm-amin-4487/) — tobylane · [The Portal](https://pixabay.com/music/techno-trance-rizzlas-the-portal-224647/) — Rizzlas · [TwinFish – Pivot (Drum and Bass)](https://pixabay.com/music/drum-n-bass-twinfish-pivot-drum-and-bass-326341/) — TwinFishAudio
 
 Artistas (42): -SunSet-, 14584889, arnaud136, ARPMedia, ArtIssizm, BerryDeep, BUZZPSY, catch22music, CONATHOR, deep_house_music, DELOSound, DJDoblina, DjFunkyPharmacist, Dubdown, Eliveta, hasenchat, klavo85, Kromaspere, Lone_Wolf_Productions, MC_QUATTRO, MeditativeTiger, Musinova, NverAvetyanMusic, PaulYudin, Placidplace, prettyjohn1, PWLPL, Rizzlas, Rockot, Saturn-3-Music, SoundReality, tAUREON, The_Mountain, ThisIsBeatKitchen, tobylane, Tunetank, TwinFishAudio, TwoWingbeats, van_Wiese, VifotoFreeSounds, Watermello, WELC0MEИ0.
+
 
 ## Estructura del proyecto
 
