@@ -5,7 +5,7 @@
 // En Safari todo es inerte: isNative() es false, post() devuelve false y attachPlayer() da un adaptador vacío.
 // Importar el módulo no tiene efectos: nada se engancha hasta initNativeBridge() (app.js, solo en la app nativa).
 // Sin DOM ni UI: la fábrica createNativeBridge() se prueba en Node (tools/test-native-bridge.mjs).
-import { clamp, round1, todayKey, addDays, weekdayOf, capitalize, fmt } from '../core/utils.js';
+import { clamp, round1, todayKey, addDays, mondayOf, weekdayOf, capitalize, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, hrZones, hrMaxFromAge, hrTargetForZone } from '../training/levels.js';
 import { hrFromSamples, hrFieldsFrom, hrAtLevels, hasHrSeries, HR_MIN, HR_MAX } from './watch-hr.js';
 import { diagMark } from '../core/diag.js';
@@ -231,8 +231,8 @@ const defaultTimers = {
   setInterval: (fn, ms) => setInterval(fn, ms),
   clearInterval: (t) => clearInterval(t),
 };
-const defaultLibs = () => Promise.all([import('../training/planner.js'), import('../training/templates.js')])
-  .then(([planner, templates]) => ({ planner, templates }));
+const defaultLibs = () => Promise.all([import('../training/planner.js'), import('../training/templates.js'), import('../training/goal.js')])
+  .then(([planner, templates, goal]) => ({ planner, templates, goal }));
 
 /**
  * Puente (fábrica pura para los tests; la app usa la instancia por defecto).
@@ -625,6 +625,27 @@ export function createNativeBridge(opts = {}) {
     t.weekPlanned = week.filter((d) => d?.workout && d.kind !== 'rest').length;
     t.reminder = st.schedule?.reminderTime ? String(st.schedule.reminderTime) : null;
     t.hrZones = hrZonesSpec(st.profile);
+    // Esferas del reloj: km y minutos corridos desde el lunes, y la carrera objetivo (cuenta atrás)
+    const monday = mondayOf(t.date);
+    let wKm = 0, wSec = 0;
+    for (const h of Array.isArray(st.history) ? st.history : []) {
+      const k = String(h?.dayKey || '');
+      if (k < monday || k > t.date) continue;
+      wKm += num(h.distanceKm); wSec += num(h.elapsedSec);
+    }
+    t.weekKm = r3(wKm);
+    t.weekMinutes = int(wSec / 60);
+    t.goal = null;
+    try {
+      const g = L.goal?.goalOf?.(st);
+      if (g && g.date >= t.date) {
+        const wi = L.goal.goalWeekInfo?.(g, t.date);
+        t.goal = {
+          distance: g.distance, label: L.goal.goalDistance?.(g.distance)?.label || g.distance.toUpperCase(), date: g.date,
+          targetSec: g.targetSec ?? null, where: g.where, week: wi?.weekOfBlock ?? null, weeks: wi?.blockWeeks ?? null,
+        };
+      }
+    } catch { t.goal = null; /* sin cuenta atrás, pero «hoy» llega igual */ }
     return t;
   }
 

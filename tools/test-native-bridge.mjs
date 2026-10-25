@@ -57,7 +57,8 @@ const SCHEMA = {
     date: 'str', status: 'str', classId: opt('str'), href: opt('str'), title: opt('str'), category: opt('str'),
     categoryLabel: opt('str'), categoryColor: opt('str'), minutes: opt('int'), estKm: opt('num'), recordKm: opt('num'),
     segments: arr(SEG), next: opt({ label: 'str', minutes: opt('int'), title: opt('str') }), weekDone: 'int', weekPlanned: 'int',
-    reminder: opt('str'), hrZones: arr(HRZ),
+    reminder: opt('str'), hrZones: arr(HRZ), weekMinutes: opt('int'), weekKm: opt('num'),
+    goal: opt({ distance: 'str', label: 'str', date: 'str', targetSec: opt('int'), where: 'str', week: opt('int'), weeks: opt('int') }),
   },
   'class.ready': {
     classId: 'str', title: 'str', category: opt('str'), categoryLabel: opt('str'), categoryColor: opt('str'), minutes: opt('int'),
@@ -136,7 +137,7 @@ const HAPTIC_STYLES = ['light', 'medium', 'heavy', 'soft', 'rigid', 'selection',
 const ID_REQUIRED = new Set(['cmd', 'workout.summary', 'backup.get']);
 // Decimales máximos (§3.1): km/h 1 · km 3 · left/elapsed/remaining 1 · volumen 2
 const DECIMALS = {
-  today: { 'segments[].kmh': 1, estKm: 3, recordKm: 3 },
+  today: { 'segments[].kmh': 1, estKm: 3, recordKm: 3, weekKm: 3 },
   'class.ready': { firstKmh: 1, recordKm: 3 },
   'class.start': { 'segments[].kmh': 1, 'record.bestKm': 3 },
   state: { 'seg.kmh': 1, 'seg.left': 1, 'seg.adj': 1, 'next.kmh': 1, elapsed: 1, remaining: 1, km: 3, avgKmh: 1, 'record.bestKm': 3, 'music.volume': 2 },
