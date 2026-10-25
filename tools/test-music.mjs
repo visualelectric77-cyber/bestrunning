@@ -228,11 +228,15 @@ function checkPlan(w, plan, label) {
         if (mem && mem.trackId !== active.trackId) {
           const mt = BY_ID.get(mem.trackId);
           const mg = trackGrid(mt);
-          const rp = Math.max(mg.firstBar, snapToBar(mt, mem.pos));
           const need = Math.min(90, Math.max(30, segs[c.segIndex].sec));
-          const fits = isCandidate(mt, c.targetBpm, c.zone) && (mg.outro - rp) / rateForZone(mt, c.targetBpm, c.zone) >= need - 1e-6;
-          if (fits) must(c.entry === 'resume' && c.trackId === mem.trackId, 'mustResume', `no retoma ${mem.trackId} en ${c.zone} (${label} #${k})`);
-          else must(c.entry !== 'resume', 'noResume', 'retoma una pista agotada');
+          // La posición del plan va redondeada (cues a 4 decimales): si quedó justo entre dos compases, el compás más
+          // cercano puede ser uno u otro. Solo se exige (o se prohíbe) retomar cuando las dos lecturas coinciden.
+          const fitsAt = (p) => (mg.outro - Math.max(mg.firstBar, snapToBar(mt, p))) / rateForZone(mt, c.targetBpm, c.zone) >= need - 1e-6;
+          const cand = isCandidate(mt, c.targetBpm, c.zone);
+          const fitsA = cand && fitsAt(mem.pos - 0.01);
+          const fitsB = cand && fitsAt(mem.pos + 0.01);
+          if (fitsA && fitsB) must(c.entry === 'resume' && c.trackId === mem.trackId, 'mustResume', `no retoma ${mem.trackId} en ${c.zone} (${label} #${k})`);
+          else if (!fitsA && !fitsB) must(c.entry !== 'resume', 'noResume', 'retoma una pista agotada');
         }
         memory[active.zone] = { trackId: active.trackId, pos: cuePosition(active, endT) };
         delete memory[c.zone];
@@ -373,11 +377,11 @@ section('Variedad entre sesiones (pistas de las últimas sesiones)', () => {
     { startedAt: day(7), music: { tracks: ['e'] } },
     { startedAt: day(8), music: { tracks: ['h', 'h'] } },
   ];
-  const ages = recentTracksFromHistory(hist);
-  ok(RECENT_SESSIONS === 5, 'se recuerdan 5 sesiones');
+  const ages = recentTracksFromHistory(hist, 5);
+  ok(RECENT_SESSIONS === 8, 'se recuerdan 8 sesiones');
   ok(ages.get('f') === 0 && ages.get('g') === 0 && ages.get('h') === 1 && ages.get('e') === 2 && ages.get('d') === 3 && ages.get('a') === 3 && ages.get('c') === 4,
     `antigüedad por fecha (${[...ages].map(([k, v]) => `${k}${v}`).join(' ')})`);
-  ok(!ages.has('b'), 'la sexta sesión con música ya no cuenta');
+  ok(!ages.has('b'), 'con n = 5, la sexta sesión con música ya no cuenta');
   ok(recentTracksFromHistory([{ music: { tracks: ['x'] } }, { music: { tracks: ['y'] } }]).get('y') === 0, 'sin fecha: la última del historial es la más reciente');
   ok(recentTracksFromHistory(null).size === 0 && recentTracksFromHistory([{ music: 'nada' }]).size === 0, 'historial vacío o corrupto');
 
@@ -448,7 +452,7 @@ section('Variedad entre sesiones (pistas de las últimas sesiones)', () => {
             forced++;
             const alt = TRACKS.find((t) => !usedBefore.has(t.id) && !recentSet.has(t.id) && t.id !== c.trackId
               && preferred(t, c.zone) && isCandidate(t, c.targetBpm, c.zone));
-            ok(!alt, `${id} s${k}: repite ${c.trackId} (${c.zone}) habiendo ${alt?.id} sin sonar en 5 sesiones`);
+            ok(!alt, `${id} s${k}: repite ${c.trackId} (${c.zone}) habiendo ${alt?.id} sin sonar en ${RECENT_SESSIONS} sesiones`);
           }
         }
         usedBefore.add(c.trackId);

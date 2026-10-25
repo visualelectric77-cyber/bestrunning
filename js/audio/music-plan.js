@@ -27,7 +27,7 @@ export const BEATMIX_MAX_DELTA = 0.06;
 export const SPRINT_NATIVE = [148, 190];
 export const END_FADE_SEC = 8;
 /** Variedad entre sesiones: se evitan las pistas que sonaron en las últimas N sesiones (si hay otras en el tramo). */
-export const RECENT_SESSIONS = 5;
+export const RECENT_SESSIONS = 8;
 /** Penalización por sesión de una pista reciente cuando no queda otra: la de la última sesión pesa más y gana la más antigua. */
 const RECENT_STEP = 2;
 const RESUME_MIN_SEC = 30;

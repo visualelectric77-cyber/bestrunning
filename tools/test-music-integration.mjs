@@ -336,13 +336,17 @@ section('music-library.js · variedad entre sesiones (recentAge desde session.mu
     const at = (d) => `2026-10-${String(d).padStart(2, '0')}T07:00:00.000Z`;
     store.setState((d) => {
       d.history = [
+        // s1 queda justo fuera de la memoria (RECENT_SESSIONS = 8 sesiones con música por delante)
         { id: 's1', startedAt: at(1), music: { tracks: [ids[0]] } },
-        { id: 's2', startedAt: at(2), music: { tracks: [ids[1], { id: ids[2], title: 'x' }] } },
-        { id: 's3', startedAt: at(3), music: { tracks: [] } },
-        { id: 's4', startedAt: at(4), music: { tracks: [ids[3]] } },
-        { id: 's5', startedAt: at(5), music: { tracks: [ids[4]] } },
-        { id: 's6', startedAt: at(6), music: { tracks: [ids[5]] } },
-        { id: 's7', startedAt: at(7), music: { tracks: [ids[6], ids[1]] } },
+        { id: 'e1', startedAt: at(2), music: { tracks: [ids[8]] } },
+        { id: 'e2', startedAt: at(3), music: { tracks: [ids[9]] } },
+        { id: 'e3', startedAt: at(4), music: { tracks: [ids[10]] } },
+        { id: 's2', startedAt: at(5), music: { tracks: [ids[1], { id: ids[2], title: 'x' }] } },
+        { id: 's3', startedAt: at(6), music: { tracks: [] } },
+        { id: 's4', startedAt: at(7), music: { tracks: [ids[3]] } },
+        { id: 's5', startedAt: at(8), music: { tracks: [ids[4]] } },
+        { id: 's6', startedAt: at(9), music: { tracks: [ids[5]] } },
+        { id: 's7', startedAt: at(10), music: { tracks: [ids[6], ids[1]] } },
       ];
     });
     const tracks = await libMod.loadLibrary({ useImported: false });
