@@ -1043,3 +1043,15 @@
 .td-goal__nb { white-space: nowrap; }
 .pn-gsheet .st-row .list__title { white-space: nowrap; }
 .pn-gsheet .st-time { min-width: 0; max-width: 62%; }
+
+/* Salud y entrenos (Progreso) */
+.pg-health { display: flex; flex-direction: column; gap: var(--s-2); }
+.pg-health__title { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); font-size: var(--fs-title3); line-height: var(--lh-title3); font-weight: 700; color: var(--text); }
+.pg-health__dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.pg-health__meta { margin-left: auto; font-size: var(--fs-footnote); font-weight: 500; color: var(--text-2); }
+.pg-health__text { margin: 0; font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--text-2); }
+.pg-health__text b { color: var(--text); }
+.pg-health__gauge { position: relative; height: 8px; margin-top: var(--s-2); border-radius: 4px; background: linear-gradient(90deg, var(--surface-3) 0 33%, var(--surface-4) 33% 66%, var(--surface-3) 66% 100%); }
+.pg-health__gauge i { position: absolute; top: -5px; width: 4px; height: 18px; margin-left: -2px; border-radius: 2px; background: var(--text); }
+.pg-health__scale { display: flex; justify-content: space-between; font-size: var(--fs-caption2); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+.pg-health__foot { margin: 0; padding: 0 var(--s-2); font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-3); }
