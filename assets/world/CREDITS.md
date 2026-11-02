@@ -47,3 +47,13 @@ Los rótulos de Neón (HOTEL, BAR, CINE…) se dibujan en la app. No hay marcas 
 | Halloween | `mud_*` | textura «Forest Floor» |
 | Grafito | `floor_*` | textura «Smooth Concrete Floor» |
 
+
+## Ciudades reales (prototipos ocultos: Berlín, Berlín 10 km y Madrid)
+
+`ciudad/<ruta>/` (`route.json` y los trozos `c<k>.json`): calles, edificios con su altura, parques, fuentes, árboles y
+farolas de **OpenStreetMap**. **© colaboradores de OpenStreetMap**, datos bajo licencia
+[ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/) (https://www.openstreetmap.org/copyright). Estos JSON son
+una base de datos derivada: se publican con la misma licencia ODbL. La escena muestra «© OpenStreetMap» en una esquina.
+Los genera `tools/ciudad/bake.mjs` con las consultas `tools/ciudad/*.overpassql`. Los árboles de parques y bulevares
+que OSM no tiene uno a uno los siembra el script, y las fuentes de Cibeles y Neptuno se ponen a mano.
+Texturas y cielo: los de Neón, Costa y Bosque (CC0, ver arriba). El público y las hojas se dibujan en la app.
