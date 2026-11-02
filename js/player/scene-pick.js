@@ -1,38 +1,42 @@
 // BestRunning · escenario automático según la clase (función pura, sin DOM: la usan Preparación, Ajustes y los tests).
-// Cada tipo de entreno tiene su mundo: cuestas en la Cordillera, series y ritmos en el Estadio, rodajes largos bajo la
-// Aurora y la recuperación en Grafito (el más sereno). Los ids son los de js/player/scene3d/themes/index.js.
+// Cada tipo de entreno tiene su mundo: cuestas en la Cordillera, series en el Túnel, cambios de ritmo en la avenida de
+// Neón, ritmo sostenido en la carretera del Desierto, tests y retos en el Estadio, rodajes largos en la Costa y la
+// recuperación en el Bosque. Aurora es el respaldo. Los ids son los de js/player/scene3d/themes/index.js.
 
 /** Valor guardado en visuals.theme cuando el escenario lo elige la clase. */
 export const AUTO_THEME = 'auto';
 /** Escenarios que se ofrecen (mismo orden que Ajustes → Pantalla de entreno). */
-export const SCENE_IDS = ['aurora', 'cordillera', 'estadio', 'blank'];
+export const SCENE_IDS = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'blank'];
 /** Respaldo cuando ni la clase ni el usuario deciden. */
 export const BASE_THEME = 'aurora';
 
-export const SCENE_NAMES = { aurora: 'Aurora', cordillera: 'Cordillera', estadio: 'Estadio', blank: 'Grafito' };
+export const SCENE_NAMES = {
+  costa: 'Costa', neon: 'Neón', desierto: 'Desierto', tunel: 'Túnel', bosque: 'Bosque',
+  aurora: 'Aurora', cordillera: 'Cordillera', estadio: 'Estadio', blank: 'Grafito',
+};
 
 // categoría → [escenario, por qué] (el porqué se lee «Automático · Estadio — series en pista»)
 const BY_CATEGORY = {
   hills: ['cordillera', 'cuestas en la montaña'],
-  intervals: ['estadio', 'series en pista'],
-  fartlek: ['estadio', 'cambios de ritmo en pista'],
-  tempo: ['estadio', 'ritmo sostenido en pista'],
+  intervals: ['tunel', 'series en el túnel de luz'],
+  fartlek: ['neon', 'cambios de ritmo por la ciudad'],
+  tempo: ['desierto', 'ritmo sostenido bajo las estrellas'],
   test: ['estadio', 'test en pista'],
   challenge: ['estadio', 'reto en pista'],
-  endurance: ['aurora', 'rodaje largo bajo la aurora'],
-  recovery: ['blank', 'recuperación serena'],
+  endurance: ['costa', 'rodaje largo junto al mar'],
+  recovery: ['bosque', 'recuperación entre los árboles'],
 };
 
 const isScene = (id) => typeof id === 'string' && SCENE_IDS.includes(id);
 
 /** Mundos especiales (ocultos en Ajustes): la carrera del objetivo y los eventos de temporada con escenario propio. */
-export const SPECIAL_SCENES = { carrera: 'Carrera', halloween: 'Noche de Halloween' };
-const EVENT_SCENE = { halloween: 'halloween' };
+export const SPECIAL_SCENES = { carrera: 'Carrera', halloween: 'Noche de Halloween', nieve: 'Navidad' };
+const EVENT_SCENE = { halloween: 'halloween', navidad: 'nieve' };
 const isSpecial = (id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SPECIAL_SCENES, id);
 
 /**
  * Mundo especial de una clase o null: la carrera (workout.race o categoría 'race') va siempre en la Carrera y las clases
- * de evento con escenario propio, en el suyo (Halloween). Mandan sobre el escenario de siempre; solo la elección hecha
+ * de evento con escenario propio, en el suyo (Halloween, Navidad). Mandan sobre el escenario de siempre; solo la elección hecha
  * en Preparación para esa clase los cambia.
  */
 export function specialTheme(workout) {
@@ -40,7 +44,7 @@ export function specialTheme(workout) {
   if (!w) return null;
   if (w.race || w.category === 'race') return { id: 'carrera', reason: 'tu día de carrera' };
   const ev = typeof w.event === 'string' ? EVENT_SCENE[w.event] : null;
-  return ev ? { id: ev, reason: 'especial de Halloween' } : null;
+  return ev ? { id: ev, reason: ev === 'nieve' ? 'especial de Navidad' : 'especial de Halloween' } : null;
 }
 
 /**

@@ -2,11 +2,12 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.11.0';
-const BUILD = 'e65e8cbeb4';
+const VERSION = '1.12.0';
+const BUILD = '357ed66806';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
+const WORLD_CACHE = 'br-world'; // cielos y texturas de los escenarios realistas (assets/world/): al elegir cada uno
 const MEDIA_CACHE = 'br-media'; // vídeos de campaña (assets/media/*.mp4): al verlos, con rangos como pide <video> en Safari
 const MEDIA_RE = /\.(m4a|mp4|aac|mp3|wav|ogg|oga|opus|flac|webm)$/i;
 const JSON_TIMEOUT_MS = 4000;
@@ -80,6 +81,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/aurora/sky.js',
   './js/player/scene3d/themes/aurora/tags.js',
   './js/player/scene3d/themes/blank.js',
+  './js/player/scene3d/themes/bosque.js',
   './js/player/scene3d/themes/carrera.js',
   './js/player/scene3d/themes/carrera/arches.js',
   './js/player/scene3d/themes/carrera/city.js',
@@ -91,6 +93,8 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/cordillera/profile.js',
   './js/player/scene3d/themes/cordillera/tags.js',
   './js/player/scene3d/themes/cordillera/terrain.js',
+  './js/player/scene3d/themes/costa.js',
+  './js/player/scene3d/themes/desierto.js',
   './js/player/scene3d/themes/estadio.js',
   './js/player/scene3d/themes/estadio/graphics.js',
   './js/player/scene3d/themes/estadio/shaders.js',
@@ -103,6 +107,9 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/halloween/pumpkins.js',
   './js/player/scene3d/themes/halloween/sky.js',
   './js/player/scene3d/themes/index.js',
+  './js/player/scene3d/themes/kit/firs.js',
+  './js/player/scene3d/themes/kit/runner.js',
+  './js/player/scene3d/themes/kit/world.js',
   './js/player/scene3d/themes/legacy.js',
   './js/player/scene3d/themes/legacy/gates.js',
   './js/player/scene3d/themes/legacy/ghost.js',
@@ -111,6 +118,9 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/legacy/sky.js',
   './js/player/scene3d/themes/legacy/skyline.js',
   './js/player/scene3d/themes/legacy/track.js',
+  './js/player/scene3d/themes/neon.js',
+  './js/player/scene3d/themes/nieve.js',
+  './js/player/scene3d/themes/tunel.js',
   './js/player/scene3d/timeline.js',
   './js/player/scene3d/util.js',
   './js/player/wakelock.js',
@@ -176,14 +186,26 @@ const ASSETS = /*ASSETS:START*/[
   './assets/scenes/aurora.jpg',
   './assets/scenes/blank-poster.jpg',
   './assets/scenes/blank.jpg',
+  './assets/scenes/bosque-poster.jpg',
+  './assets/scenes/bosque.jpg',
   './assets/scenes/carrera-poster.jpg',
   './assets/scenes/carrera.jpg',
   './assets/scenes/cordillera-poster.jpg',
   './assets/scenes/cordillera.jpg',
+  './assets/scenes/costa-poster.jpg',
+  './assets/scenes/costa.jpg',
+  './assets/scenes/desierto-poster.jpg',
+  './assets/scenes/desierto.jpg',
   './assets/scenes/estadio-poster.jpg',
   './assets/scenes/estadio.jpg',
   './assets/scenes/halloween-poster.jpg',
   './assets/scenes/halloween.jpg',
+  './assets/scenes/neon-poster.jpg',
+  './assets/scenes/neon.jpg',
+  './assets/scenes/nieve-poster.jpg',
+  './assets/scenes/nieve.jpg',
+  './assets/scenes/tunel-poster.jpg',
+  './assets/scenes/tunel.jpg',
   './audio/manifest.json',
   './audio/music/library.json',
   './audio/packs/eva/index.json',
@@ -330,6 +352,12 @@ self.addEventListener('fetch', (event) => {
   if (path.startsWith('assets/media/')) {
     if (MEDIA_RE.test(path)) respondMedia(event, MEDIA_CACHE);
     else event.respondWith(cacheFirst(req, MEDIA_CACHE));
+    return;
+  }
+
+  // Escenarios realistas: cielos y texturas cache-first en su propia caché (no se re-descargan con cada versión)
+  if (path.startsWith('assets/world/')) {
+    event.respondWith(cacheFirst(req, WORLD_CACHE));
     return;
   }
 

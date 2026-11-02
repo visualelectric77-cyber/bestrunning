@@ -1,6 +1,6 @@
 // BestRunning · tests del escenario automático según la clase (js/player/scene-pick.js) y su migración en el store.
 // Uso: node tools/test-scene-pick.mjs   (sale con código ≠ 0 si algo falla)
-import { autoTheme, resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES } from '../js/player/scene-pick.js';
+import { autoTheme, resolveTheme, specialTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../js/player/scene-pick.js';
 import { THEMES } from '../js/player/scene3d/themes/index.js';
 import { TEMPLATES } from '../js/training/templates.js';
 import * as store from '../js/core/store.js';
@@ -20,9 +20,12 @@ function section(name, fn) {
 section('mapa categoría → escenario', () => {
   const t = (category, extra = {}) => autoTheme({ category, ...extra }).id;
   ok(t('hills') === 'cordillera', 'cuestas → Cordillera (montaña)');
-  for (const c of ['intervals', 'fartlek', 'tempo', 'test', 'challenge']) ok(t(c) === 'estadio', `${c} → Estadio (pista)`);
-  ok(t('endurance') === 'aurora', 'resistencia → Aurora');
-  ok(t('recovery') === 'blank', 'recuperación → Grafito');
+  ok(t('intervals') === 'tunel', 'series → Túnel');
+  ok(t('fartlek') === 'neon', 'fartlek → Neón');
+  ok(t('tempo') === 'desierto', 'ritmo sostenido → Desierto');
+  for (const c of ['test', 'challenge']) ok(t(c) === 'estadio', `${c} → Estadio (pista)`);
+  ok(t('endurance') === 'costa', 'resistencia → Costa');
+  ok(t('recovery') === 'bosque', 'recuperación → Bosque');
   ok(t('endurance', { isTest: true }) === 'estadio', 'isTest manda (test en pista)');
   ok(autoTheme({ category: 'rara' }, 'cordillera').id === 'cordillera', 'categoría desconocida → escenario del usuario');
   ok(autoTheme({ category: 'rara' }, 'auto').id === 'aurora', 'sin escenario del usuario → Aurora');
@@ -45,6 +48,16 @@ section('todas las plantillas del catálogo tienen un mundo propio', () => {
   ok(n > 20, `catálogo recorrido (${n} plantillas)`);
 });
 
+section('mundos especiales: carrera, Halloween y Navidad', () => {
+  ok(specialTheme({ event: 'navidad' })?.id === 'nieve', 'clase de Navidad → Navidad (nieve)');
+  ok(specialTheme({ event: 'halloween' })?.id === 'halloween', 'clase de Halloween → Noche de Halloween');
+  ok(specialTheme({ category: 'race' })?.id === 'carrera', 'carrera → Carrera');
+  ok(resolveTheme('estadio', { event: 'navidad', category: 'fartlek' }).id === 'nieve', 'el especial manda sobre el escenario de siempre');
+  ok(resolveTheme('estadio', { event: 'navidad' }, 'costa').id === 'costa', 'elegir otro mundo en Preparación lo cambia');
+  const hidden = new Set(THEMES.filter((x) => x.hidden).map((x) => x.id));
+  ok(Object.keys(SPECIAL_SCENES).every((id) => hidden.has(id)), 'los especiales existen y no salen en Ajustes');
+});
+
 section('resolveTheme: preferencia, automático y elección solo para esta clase', () => {
   const hills = { category: 'hills' };
   const r1 = resolveTheme(AUTO_THEME, hills);
@@ -55,8 +68,8 @@ section('resolveTheme: preferencia, automático y elección solo para esta clase
   ok(r3.id === 'cordillera' && r3.auto, 'Automático elegido en Preparación gana a la preferencia');
   const r4 = resolveTheme(AUTO_THEME, hills, 'blank');
   ok(r4.id === 'blank' && !r4.auto, 'un mundo elegido en Preparación gana al automático');
-  ok(resolveTheme('basura', { category: 'recovery' }).id === 'blank', 'preferencia corrupta → automático');
-  ok(resolveTheme(undefined, { category: 'intervals' }, 'legacy').id === 'estadio', 'elección no ofrecida → se ignora');
+  ok(resolveTheme('basura', { category: 'recovery' }).id === 'bosque', 'preferencia corrupta → automático');
+  ok(resolveTheme(undefined, { category: 'intervals' }, 'legacy').id === 'tunel', 'elección no ofrecida → se ignora');
 });
 
 section('store: escenario automático por defecto y migración', () => {

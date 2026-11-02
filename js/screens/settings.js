@@ -600,7 +600,7 @@ const QUALITY_DESC = {
   off: 'Desactivadas: el fondo oscuro clásico con el color de cada zona. Lo más ligero.',
 };
 /** Orden de Ajustes → Escenario: el recomendado primero y Grafito (el más ligero) al final. */
-const SCENE_ORDER = ['aurora', 'cordillera', 'estadio', 'blank'];
+const SCENE_ORDER = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'blank'];
 const SCENES = (() => {
   const list = safe(() => listThemes(), []) || [];
   const rank = (id) => { const i = SCENE_ORDER.indexOf(id); return i < 0 ? SCENE_ORDER.length : i; };
@@ -610,7 +610,7 @@ const SCENES = (() => {
 const AUTO_SCENE = {
   id: AUTO_THEME,
   name: 'Automático',
-  description: 'Cada clase en su mundo: cuestas en la Cordillera, series en el Estadio, rodajes en la Aurora y recuperación en Grafito.',
+  description: 'Cada clase en su mundo: series en el Túnel, cambios de ritmo en Neón, ritmo sostenido en el Desierto, rodajes en la Costa, recuperación en el Bosque y cuestas en la Cordillera.',
 };
 const sceneOf = (id) => (id === AUTO_THEME ? AUTO_SCENE : SCENES.find((t) => t.id === id) || SCENES.find((t) => t.id === DEFAULT_THEME) || SCENES[0] || { id: DEFAULT_THEME, name: 'Aurora', description: '' });
 const visualsOf = (s) => {

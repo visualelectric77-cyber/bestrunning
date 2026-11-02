@@ -9,7 +9,8 @@
 // Excluye docs/, tools/, native/, .git, node_modules, *.md, ficheros ocultos (incluidos los "._*" de macOS en discos
 // externos), los mp3 de audio/packs/<pack>/ (su index.json SÍ entra) y la música (audio/music/*.m4a,
 // audio/music-src/) que se cachean en tiempo de ejecución o no se publican, y las imágenes de arranque de
-// assets/splash/ (iOS las lee al instalar) y la campaña de assets/media/ (se cachea al verla).
+// assets/splash/ (iOS las lee al instalar), la campaña de assets/media/ (se cachea al verla) y los recursos de los
+// escenarios realistas de assets/world/ (se cachean al elegir cada escenario).
 import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, relative, sep, dirname } from 'node:path';
@@ -46,6 +47,8 @@ function isExcluded(rel, isDir) {
     if (parts.length === 2 && parts[0] === 'assets' && parts[1] === 'splash') return true;
     // assets/media/: fotos y vídeos de campaña (≈ 9 MB). Se guardan al verlos (br-media / shell), nunca en el precache
     if (parts.length === 2 && parts[0] === 'assets' && parts[1] === 'media') return true;
+    // assets/world/: cielos y texturas de los escenarios realistas (≈ 11 MB). Se guardan al elegir cada escenario (br-world)
+    if (parts.length === 2 && parts[0] === 'assets' && parts[1] === 'world') return true;
     // audio/music-src/: fuentes originales de música (en .gitignore, no se publican)
     if (parts.length === 2 && parts[0] === 'audio' && parts[1] === 'music-src') return true;
     return false;

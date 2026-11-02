@@ -12,11 +12,17 @@
 
 /** @type {ThemeEntry[]} */
 export const THEMES = [
+  { id: 'costa', name: 'Costa', description: 'Paseo marítimo al amanecer: el mar a tu lado, losas mojadas y farolas aún encendidas.', loader: () => import('./costa.js') },
+  { id: 'neon', name: 'Neón', description: 'Avenida mojada entre rascacielos, rótulos de neón y la ciudad reflejada en el asfalto.', loader: () => import('./neon.js') },
+  { id: 'desierto', name: 'Desierto', description: 'Una carretera recta bajo la Vía Láctea, con los captafaros del color de tu tramo.', loader: () => import('./desierto.js') },
+  { id: 'tunel', name: 'Túnel', description: 'Un tubo de metal con anillos de luz del color de tu tramo. Para series.', loader: () => import('./tunel.js') },
+  { id: 'bosque', name: 'Bosque', description: 'Un sendero entre abetos altos con niebla de la mañana y haces de luz.', loader: () => import('./bosque.js') },
   { id: 'aurora', name: 'Aurora', description: 'Auroras sobre la noche y un río de luz que fluye a tu ritmo.', loader: () => import('./aurora.js') },
   { id: 'cordillera', name: 'Cordillera', description: 'Tu clase como una cordillera nocturna: cada intervalo, una cumbre.', loader: () => import('./cordillera.js') },
   { id: 'estadio', name: 'Estadio', description: 'Pista de atletismo de noche con luces de ritmo a tu velocidad.', loader: () => import('./estadio.js') },
   { id: 'blank', name: 'Grafito', description: 'Suelo de grafito y horizonte limpio. Sobrio y el más ligero.', loader: () => import('./blank.js') },
   { id: 'carrera', name: 'Carrera', description: 'Gran carrera de ciudad de noche: salida, arcos de cada kilómetro y meta con tu tiempo.', hidden: true, loader: () => import('./carrera.js') },
+  { id: 'nieve', name: 'Navidad', description: 'Un camino nevado entre abetos con guirnaldas, farolillos y nieve cayendo.', hidden: true, loader: () => import('./nieve.js') },
   { id: 'halloween', name: 'Noche de Halloween', description: 'Un camino entre calabazas encendidas bajo la luna llena.', hidden: true, loader: () => import('./halloween.js') },
   { id: 'legacy', name: 'Hypertrack v1', description: 'Autopista de neón original (oculta).', hidden: true, loader: () => import('./legacy.js') },
 ];
