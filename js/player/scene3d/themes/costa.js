@@ -133,7 +133,8 @@ export async function createTheme(ctx) {
   const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 0.72, 0.5), 1.6);
   sun.position.set(-0.35, 0.18, 1).multiplyScalar(100);
   root.add(sun, sun.target);
-  root.add(new THREE.HemisphereLight(new THREE.Color(0.55, 0.6, 0.78), new THREE.Color(0.18, 0.15, 0.14), 0.45));
+  const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.6, 0.78), new THREE.Color(0.18, 0.15, 0.14), 0.45);
+  root.add(hemi);
 
   // ── mar ──
   const waterU = {
@@ -255,7 +256,31 @@ export async function createTheme(ctx) {
   // charcos de luz en las losas (farolas y balizas), con el color del tramo
   const rowLamp = new THREE.Vector4(LX - 1.0, 4.9, LAMP_D, 0);
   const rowBol = new THREE.Vector4(WALL_X + 0.55, 0.45, BOL_D, 0);
-  addLamps(paveMat, ctx, runner, [rowLamp, rowBol], { tint: '#ffd9a8', mix: 0.55, power: 9, range: 16 });
+  const lampU = addLamps(paveMat, ctx, runner, [rowLamp, rowBol], { tint: '#ffd9a8', mix: 0.55, power: 9, range: 16 });
+
+  // ── escenario vivo (web 1.15): el amanecer avanza con la clase. Empiezas en la hora azul con las farolas encendidas y
+  //    acabas con el día hecho: el cielo se aclara, el sol calienta las losas y las farolas se apagan (las balizas del
+  //    color del tramo siguen: son la señal de velocidad) ──
+  const fogBase = scene.fog.color.clone();
+  const blue = new THREE.Color(0.5, 0.64, 1.05);
+  const white = new THREE.Color(1, 1, 1);
+  const P0 = { bulb: bulbs.material.uniforms.uPower.value, halo: lampHalo.material.uniforms.uPower.value, lamp: lampU.uLampPower.value };
+  const totalSec = Math.max(60, ctx.timeline.totalSec);
+  function dawn(f) {
+    const p = Math.min(1, Math.max(0, f.t / (totalSec * 0.92)));
+    const d = p * p * (3 - 2 * p);
+    const g = 0.42 + 0.46 * d;
+    sky.u.uGain.value = g; waterU.uGain.value = g;
+    sky.u.uTint.value.copy(blue).lerp(white, d);
+    sun.intensity = 0.25 + 1.45 * d;
+    hemi.intensity = 0.25 + 0.22 * d;
+    scene.environmentIntensity = 0.45 + 0.4 * d;
+    scene.fog.color.copy(fogBase).multiplyScalar(0.55 + 0.45 * d).multiply(sky.u.uTint.value);
+    const on = 1 - Math.min(1, Math.max(0, (d - 0.62) / 0.3));
+    bulbs.material.uniforms.uPower.value = P0.bulb * (0.12 + 0.88 * on);
+    lampHalo.material.uniforms.uPower.value = P0.halo * on;
+    lampU.uLampPower.value = P0.lamp * (0.3 + 0.7 * on);
+  }
 
   const inst = {
     director: { scale: 0.9, maxDown: 0.15, orbit: true },
@@ -273,6 +298,7 @@ export async function createTheme(ctx) {
       lampGroup.position.z = scrollZ(S, LAMP_D);
       rowLamp.w = lampGroup.position.z + 12;
       rowBol.w = bolGroup.position.z + 4;
+      dawn(f);
       waterU.uS.value = S % 4096;
       waterU.uTime.value = st.rm ? 0 : f.time;
     },

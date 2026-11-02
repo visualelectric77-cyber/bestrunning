@@ -6,6 +6,7 @@
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
 import { createFirs } from './kit/firs.js';
+import { weatherWave } from './kit/weather.js';
 
 export const meta = {
   id: 'bosque',
@@ -161,6 +162,11 @@ export async function createTheme(ctx) {
   }
   applyQuality();
 
+  // ── escenario vivo (web 1.15): la niebla entra y sale despacio (~4 min); cuando se espesa, los haces de luz entre
+  //    los troncos se marcan más (luz en el aire húmedo) ──
+  const fog0 = scene.fog.density;
+  const ray0 = rayMat.uniforms.uPower.value;
+
   const inst = {
     director: { scale: 0.85, maxDown: 0.12, orbit: true },
     resize(s) { runner.resize(s); },
@@ -169,6 +175,9 @@ export async function createTheme(ctx) {
       const S = st.S;
       floorSet.offset.y = (S / FLOOR_TILE) % 1;
       treeGroup.position.z = scrollZ(S, TREE_P);
+      const mist = st.rm ? 0.5 : weatherWave(f.t, 250, 0.6, 1.4);
+      scene.fog.density = fog0 * (0.72 + 0.6 * mist);
+      rayMat.uniforms.uPower.value = ray0 * (0.6 + 0.9 * mist);
       bolGroup.position.z = scrollZ(S, BOL_D);
       rowL.w = bolGroup.position.z + 6;
       rowR.w = bolGroup.position.z + 6 - BOL_D / 2;

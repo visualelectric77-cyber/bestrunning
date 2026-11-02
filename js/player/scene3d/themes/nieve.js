@@ -23,19 +23,20 @@ const WARM = '#ffc27a';
 
 const FLAKE_VERT = /* glsl */ `
 attribute vec3 aSeed;
-uniform float uTime, uS, uSize;
+uniform float uTime, uS, uSize, uFall, uDrift, uDens;
 varying float vA;
 void main() {
-  // copos en una caja de 24 × 10 × 60 m delante de la cámara; caen despacio, derivan y avanzan con el mundo
+  // copos en una caja de 24 × 10 × 60 m delante de la cámara; caen, derivan con el viento y avanzan con el mundo.
+  // uFall y uDrift son fases ACUMULADAS (en JS): la nevada puede acelerar sin que los copos salten
   vec3 b = vec3(24.0, 10.0, 60.0);
   vec3 p = aSeed * b;
-  p.y = b.y - mod(aSeed.y * b.y + uTime * (0.55 + 0.4 * aSeed.x), b.y);
-  p.x += sin(uTime * 0.5 + aSeed.z * 30.0) * 0.4;
+  p.y = b.y - mod(aSeed.y * b.y + uFall * (0.55 + 0.4 * aSeed.x), b.y);
+  p.x += sin(uTime * 0.5 + aSeed.z * 30.0) * 0.4 + mod(uDrift * (0.7 + 0.6 * aSeed.y) + aSeed.x * b.x, b.x) - aSeed.x * b.x;
   p.z = -mod(aSeed.z * b.z - uS, b.z) + 2.0;
   p.x -= b.x * 0.5;
   vec4 mv = viewMatrix * vec4(p, 1.0);
   float d = -mv.z;
-  vA = smoothstep(0.5, 2.0, d) * (1.0 - smoothstep(30.0, 58.0, d));
+  vA = smoothstep(0.5, 2.0, d) * (1.0 - smoothstep(30.0, 58.0, d)) * step(fract(aSeed.x * 5.17 + aSeed.y * 2.31), uDens);
   gl_PointSize = uSize * (0.6 + 0.8 * aSeed.x) / max(d, 0.5);
   gl_Position = projectionMatrix * mv;
 }`;
@@ -195,7 +196,10 @@ export async function createTheme(ctx) {
   const fg = new THREE.BufferGeometry();
   fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nF * 3), 3));
   fg.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 3));
-  const flakeU = { uTime: { value: 0 }, uS: { value: 0 }, uSize: { value: 40 } };
+  const flakeU = { uTime: { value: 0 }, uS: { value: 0 }, uSize: { value: 40 }, uFall: { value: 0 }, uDrift: { value: 0 }, uDens: { value: 0.5 } };
+  // escenario vivo (web 1.15): la nevada sigue la intensidad del tramo (suave al trote, ventisca ligera en los sprints)
+  const SNOW_E = { walk: 0.35, warmup: 0.4, cooldown: 0.35, jog: 0.5, run: 0.65, fast: 0.85, sprint: 1 };
+  let snowE = -1;
   const flakes = new THREE.Points(fg, new THREE.ShaderMaterial({
     uniforms: flakeU, vertexShader: FLAKE_VERT, fragmentShader: FLAKE_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   }));
@@ -225,6 +229,11 @@ export async function createTheme(ctx) {
       rowL.w = lGroup.position.z + 6;
       rowR.w = lGroup.position.z + 6 - LANT_D / 2;
       flakeU.uTime.value = st.rm ? 0 : f.time;
+      const eT = SNOW_E[f.zone] ?? 0.5;
+      snowE = snowE < 0 ? eT : snowE + (eT - snowE) * (1 - Math.exp(-f.dt * 0.35));
+      flakeU.uDens.value = 0.35 + 0.65 * snowE;
+      flakeU.uFall.value += f.dt * (0.7 + 1.5 * snowE * snowE);
+      flakeU.uDrift.value += f.dt * 1.6 * Math.max(0, snowE - 0.55);
       flakeU.uS.value = S % 60;
       flakes.visible = !st.rm;
     },
