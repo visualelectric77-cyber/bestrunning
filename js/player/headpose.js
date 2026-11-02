@@ -46,7 +46,8 @@ export function createHeadFilter(opts = {}) {
   const settle = opts.settle ?? SETTLE;
   const st = {};
   const neutral = {};
-  for (const k of KEYS) { st[k] = { v: 0, dv: 0 }; neutral[k] = 0; }
+  const target = {};    // última muestra: el muelle la persigue en CADA fotograma (no solo al llegar otra)
+  for (const k of KEYS) { st[k] = { v: 0, dv: 0 }; neutral[k] = 0; target[k] = 0; }
   let t0 = null;        // primera muestra con cara
   let calibN = 0;
   const calibSum = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
@@ -56,47 +57,54 @@ export function createHeadFilter(opts = {}) {
   let ready = false;
   const out = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, w: 0 };
 
-  function step(t) {
+  /**
+   * Avanza el reloj del filtro hasta t: peso del efecto, muelles hacia la última muestra y postura neutra. Se llama
+   * desde push (muestras de la cámara, ~15 Hz) y desde sample (cada fotograma, 60 Hz): el movimiento sale continuo
+   * aunque la cámara dé pocas muestras por segundo (antes avanzaba a saltos, uno por muestra).
+   */
+  function advance(t) {
     const dt = lastT == null ? 0 : clamp(t - lastT, 0, 0.25);
     lastT = t;
+    if (!(dt > 0)) return;
     const seen = t - lastSeen < LOST;
-    const target = seen && ready ? 1 : 0;
-    if (dt > 0 && target !== w) w = target > w ? Math.min(target, w + dt / 0.6) : Math.max(target, w - dt / FADE);
-    return dt;
+    const goal = seen && ready ? 1 : 0;
+    if (goal !== w) w = goal > w ? Math.min(goal, w + dt / 0.6) : Math.max(goal, w - dt / FADE);
+    if (t0 == null) return;
+    for (const k of KEYS) spring(st[k], target[k], settle, dt);
+    if (ready) {
+      const a = 1 - Math.exp(-dt / TAU_NEUTRAL);
+      for (const k of KEYS) neutral[k] += (st[k].v - neutral[k]) * a;
+    }
   }
 
   return {
     push(t, raw) {
-      const dt = step(t);
+      advance(t);
       if (!raw || !Number.isFinite(raw.x) || !Number.isFinite(raw.y) || !Number.isFinite(raw.z)) return;
       lastSeen = t;
+      for (const k of KEYS) target[k] = Number(raw[k]) || 0;
       if (t0 == null) {
         t0 = t;
-        for (const k of KEYS) { st[k].v = Number(raw[k]) || 0; st[k].dv = 0; }
+        for (const k of KEYS) { st[k].v = target[k]; st[k].dv = 0; }
       }
       if (!ready) {
-        for (const k of KEYS) calibSum[k] += Number(raw[k]) || 0;
+        for (const k of KEYS) calibSum[k] += target[k];
         calibN++;
         if (t - t0 >= CALIB && calibN >= 5) {
           for (const k of KEYS) neutral[k] = calibSum[k] / calibN;
           ready = true;
         }
       }
-      for (const k of KEYS) spring(st[k], Number(raw[k]) || 0, settle, dt > 0 ? dt : 1 / 30);
-      if (ready && dt > 0) {
-        const a = 1 - Math.exp(-dt / TAU_NEUTRAL);
-        for (const k of KEYS) neutral[k] += (st[k].v - neutral[k]) * a;
-      }
     },
     sample(t) {
-      step(t);
+      advance(t);
       for (const k of KEYS) out[k] = ready ? clamp(deadzone(st[k].v - neutral[k], DEAD[k]), -LIM[k], LIM[k]) : 0;
       out.w = w;
       return out;
     },
     reset() {
       t0 = null; calibN = 0; ready = false; lastT = null; lastSeen = -1e9; w = 0;
-      for (const k of KEYS) { st[k].v = 0; st[k].dv = 0; neutral[k] = 0; calibSum[k] = 0; }
+      for (const k of KEYS) { st[k].v = 0; st[k].dv = 0; neutral[k] = 0; calibSum[k] = 0; target[k] = 0; }
     },
     get ready() { return ready; },
   };

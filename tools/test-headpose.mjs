@@ -49,6 +49,25 @@ section('el rebote de la zancada no pasa; los gestos lentos sí', () => {
   ok(Math.abs(q.x) < 0.01, `si te quedas así, vuelve solo al centro (${(q.x * 100).toFixed(2)} cm)`);
 });
 
+section('fluido a 60 fps con muestras a 15 Hz (la cámara de la build 19)', () => {
+  const f = createHeadFilter();
+  // calibración con muestras a 15 Hz
+  for (let i = 0; i <= 45; i++) f.push(i / 15, at()());
+  // te asomas 8 cm de golpe; la escena se pinta a 60 fps y la cámara da una muestra cada 4 fotogramas
+  let prev = f.sample(3).x; let frozen = 0; let maxJump = 0; let moving = 0;
+  for (let k = 1; k <= 60; k++) {
+    const t = 3 + k / 60;
+    if (k % 4 === 0) f.push(t, { ...base, x: base.x + 0.08 + 0.004 * Math.sin(k) });   // con un poco de ruido de Vision
+    const x = f.sample(t).x;
+    if (k < 40 && prev > 0) { moving++; if (Math.abs(x - prev) < 1e-7) frozen++; }   // ya en marcha (fuera de la zona muerta)
+    maxJump = Math.max(maxJump, Math.abs(x - prev));
+    prev = x;
+  }
+  ok(frozen === 0, `ningún fotograma congelado mientras te mueves (${frozen}/${moving})`);
+  ok(maxJump < 0.006, `sin saltos: como mucho ${(maxJump * 1000).toFixed(1)} mm por fotograma`);
+  ok(prev > 0.05, `llega a donde te asomas (${(prev * 100).toFixed(1)} cm)`);
+});
+
 section('topes y zona muerta', () => {
   ok(deadzone(0.005, 0.01) === 0 && Math.abs(deadzone(0.03, 0.01) - 0.02) < 1e-9 && Math.abs(deadzone(-0.03, 0.01) + 0.02) < 1e-9, 'zona muerta suave');
   const f = createHeadFilter();
