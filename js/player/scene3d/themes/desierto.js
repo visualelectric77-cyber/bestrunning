@@ -148,15 +148,20 @@ export async function createTheme(ctx) {
   const rockMat = pbr(ctx, sand, { roughness: 1, color: new THREE.Color(0.55, 0.45, 0.38), normalScale: 1.5 });
   const nRock = 140;
   const rocks = new THREE.InstancedMesh(rockGeo, rockMat, nRock * 2);
-  setInstances(ctx, rocks, nRock * 2, (i, t) => {
-    const k = i % nRock;
+  // una sola lista para las dos copias del patrón (si no, las piedras saltaban al enlazar cada 240 m)
+  const rockList = [];
+  for (let k = 0; k < nRock; k++) {
     const r1 = rand(); const r2 = rand(); const r3 = rand();
     const side = r1 < 0.5 ? -1 : 1;
     const x = side * (ROAD_W + 2.2 + Math.pow(r2, 1.6) * 70);
-    const s = 0.12 + Math.pow(r3, 3) * 1.4 + (Math.abs(x) > 20 ? 0.6 * r3 : 0);
-    t.p.set(x, -0.04, -((k / nRock) * ROCK_P + rand() * 3) - (i >= nRock ? ROCK_P : 0));
-    t.s.set(s * (0.8 + 0.5 * rand()), s, s * (0.8 + 0.5 * rand()));
-    t.e.set(0, rand() * 6.28, 0);
+    const sz = 0.12 + Math.pow(r3, 3) * 1.4 + (Math.abs(x) > 20 ? 0.6 * r3 : 0);
+    rockList.push({ x, z: -((k / nRock) * ROCK_P + rand() * 3), sx: sz * (0.8 + 0.5 * rand()), sy: sz, sz: sz * (0.8 + 0.5 * rand()), r: rand() * 6.28 });
+  }
+  setInstances(ctx, rocks, nRock * 2, (i, t) => {
+    const r = rockList[i % nRock];
+    t.p.set(r.x, -0.04, r.z - (i >= nRock ? ROCK_P : 0));
+    t.s.set(r.sx, r.sy, r.sz);
+    t.e.set(0, r.r, 0);
   });
   rocks.frustumCulled = false;
   const rockGroup = new THREE.Group();
@@ -178,15 +183,23 @@ export async function createTheme(ctx) {
   const mesaMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.1, 0.08, 0.07), roughness: 1 });
   const nMesa = 22;
   const mesas = new THREE.InstancedMesh(mesaGeo, mesaMat, nMesa * 2);
+  // Las dos copias del patrón son la MISMA lista (si no, al enlazar cada 6 km saltaban mesetas). Cada meseta queda
+  // lejos de la carretera contando su radio de verdad (base 1,25 × escala, más el bulto de 0,28): antes una meseta
+  // ancha cruzaba la carretera y la cámara la atravesaba («muro negro»).
   const mr = ctx.rng(31);
-  setInstances(ctx, mesas, nMesa * 2, (i, t) => {
-    const k = i % nMesa;
+  const mesaList = [];
+  for (let k = 0; k < nMesa; k++) {
     const side = k % 2 ? 1 : -1;
-    const dist = 900 + mr() * 2200;
     const w = 120 + mr() * 380;
+    const d = w * (0.6 + mr() * 0.8);
     const h = 40 + mr() * 110;
-    t.p.set(side * (250 + mr() * 1400), h / 2 - 2, -(k / nMesa) * MESA_P - dist * 0.3 - (i >= nMesa ? MESA_P : 0));
-    t.s.set(w, h, w * (0.6 + mr() * 0.8));
+    const reach = Math.max(w, d) * 1.25 * 1.3;
+    mesaList.push({ x: side * (reach + 120 + mr() * 900), h, w, d, z: -(k / nMesa) * MESA_P - mr() * 200 });
+  }
+  setInstances(ctx, mesas, nMesa * 2, (i, t) => {
+    const m = mesaList[i % nMesa];
+    t.p.set(m.x, m.h / 2 - 2, m.z - (i >= nMesa ? MESA_P : 0));
+    t.s.set(m.w, m.h, m.d);
   });
   mesas.frustumCulled = false;
   const mesaGroup = new THREE.Group();

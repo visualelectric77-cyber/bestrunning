@@ -120,12 +120,17 @@ export async function createTheme(ctx) {
     vertexShader: RAY_VERT, fragmentShader: RAY_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
   });
   const rays = new THREE.InstancedMesh(rayGeo, rayMat, nRay * 2);
-  setInstances(ctx, rays, nRay * 2, (i, t) => {
-    const k = i % nRay;
+  // una sola lista para las dos copias del patrón (sin saltos al enlazar)
+  const rayList = [];
+  for (let k = 0; k < nRay; k++) {
     const side = k % 2 ? 1 : -1;
-    t.p.set(side * (3 + rnd() * 14), 0, -((k + rnd() * 0.6) / nRay) * TREE_P - (i >= nRay ? TREE_P : 0));
-    t.s.set(2.5 + rnd() * 4, 26, 1);
-    t.e.set(0.35, 0.2 * side, -0.42 + rnd() * 0.1, 'YXZ');
+    rayList.push({ side, x: side * (3 + rnd() * 14), z: -((k + rnd() * 0.6) / nRay) * TREE_P, w: 2.5 + rnd() * 4, tilt: -0.42 + rnd() * 0.1 });
+  }
+  setInstances(ctx, rays, nRay * 2, (i, t) => {
+    const r = rayList[i % nRay];
+    t.p.set(r.x, 0, r.z - (i >= nRay ? TREE_P : 0));
+    t.s.set(r.w, 26, 1);
+    t.e.set(0.35, 0.2 * r.side, r.tilt, 'YXZ');
   });
   rays.frustumCulled = false;
   rays.renderOrder = 25;

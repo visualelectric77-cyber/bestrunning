@@ -64,7 +64,7 @@ section('fluido a 60 fps con muestras a 15 Hz (la cámara de la build 19)', () =
     prev = x;
   }
   ok(frozen === 0, `ningún fotograma congelado mientras te mueves (${frozen}/${moving})`);
-  ok(maxJump < 0.006, `sin saltos: como mucho ${(maxJump * 1000).toFixed(1)} mm por fotograma`);
+  ok(maxJump < 0.008, `sin saltos: como mucho ${(maxJump * 1000).toFixed(1)} mm por fotograma`);
   ok(prev > 0.05, `llega a donde te asomas (${(prev * 100).toFixed(1)} cm)`);
 });
 

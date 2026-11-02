@@ -14,7 +14,7 @@
 //   f.push(t, null)                      // sin cara en esta muestra
 //   f.sample(t) → { x, y, z, yaw, pitch, w }   // desplazamientos (m, rad) y peso 0..1 del efecto
 
-const SETTLE = 0.42;     // s: muelle crítico de la pose (~0,8 Hz)
+const SETTLE = 0.34;     // s: muelle crítico de la pose (~1 Hz; la zancada, a 2,5–3 Hz, sigue fuera)
 const CALIB = 1.5;       // s de calibración inicial
 const TAU_NEUTRAL = 12;  // s: la postura neutra sigue la tuya muy despacio
 const LOST = 0.6;        // s sin cara ⇒ se desvanece
@@ -116,7 +116,7 @@ export function createHeadFilter(opts = {}) {
  * lente se descentra para que lo que está a `win` m quede quieto; lo lejano se mueve con tu cabeza (ves «detrás» del
  * borde), lo cercano al revés. Girar la cabeza gira la mirada un poco (`turn`). Devuelve out (reutilizado).
  */
-export function headCamera(p, out, { gain = 2.0, win = 3.0, turn = 0.35, lean = 0.6 } = {}) {
+export function headCamera(p, out, { gain = 2.2, win = 3.0, turn = 0.4, lean = 0.7 } = {}) {
   const k = p.w;
   out.dx = p.x * gain * k;
   out.dy = p.y * gain * k;

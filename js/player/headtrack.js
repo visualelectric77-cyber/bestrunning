@@ -74,7 +74,7 @@ export function createHeadTracker({ onState = () => {} } = {}) {
       const ok = d && Number.isFinite(d.x) && Number.isFinite(d.y) && Number.isFinite(d.z);
       sample(ok ? { x: HEAD_MIRROR * d.x, y: +d.y, z: +d.z, yaw: HEAD_MIRROR * (+d.yaw || 0), pitch: +d.pitch || 0 } : null);
     });
-    nativePost('head.start', { hz: 15 });
+    nativePost('head.start', { hz: 30 });
     // segundo vigilante, en la página: si el AudioContext deja de sonar con la cámara encendida, fuera la cámara
     const was = audioState();
     const watch = setInterval(() => {
