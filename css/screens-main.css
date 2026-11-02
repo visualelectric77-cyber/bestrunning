@@ -1955,7 +1955,8 @@
 .lb-banner .lb-section__count { color: rgba(235, 235, 245, 0.78); }
 .lb-banner .lb-more { color: #fff; margin: 0 0 -10px; padding: 0 var(--s-2); }
 .lb-banner:active > .photo { opacity: 0.85; }
-.lb-section > .lb-section__desc { margin: 0 0 12px; padding: 0 2px; -webkit-line-clamp: 1; line-clamp: 1; }
+/* Hasta dos líneas: a una sola la frase se cortaba a medias («…en cada kilómetro y l…») */
+.lb-section > .lb-section__desc { margin: 0 0 12px; padding: 0 2px; }
 .lb-more {
   flex: none;
   display: inline-flex;
@@ -2189,6 +2190,9 @@
   height: var(--hairline);
   background: var(--sep);
 }
+/* Clases de más de una hora: «1:32:10» no cabe en 40 px y se montaba sobre el punto de zona */
+.wk-struct--long .wk-row { grid-template-columns: 52px minmax(0, 1fr); }
+.wk-struct--long .wk-row + .wk-row::before { left: 74px; }
 .wk-row__time {
   padding-top: 16px;
   font-size: var(--fs-footnote);
@@ -2544,6 +2548,25 @@ body.is-pushed .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12px); 
     text-wrap: balance;
   }
   .pn-summary .stat__value { font-size: 22px; }
+  /* Objetivo de carrera y próximo test: el valor baja bajo el título en vez de cortarse en «5K · 10K · …» */
+  .pn-next .list__row:has(> .list__value) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'icon title chev'
+      'icon value chev';
+    column-gap: var(--s-3);
+    row-gap: 1px;
+  }
+  .pn-next .list__row:has(> .list__value) > svg { grid-area: icon; }
+  .pn-next .list__row:has(> .list__value) > .list__title { grid-area: title; white-space: nowrap; }
+  .pn-next .list__row:has(> .list__value) > .list__value {
+    grid-area: value;
+    max-width: none;
+    text-align: left;
+    font-size: var(--fs-footnote);
+  }
+  .pn-next .list__row:has(> .list__value) > .list__chev { grid-area: chev; }
 
   /* — Clases: buscador y duración en una fila, chips debajo; carruseles convertidos en rejilla — */
   .lb-tools {
@@ -2564,6 +2587,8 @@ body.is-pushed .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12px); 
   .lb-carousel .lb-cell { width: auto; }
   .lb-section { margin-bottom: var(--s-8); }
   .lb-section__desc { white-space: normal; }
+  /* A 3:1 la cabecera de foto medía ~270 px: toda la pantalla en horizontal. Banda fina como en el iPad */
+  .lb-banner { aspect-ratio: 6 / 1; }
 
   /* — Detalle de clase: gráfico y cifras a la izquierda; estructura a la derecha — */
   .wk {

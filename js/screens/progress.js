@@ -322,7 +322,9 @@ function kpiGrid(s, history, animate) {
         <div class="pg-totals__big">${count(km, 1)}<span class="unit">km</span></div>
       </div>
       <div class="stat-grid pg-totals__grid">
-        ${statHtml('Tiempo', count((t.sec || 0) / 3600, 1), 'h')}
+        ${(t.sec || 0) < 3600 // por debajo de una hora, minutos: «0,7 h» se leía raro
+    ? statHtml('Tiempo', count(Math.round((t.sec || 0) / 60), 0), 'min')
+    : statHtml('Tiempo', count((t.sec || 0) / 3600, 1), 'h')}
         ${statHtml('Sesiones', count(t.sessions || history.length, 0))}
         ${statHtml('Racha', count(streak, 0), streak === 1 ? 'semana' : 'semanas')}
       </div>

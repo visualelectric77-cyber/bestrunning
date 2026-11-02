@@ -260,7 +260,8 @@ function rowSummary(key, s) {
     case 'profile': return p.name ? esc(p.name) : 'Añade tu nombre';
     // De trotar a sprint (las cuatro cifras no caben en un iPhone SE; el detalle está dentro)
     case 'speeds': return `${fmt.speed(lv[LEVEL_KEYS[0]])} – ${fmt.speed(lv[LEVEL_KEYS[LEVEL_KEYS.length - 1]])} km/h`;
-    case 'week': return `L–V ${sc.weekdayMinutes ?? 20}′ · J ${sc.thursdayMinutes ?? 50}′ · ${sc.weekendDay === 7 ? 'D' : 'S'} ${sc.weekendMinutes ?? 50}′`;
+    // Días y tiempo total (como «Tu semana tipo»): «L–V 20′ · J 50′» parecía decir que el jueves también era de 20′
+    case 'week': return `6 días · ${fmt.durationLong(((sc.weekdayMinutes ?? 20) * 4 + (sc.thursdayMinutes ?? 50) + (sc.weekendMinutes ?? 50)) * 60)}`;
     case 'treadmill': return `${tm.hasIncline ? 'Inclinación · ' : ''}${fmt.speed(tm.maxSpeed ?? 18)} km/h`;
     case 'display': {
       const v = visualsOf(s);

@@ -74,7 +74,9 @@ function fitnessChart(f, height = 140) {
 function fitnessWaiting(f) {
   return `<p class="pg-health__text">${(f.have || 0) >= 6
     ? `Ya tienes <b class="num">${fmt.int(f.have)}</b> clases que sirven. Falta tiempo: entre la primera y la última tiene que haber 2 semanas para ver una tendencia de verdad. ${14 - (f.span || 0) <= 1 ? 'Mañana' : `En <b class="num">${fmt.int(14 - (f.span || 0))}</b> días`} verás tu gráfico.`
-    : `Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). De tus <b class="num">${fmt.int(f.withHr || 0)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.`}</p>`;
+    : `Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). ${(f.withHr || 0) > 0
+      ? `De tus <b class="num">${fmt.int(f.withHr)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.`
+      : 'Aún no tienes ninguna: importa el pulso del Apple Watch al terminar la próxima.'}`}</p>`;
 }
 
 function watchStats({ v, rc }) {

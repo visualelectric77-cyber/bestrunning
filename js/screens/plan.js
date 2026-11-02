@@ -388,7 +388,8 @@ function dayRow(day, today, i, createdKey, state) {
   const ses = day.session;
   let meta = `<span>${mins(w) || day.minutes} min</span>`;
   if (status === 'done' && ses) {
-    meta = `<span class="pn-ok">${icon('check', 13)} Hecho</span><span>${fmt.dec1(ses.distanceKm || 0)} km</span><span>${fmt.clock(ses.elapsedSec || 0)}</span>`;
+    // El check verde ya dice «hecho» (y la etiqueta accesible también): sin la palabra la meta cabe en una línea
+    meta = `<span class="pn-ok">${icon('check', 13)} ${fmt.dec1(ses.distanceKm || 0)} km</span><span>${fmt.clock(ses.elapsedSec || 0)}</span>`;
   } else {
     if (w.estDistanceKm) meta += `<span>~${fmt.dec1(w.estDistanceKm)} km</span>`;
     if (status === 'missed') meta += '<span class="pn-missed">No realizada</span>';

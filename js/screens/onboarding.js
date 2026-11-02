@@ -374,6 +374,10 @@ export function mount(el) {
     </div>`;
   }
 
+  // «Español (España)» como en Perfil › Voz y audio, no el código «es-ES»
+  const LANG_NAMES = { 'es-ES': 'Español (España)', 'es-MX': 'Español (México)', 'es-US': 'Español (EE. UU.)', 'es-AR': 'Español (Argentina)', 'es-CO': 'Español (Colombia)', 'es-CL': 'Español (Chile)' };
+  const langName = (l) => LANG_NAMES[String(l || '').replace('_', '-')] || l || '';
+
   function voicesHtml() {
     const list = safe(() => (typeof speech.spanishVoices === 'function' ? speech.spanishVoices() : []), []) || [];
     const def = safe(() => (typeof speech.defaultVoice === 'function' ? speech.defaultVoice() : null), null);
@@ -396,7 +400,7 @@ export function mount(el) {
       row('', 'Automática', def ? `Voz del iPhone · ${def.name}` : 'Voz del iPhone, la mejor disponible', '', !pack && !sel),
     ];
     for (const v of list.filter((x) => x.quality !== 'novelty').slice(0, 8)) {
-      rows.push(row(v.voiceURI, v.name, v.lang, v.qualityLabel ?? voiceQuality(v), !pack && sel === v.voiceURI));
+      rows.push(row(v.voiceURI, v.name, langName(v.lang), v.qualityLabel ?? voiceQuality(v), !pack && sel === v.voiceURI));
     }
     return `<div class="list ob-voices">${rows.join('')}</div>`;
   }

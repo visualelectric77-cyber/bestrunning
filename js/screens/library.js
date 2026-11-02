@@ -122,7 +122,7 @@ const BANNER = {
   recovery: ['cat-recovery', '72% 30%'],
   challenge: ['hero-man', '58% 55%'],
   test: ['cat-tempo', '42% 28%'],
-  race: ['hero-man', '50% 40%'],
+  race: ['hero-man', '50% 47%'], // cabeza y hombros enteros (con 40% la cara quedaba pegada al borde de abajo)
 };
 const bannerImg = (k) => {
   const [name, pos] = BANNER[k] || ['hero-man', '58% 55%'];

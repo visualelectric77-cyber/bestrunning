@@ -151,7 +151,7 @@ function structureBlock(w) {
   });
   return `<section class="wk-section">
     ${sectionHeader('Estructura', `<span class="wk-aside">${segs.length} tramos</span>`)}
-    <ol class="wk-struct">${rows.join('')}</ol>
+    <ol class="wk-struct${t >= 3600 ? ' wk-struct--long' : ''}">${rows.join('')}</ol>
   </section>`;
 }
 
