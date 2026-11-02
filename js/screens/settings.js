@@ -13,6 +13,7 @@ import { wordmarkSvg } from '../ui/wordmark.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
 import { listThemes, DEFAULT_THEME } from '../player/scene3d/themes/index.js';
 import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
+import { WEATHER_KEY, CITIES, weatherPref, fetchLiveWeather } from '../player/weather-live.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
 import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagText } from '../core/diag.js';
@@ -761,6 +762,35 @@ function feelHtml() {
     </div>`;
 }
 
+/* Tiempo del escenario (contrato con ../player/weather-live.js): localStorage 'ritmup.weather' = 'scene' (por defecto:
+   el tiempo vivo de cada escenario) · 'here' (tu ubicación, redondeada a ~10 km) · 'city:<id>'. Lo consultan los
+   escenarios realistas al cargarse (Open-Meteo, sin clave). */
+const WX_SCENE_SUB = 'Cada escenario con su propio tiempo: amanecer en la Costa, lluvia en Neón, niebla en el Bosque';
+function wxValue() {
+  const p = weatherPref();
+  return p.mode === 'city' ? `city:${p.city.id}` : p.mode;
+}
+function weatherHtml() {
+  const cur = wxValue();
+  const row = (value, title, sub) => {
+    const on = value === cur;
+    return `<div class="list__row st-row st-voice${on ? ' is-on' : ''}" data-st="wx" data-wx="${esc(value)}" role="radio" aria-checked="${on}" tabindex="0">
+      ${label(esc(title), esc(sub))}
+      <span class="st-voice__check">${icon('check', 14)}</span>
+    </div>`;
+  };
+  const rows = [
+    row('scene', 'El del escenario', WX_SCENE_SUB),
+    row('here', 'Tiempo real aquí', 'La hora y el tiempo de donde estás (pide tu ubicación una vez)'),
+    ...CITIES.map((c) => row(`city:${c.id}`, `Tiempo real en ${c.name}`, 'Corre con la hora y el tiempo de allí ahora mismo')),
+  ].join('');
+  return `<div class="st-group">
+      <div class="st-group__title">Tiempo del escenario</div>
+      <div class="list" role="radiogroup" aria-label="Tiempo del escenario">${rows}</div>
+      <p class="st-note" data-wx-note>Amanecer, mediodía, nubes, lluvia o nieve como están ahora. El tiempo lo da Open-Meteo: solo recibe la ciudad o tu zona aproximada.</p>
+    </div>`;
+}
+
 function displayHtml(s) {
   ensureSettingsCss();
   const v = visualsOf(s);
@@ -790,6 +820,7 @@ function displayHtml(s) {
       <button type="button" class="btn btn--secondary btn--block pl-demo__btn" data-st="demo3d"${canDemo ? '' : ' disabled'}>${icon('play', 18)}<span>${esc(demoLabel(v))}</span></button>
     </section>
     ${feelHtml()}
+    ${weatherHtml()}
     ${introHtml()}
     ${labHtml()}`;
 }
@@ -2812,6 +2843,25 @@ const PAGES = {
         if (v === introPref()) return;
         haptic('selection');
         safe(() => localStorage.setItem(INTRO_KEY, v));
+      } else if (name === 'wx') {
+        const v = el.dataset.wx || 'scene';
+        ctx.body.querySelectorAll('[data-wx]').forEach((r) => {
+          const on = r.dataset.wx === v;
+          r.classList.toggle('is-on', on);
+          r.setAttribute('aria-checked', String(on));
+        });
+        if (v === wxValue()) return;
+        haptic('selection');
+        safe(() => localStorage.setItem(WEATHER_KEY, v));
+        const note = ctx.body.querySelector('[data-wx-note]');
+        if (v !== 'scene' && note) {
+          note.textContent = 'Consultando el tiempo…';
+          fetchLiveWeather().then((w) => {
+            if (!note.isConnected) return;
+            note.textContent = w ? `Ahora: ${w.label}. Lo verás en la Costa, el Desierto, Neón, el Bosque y Navidad.`
+              : v === 'here' ? 'No he podido saber dónde estás: los escenarios siguen con su propio tiempo.' : 'Sin conexión: los escenarios siguen con su propio tiempo.';
+          });
+        } else if (note) note.textContent = WX_SCENE_SUB + '.';
       } else if (name === 'feel') {
         const v = FEEL_OPTS.some((o) => o.value === el.dataset.feel) ? el.dataset.feel : 'viva';
         ctx.body.querySelectorAll('[data-feel]').forEach((r) => {

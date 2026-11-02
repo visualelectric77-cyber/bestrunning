@@ -77,3 +77,27 @@ export function createRain(ctx, { count = 1800, box = [26, 14, 50], color = [0.3
     },
   };
 }
+
+/* ───────────── tiempo real (js/player/weather-live.js) → escenarios ───────────── */
+
+let live = null;
+/** El reproductor fija el tiempo real (o null = cada escenario con su propio tiempo vivo). */
+export function setLiveWeather(w) { live = w && typeof w === 'object' ? w : null; }
+/** Estado del tiempo real vigente o null: { day, golden, cloud, rain, snow, mist, temp, sunEl, label }. */
+export function liveWeather() { return live; }
+
+/**
+ * Lo llama cada escenario con tiempo al cargarse: con «Tiempo real» activado en Ajustes consulta el tiempo (en segundo
+ * plano, sin esperar: el escenario empieza con su propio tiempo y cambia en cuanto llega) y lo deja en liveWeather();
+ * con «El del escenario», lo borra. Nunca lanza.
+ */
+let liveReq = 0;
+export function startLiveWeather() {
+  const req = ++liveReq;
+  import('../../../weather-live.js')
+    .then((m) => {
+      if (m.weatherPref().mode === 'scene') { if (req === liveReq) setLiveWeather(null); return null; }
+      return m.fetchLiveWeather().then((w) => { if (req === liveReq) setLiveWeather(w); });
+    })
+    .catch(() => { if (req === liveReq) setLiveWeather(null); });
+}

@@ -6,7 +6,7 @@
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
 import { createFirs } from './kit/firs.js';
-import { weatherWave } from './kit/weather.js';
+import { weatherWave, createRain, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
   id: 'bosque',
@@ -75,7 +75,8 @@ export async function createTheme(ctx) {
   const sun = new THREE.DirectionalLight(new THREE.Color(1.0, 0.85, 0.65), 1.1);
   sun.position.set(0.4, 0.7, -1).multiplyScalar(100);
   root.add(sun, sun.target);
-  root.add(new THREE.HemisphereLight(new THREE.Color(0.55, 0.62, 0.7), new THREE.Color(0.12, 0.11, 0.08), 0.5));
+  const hemi = new THREE.HemisphereLight(new THREE.Color(0.55, 0.62, 0.7), new THREE.Color(0.12, 0.11, 0.08), 0.5);
+  root.add(hemi);
 
   // ── suelo del bosque y sendero ──
   const floorMat = pbr(ctx, floorSet, { roughness: 1, color: new THREE.Color(0.8, 0.78, 0.72) });
@@ -166,6 +167,13 @@ export async function createTheme(ctx) {
   //    los troncos se marcan más (luz en el aire húmedo) ──
   const fog0 = scene.fog.density;
   const ray0 = rayMat.uniforms.uPower.value;
+  const gain0 = sky.u.uGain.value;
+  const fogC0 = scene.fog.color.clone();
+  const env0 = scene.environmentIntensity;
+  const sun0 = sun.intensity;
+  startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
+  const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 1400 : 800, color: [0.3, 0.33, 0.36] });
+  root.add(rain.mesh);
 
   const inst = {
     director: { scale: 0.85, maxDown: 0.12, orbit: true },
@@ -175,9 +183,20 @@ export async function createTheme(ctx) {
       const S = st.S;
       floorSet.offset.y = (S / FLOOR_TILE) % 1;
       treeGroup.position.z = scrollZ(S, TREE_P);
-      const mist = st.rm ? 0.5 : weatherWave(f.t, 250, 0.6, 1.4);
+      // con «Tiempo real»: la hora y el tiempo del sitio elegido (de noche el bosque se apaga, con nubes no hay haces)
+      const w = liveWeather();
+      const mist = w ? Math.min(1, 0.35 + 0.5 * w.cloud + w.mist) : st.rm ? 0.5 : weatherWave(f.t, 250, 0.6, 1.4);
+      const day = w ? 0.12 + 0.88 * w.day : 1;
       scene.fog.density = fog0 * (0.72 + 0.6 * mist);
-      rayMat.uniforms.uPower.value = ray0 * (0.6 + 0.9 * mist);
+      rayMat.uniforms.uPower.value = ray0 * (0.6 + 0.9 * mist) * (w ? day * (1 - 0.8 * w.cloud) : 1);
+      sky.u.uGain.value = gain0 * day * (w ? 1 - 0.3 * w.cloud : 1);
+      sun.intensity = sun0 * day * (w ? 1 - 0.7 * w.cloud : 1);
+      // de noche la niebla también se apaga (si no, el bosque brilla gris en la oscuridad)
+      scene.fog.color.copy(fogC0).multiplyScalar(w ? 0.08 + 0.92 * day : 1);
+      sky.u.uHorizon.value.copy(scene.fog.color);
+      hemi.intensity = 0.5 * (w ? 0.15 + 0.85 * day : 1);
+      scene.environmentIntensity = env0 * (w ? 0.1 + 0.9 * day : 1);
+      rain.update(f, S, w ? w.rain : 0);
       bolGroup.position.z = scrollZ(S, BOL_D);
       rowL.w = bolGroup.position.z + 6;
       rowR.w = bolGroup.position.z + 6 - BOL_D / 2;

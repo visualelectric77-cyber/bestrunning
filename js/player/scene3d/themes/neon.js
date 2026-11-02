@@ -7,7 +7,7 @@
 // Coste: ~20 llamadas de dibujo, edificios instanciados con un solo material PBR parcheado (ventanas procedurales).
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
-import { createRain, weatherWave } from './kit/weather.js';
+import { createRain, weatherWave, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
   id: 'neon',
@@ -295,6 +295,7 @@ float gWin; float gLit; vec3 gWinCol; float gShop;`)
 
   // ── escenario vivo (web 1.15): lluvia fina que va y viene (ratos secos y chaparrones de ~5 min); con lluvia el aire
   //    se carga un poco y las aceras brillan más ──
+  startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
   const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 2000 : 1100 });
   root.add(rain.mesh);
   const fog0 = scene.fog.density;
@@ -315,10 +316,12 @@ float gWin; float gLit; vec3 gWinCol; float gShop;`)
       rowR.w = lampGroup.position.z + 10 - LAMP_D / 2;
       signMat.uniforms.uTime.value = f.time;
       // lluvia: onda lenta del reloj de la clase (determinista); arranca ya lloviznando
-      const want = 0.15 + 0.85 * weatherWave(f.t, 620, 1.1, 2.2);
+      // con «Tiempo real», la lluvia de verdad del sitio elegido (y su niebla); si no, la del escenario vivo
+      const lw = liveWeather();
+      const want = lw ? Math.max(lw.rain, lw.mist * 0.2) : 0.15 + 0.85 * weatherWave(f.t, 620, 1.1, 2.2);
       rainK = rainK < 0 ? want : rainK + (want - rainK) * (1 - Math.exp(-f.dt * 0.25));
       rain.update(f, S, rainK);
-      scene.fog.density = fog0 * (1 + 0.35 * rainK);
+      scene.fog.density = fog0 * (1 + 0.35 * rainK + (lw ? 0.5 * lw.cloud + 2 * lw.mist : 0));
       walkMat.roughness = 0.5 - 0.25 * rainK;
     },
     event(type, data) { runner.event(type, data); },

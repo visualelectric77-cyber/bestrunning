@@ -7,6 +7,7 @@
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
 import { createFirs } from './kit/firs.js';
+import { liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
   id: 'nieve',
@@ -196,6 +197,7 @@ export async function createTheme(ctx) {
   const fg = new THREE.BufferGeometry();
   fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nF * 3), 3));
   fg.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 3));
+  startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
   const flakeU = { uTime: { value: 0 }, uS: { value: 0 }, uSize: { value: 40 }, uFall: { value: 0 }, uDrift: { value: 0 }, uDens: { value: 0.5 } };
   // escenario vivo (web 1.15): la nevada sigue la intensidad del tramo (suave al trote, ventisca ligera en los sprints)
   const SNOW_E = { walk: 0.35, warmup: 0.4, cooldown: 0.35, jog: 0.5, run: 0.65, fast: 0.85, sprint: 1 };
@@ -229,7 +231,9 @@ export async function createTheme(ctx) {
       rowL.w = lGroup.position.z + 6;
       rowR.w = lGroup.position.z + 6 - LANT_D / 2;
       flakeU.uTime.value = st.rm ? 0 : f.time;
-      const eT = SNOW_E[f.zone] ?? 0.5;
+      // con «Tiempo real»: si nieva de verdad en el sitio elegido, nieva más; si está despejado, apenas unos copos
+      const lw = liveWeather();
+      const eT = lw ? Math.min(1, 0.2 + 0.8 * lw.snow + 0.25 * lw.cloud) : (SNOW_E[f.zone] ?? 0.5);
       snowE = snowE < 0 ? eT : snowE + (eT - snowE) * (1 - Math.exp(-f.dt * 0.35));
       flakeU.uDens.value = 0.35 + 0.65 * snowE;
       flakeU.uFall.value += f.dt * (0.7 + 1.5 * snowE * snowE);

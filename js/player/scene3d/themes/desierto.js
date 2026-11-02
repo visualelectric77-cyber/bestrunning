@@ -6,6 +6,7 @@
 // A VELOCIDAD REAL: asfalto, arena, hitos, piedras y mesetas avanzan a km/h ÷ 3,6 m/s.
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
+import { createRain, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
   id: 'desierto',
@@ -206,6 +207,16 @@ export async function createTheme(ctx) {
   mesaGroup.add(mesas);
   root.add(mesaGroup);
 
+  // ── tiempo real (web 1.16): las nubes tapan las estrellas, al atardecer/amanecer el horizonte se calienta y, si
+  //    llueve en el sitio elegido, llueve en la carretera ──
+  startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
+  const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 1400 : 800, color: [0.26, 0.26, 0.3] });
+  root.add(rain.mesh);
+  const gain0 = sky.u.uGain.value;
+  const fog0 = scene.fog.density;
+  const fogC0 = scene.fog.color.clone();
+  const warm = new THREE.Color(0.55, 0.36, 0.26);
+
   const inst = {
     director: { scale: 1.0, maxDown: 0.15, orbit: true },
     resize(s) { runner.resize(s); },
@@ -222,6 +233,11 @@ export async function createTheme(ctx) {
       rowL.w = postGroup.position.z + 10;
       rowR.w = postGroup.position.z + 10 - POST_D / 2;
       rowE.w = eyeGroup.position.z + 4;
+      const w = liveWeather();
+      sky.u.uGain.value = gain0 * (w ? (1 - 0.94 * w.cloud) * (1 + 0.4 * w.day) : 1);
+      scene.fog.density = fog0 * (w ? 1 + 2 * w.cloud + 4 * w.mist : 1);
+      scene.fog.color.copy(fogC0).lerp(warm, w ? 0.5 * w.golden + 0.25 * w.day : 0);
+      rain.update(f, S, w ? w.rain : 0);
     },
     event(type, data) { runner.event(type, data); },
     get _debug() { return runner.debug(); },

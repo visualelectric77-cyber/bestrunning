@@ -8,6 +8,7 @@
 // refleja el panorama, que es lo que de verdad se ve en él).
 import { createRunner, scrollZ } from './kit/runner.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
+import { createRain, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
   id: 'costa',
@@ -266,13 +267,23 @@ export async function createTheme(ctx) {
   const white = new THREE.Color(1, 1, 1);
   const P0 = { bulb: bulbs.material.uniforms.uPower.value, halo: lampHalo.material.uniforms.uPower.value, lamp: lampU.uLampPower.value };
   const totalSec = Math.max(60, ctx.timeline.totalSec);
-  function dawn(f) {
+  const grey = new THREE.Color(0.7, 0.74, 0.8);
+  const fogD0 = scene.fog.density;
+  startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
+  const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 1600 : 900, color: [0.4, 0.42, 0.48] });
+  root.add(rain.mesh);
+  function dawn(f, S) {
+    // con «Tiempo real» manda la hora del sitio elegido; si no, el amanecer avanza con la clase
+    const w = liveWeather();
     const p = Math.min(1, Math.max(0, f.t / (totalSec * 0.92)));
-    const d = p * p * (3 - 2 * p);
-    const g = 0.42 + 0.46 * d;
+    const d = w ? w.day : p * p * (3 - 2 * p);
+    const cloud = w ? w.cloud : 0;
+    const g = (0.42 + 0.46 * d) * (1 - 0.4 * cloud) * (w && d < 0.05 ? 0.6 : 1);
     sky.u.uGain.value = g; waterU.uGain.value = g;
-    sky.u.uTint.value.copy(blue).lerp(white, d);
-    sun.intensity = 0.25 + 1.45 * d;
+    sky.u.uTint.value.copy(blue).lerp(white, d).lerp(grey, 0.75 * cloud);
+    scene.fog.density = fogD0 * (1 + 1.4 * cloud + (w ? 3 * w.mist : 0));
+    rain.update(f, S, w ? w.rain : 0);
+    sun.intensity = (0.25 + 1.45 * d) * (1 - 0.75 * cloud);
     hemi.intensity = 0.25 + 0.22 * d;
     scene.environmentIntensity = 0.45 + 0.4 * d;
     scene.fog.color.copy(fogBase).multiplyScalar(0.55 + 0.45 * d).multiply(sky.u.uTint.value);
@@ -298,7 +309,7 @@ export async function createTheme(ctx) {
       lampGroup.position.z = scrollZ(S, LAMP_D);
       rowLamp.w = lampGroup.position.z + 12;
       rowBol.w = bolGroup.position.z + 4;
-      dawn(f);
+      dawn(f, S);
       waterU.uS.value = S % 4096;
       waterU.uTime.value = st.rm ? 0 : f.time;
     },
