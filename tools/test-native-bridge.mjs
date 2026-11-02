@@ -129,10 +129,10 @@ const SCHEMA = {
   // RITMUP Pro (StoreKit 2): la página abre la hoja de la suscripción; el iPhone manda el estado (solo con 'store' en caps)
   'store.show': { from: opt('str') },
   'store.status': { pro: 'bool', product: opt('str'), expires: opt('int'), trial: 'bool', available: 'bool' },
-  // build 18 (cap 'head'): «Sigue tu cabeza» con ARKit (js/player/headtrack.js). `head {}` = sin cara
+  // build 19 (cap 'head-v2'): «Sigue tu cabeza» con la cámara frontal (js/player/headtrack.js). `head {}` = sin cara
   'head.start': { hz: opt('int') },
   'head.stop': {},
-  head: { x: opt('num'), y: opt('num'), z: opt('num'), yaw: opt('num'), pitch: opt('num') },
+  head: { x: opt('num'), y: opt('num'), z: opt('num'), yaw: opt('num'), pitch: opt('num'), err: opt('str') },
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',

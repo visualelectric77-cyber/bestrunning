@@ -7,6 +7,7 @@
 // trabajo de cámara lo hace la app nativa, que no toca la sesión de audio de WebKit. En Safari no está disponible.
 import { createHeadFilter } from './headpose.js';
 import { isNative, nativeStatus, post as nativePost, on as nativeOn } from '../integrations/native-bridge.js';
+import { audioContextInfo, reassertAudio } from '../audio/audio-engine.js';
 
 export const HEAD_KEY = 'ritmup.headtrack';
 /** Signo de x y yaw que llega de la app (1 = tal cual). Si en un iPhone el efecto saliera al revés, se corrige aquí. */
@@ -44,6 +45,7 @@ export function createHeadTracker({ onState = () => {} } = {}) {
   let stopped = true;
   let face = false;
   let stopAt = 0;
+  let blocked = false;   // se apagó por el audio: no vuelve a encenderse en esta clase
   const t = (ms) => ms / 1000;
   const now = () => (globalThis.performance?.now?.() ?? Date.now());
 
@@ -61,16 +63,37 @@ export function createHeadTracker({ onState = () => {} } = {}) {
   async function startNative() {
     const off = nativeOn('head', (d) => {
       if (stopped) return;
+      if (d && typeof d.err === 'string') {
+        // la app apagó la cámara: «audio» (su vigilante vio algo raro en el audio) o «denied» (sin permiso)
+        blocked = d.err === 'audio';
+        api.stop();
+        if (blocked) { try { reassertAudio('headtrack'); } catch { /* nada */ } }
+        onState('error', d.err);
+        return;
+      }
       const ok = d && Number.isFinite(d.x) && Number.isFinite(d.y) && Number.isFinite(d.z);
       sample(ok ? { x: HEAD_MIRROR * d.x, y: +d.y, z: +d.z, yaw: HEAD_MIRROR * (+d.yaw || 0), pitch: +d.pitch || 0 } : null);
     });
-    nativePost('head.start', { hz: 30 });
-    return { stop() { try { off?.(); } catch { /* nada */ } nativePost('head.stop', {}); } };
+    nativePost('head.start', { hz: 15 });
+    // segundo vigilante, en la página: si el AudioContext deja de sonar con la cámara encendida, fuera la cámara
+    const was = audioState();
+    const watch = setInterval(() => {
+      if (stopped) return;
+      const st = audioState();
+      if (was === 'running' && st && st !== 'running') {
+        blocked = true;
+        api.stop();
+        try { reassertAudio('headtrack'); } catch { /* nada */ }
+        onState('error', 'audio');
+      }
+    }, 500);
+    return { stop() { clearInterval(watch); try { off?.(); } catch { /* nada */ } nativePost('head.stop', {}); } };
   }
 
   const api = {
     async start() {
       if (!stopped) return true;
+      if (blocked) return false;
       const kind = headSource();
       if (!kind) { onState('error', 'unsupported'); return false; }
       stopped = false;
@@ -126,4 +149,8 @@ export function poseFromMatrix(m) {
     yaw: -Math.atan2(fx, fz),
     pitch: Math.atan2(fy, Math.hypot(fx, fz)),
   };
+}
+
+function audioState() {
+  try { return (audioContextInfo() || {}).state || null; } catch { return null; }
 }

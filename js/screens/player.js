@@ -1733,7 +1733,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
               headWarned = true;
               const msg = why === 'unsupported'
                 ? (isNative() ? 'Para seguir tu cabeza, actualiza la app de RITMUP' : '«Sigue tu cabeza» solo funciona en la app de RITMUP')
-                : 'No he podido seguir tu cabeza en esta clase';
+                : why === 'audio' ? 'He apagado «Sigue tu cabeza» para que suenen la música y el coach'
+                  : why === 'denied' ? 'Sin permiso de cámara: actívalo en Ajustes › RITMUP para seguir tu cabeza'
+                    : 'No he podido seguir tu cabeza en esta clase';
               toast(msg, { icon: 'info', duration: 4500 });
             }
           },
