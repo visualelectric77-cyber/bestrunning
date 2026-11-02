@@ -359,6 +359,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let sessionTheme = null;    // escenario elegido en Preparación SOLO para esta clase ('auto' o un id; null = el de Perfil)
   let sceneThemeId = null;    // escenario con el que se creó (o al que se cambió) la escena
   let scene = null;           // controlador de createScene3D (null = fondo 2D)
+  let head = null;            // seguimiento de cabeza (js/player/headtrack.js), solo con Ajustes › «Sigue tu cabeza»
+  let headWarned = false;
   let sceneP = null;          // creación en curso
   let sceneCanvas = null;
   let sceneOn = false;        // primer fotograma pintado y lienzo visible
@@ -1704,6 +1706,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     computeDrops();
     pushHudRects();
     startSceneLoop();
+    startHead();
     // Fundido de entrada cuando la escena ya pinta (dos fotogramas): el 2D queda debajo como respaldo
     requestAnimationFrame(() => requestAnimationFrame(() => {
       if (!scene || disposed || !root) return;
@@ -1711,6 +1714,38 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (!sceneCanvas?.dataset.lost) root.classList.add('has-3d');
       scheduleHudRects();
     }));
+  }
+
+  /**
+   * Perspectiva acoplada a la cabeza (beta): con «Sigue tu cabeza» activado en Ajustes, la escena 3D se recoloca con tu
+   * cabeza (ARKit en la app nativa; la web no abre cámara ni <video>). Solo con la clase en marcha; se para en pausa y
+   * al final.
+   */
+  function startHead() {
+    if (!scene || disposed || reducedMotion()) return;
+    if (engine && engine.getState().status !== 'running') return;
+    import('../player/headtrack.js').then((m) => {
+      if (!scene || disposed || !m.headTrackOn()) return;
+      if (!head) {
+        head = m.createHeadTracker({
+          onState: (st, why) => {
+            if (st === 'error' && !headWarned) {
+              headWarned = true;
+              const msg = why === 'unsupported'
+                ? (isNative() ? 'Para seguir tu cabeza, actualiza la app de RITMUP' : '«Sigue tu cabeza» solo funciona en la app de RITMUP')
+                : 'No he podido seguir tu cabeza en esta clase';
+              toast(msg, { icon: 'info', duration: 4500 });
+            }
+          },
+        });
+      }
+      scall('setHead', (now) => head?.pose(now) ?? null);
+      head.start();
+    }).catch(() => {});
+  }
+
+  function stopHead() {
+    try { head?.stop(); } catch { /* nada */ }
   }
 
   /** Escenario de esta clase: elección de Preparación › preferencia de Perfil ('auto' = según el tipo de clase). */
@@ -1738,6 +1773,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   function destroyScene() {
+    stopHead();
     stopSceneLoop();
     if (hudRaf) cancelAnimationFrame(hudRaf);
     hudRaf = 0;
@@ -2369,7 +2405,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       applySegment(engine.getState(), { reason: 'ready', silent: true });
       update(engine.getState());
       ensureCoach();
-      runCountdown(() => engine.start());
+      runCountdown(() => { engine.start(); startHead(); });
       // Cabecera de apertura durante el 3-2-1 (un toque la salta); el lower third con la cuenta sigue visible
       mo('intro', {
         title: workout.title || 'Entrenamiento',
@@ -2647,6 +2683,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (performance.now() - testEndAt > 2500) sceneEvent('halfway');
     } else if (type === 'pause' || type === 'resume') {
       sceneEvent(type);
+      if (type === 'pause') stopHead(); else startHead();
     } else if (type === 'testEnd') {
       testEndAt = performance.now();
       sceneEvent('testEnd', { test: d.test || null });
@@ -2917,7 +2954,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     ensureCoach();
     haptic('medium');
     if (s.status === 'ready') {
-      runCountdown(() => engine.start());
+      runCountdown(() => { engine.start(); startHead(); });
     } else if (needsCountdown) {
       needsCountdown = false;
       runCountdown(() => engine.resume());
@@ -3621,6 +3658,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     clearNowPlaying();
     // Plano final sobrio de la escena (~3 s) mientras el rótulo final resume la sesión
     sceneEvent('finish', { durationMs: FINISH_MS });
+    stopHead();
     showDone(session);
   }
 

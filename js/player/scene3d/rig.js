@@ -63,6 +63,12 @@ export function createRig(THREE, camera) {
     settle,
     /** Multiplicador del balanceo de zancada del núcleo (0 = sin balanceo). 1 u = 1 m ⇒ ~1 cm de rebote. */
     bobScale: 1,
+    /**
+     * Perspectiva acoplada a la cabeza (scene.setHead; js/player/headpose.js → headCamera): desplazamiento de la cámara
+     * en su propio marco (m), giro de la mirada (rad) y distancia de la «ventana» (m): la lente se descentra para que lo
+     * que está a `win` m quede quieto en pantalla. Ceros = sin efecto.
+     */
+    head: { dx: 0, dy: 0, dz: 0, yaw: 0, pitch: 0, win: 3.2 },
     /** Pose actual suavizada (solo lectura). */
     current: { position: new THREE.Vector3(), lookAt: new THREE.Vector3(), fov: 60, roll: 0, shift: new THREE.Vector2() },
     /** Coloca la cámara en la pose objetivo en el próximo fotograma, sin transición (cortes, saltos, cambio de escenario). */
@@ -106,12 +112,17 @@ export function createRig(THREE, camera) {
       camera.up.set(0, 1, 0);
       camera.lookAt(look);
       if (c.roll) camera.rotateZ(c.roll);
+      const hd = rig.head;
+      if (hd.dx || hd.dy || hd.dz) { camera.translateX(hd.dx); camera.translateY(hd.dy); camera.translateZ(hd.dz); }
+      if (hd.yaw) camera.rotateY(hd.yaw);
+      if (hd.pitch) camera.rotateX(hd.pitch);
       camera.fov = c.fov;
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
       const e = camera.projectionMatrix.elements;
-      e[8] = -c.shift.x;
-      e[9] = -c.shift.y;
+      const win = hd.win > 0.5 ? hd.win : 3.2;
+      e[8] = -(c.shift.x + (e[0] * hd.dx) / win);
+      e[9] = -(c.shift.y + (e[5] * hd.dy) / win);
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
       camera.updateMatrixWorld();
     },

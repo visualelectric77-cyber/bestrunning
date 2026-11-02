@@ -28,6 +28,7 @@
 //   scene.setTheme(id) → Promise<bool> · scene.getTheme() → id · scene.setQuality(q) · scene.setTvMode(bool)
 //   scene.setStrideBob(bool) (alias setStride) · scene.resize() · scene.getInfo() · scene.destroy({ releaseContext })
 //   scene.setRunning(bool)                // false: creada pero sin pintar (preparación); true: vuelve a pintar
+//   scene.setHead(fn | null)              // perspectiva acoplada a la cabeza: fn(nowMs) → pose filtrada (headpose.js)
 //   scene.setSpeedFeel('real'|'viva'|'intensa')  // sensación de velocidad (scene3d/speedfeel.js); sin llamarla se lee
 //                                         //   localStorage 'ritmup.speedfeel' al crear la escena y en cada escenario
 //   Calidad 'auto': baja por cadencia Y coste de CPU por fotograma (un rAF a 30 fps del modo de bajo consumo con poco
@@ -105,6 +106,7 @@ import {
 } from './scene3d/util.js';
 import { THEMES, DEFAULT_THEME, themeById, listThemes } from './scene3d/themes/index.js';
 import { readSpeedFeel, speedFeelProfile, speedFeelFov, kmhOfVisual } from './scene3d/speedfeel.js';
+import { headCamera } from './headpose.js';
 import { ZONES } from '../training/levels.js';
 
 export { THEMES, DEFAULT_THEME, listThemes };
@@ -145,7 +147,7 @@ function noopController() {
   const f = () => {};
   return {
     setState: f, setBeat: f, event: f, resize: f, setQuality: f, setTvMode: f, destroy: f, setHudRects: f, setGhost: f,
-    setAnalyser: f, setStride: f, setStrideBob: f, setRunning: f, setSpeedFeel: f, setTheme: async () => false, getTheme: () => null,
+    setAnalyser: f, setHead: f, setStride: f, setStrideBob: f, setRunning: f, setSpeedFeel: f, setTheme: async () => false, getTheme: () => null,
     getInfo: () => ({ fps: 0, quality: 'off', level: -1 }),
   };
 }
@@ -292,6 +294,8 @@ export async function createScene3D(canvas, {
   let lastQChange = nowMs();
   let hiddenTimer = 0;
   let parked = false;          // setRunning(false): el reproductor la tiene creada pero parada (preparación)
+  let headFn = null;           // scene.setHead(fn): pose filtrada de la cabeza (js/player/headtrack.js), o null
+  const HEAD_ZERO = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, w: 0 };
   // Calidad adaptativa: cadencia de fotogramas Y coste de CPU por fotograma (un rAF limitado a 30 fps por el modo de
   // bajo consumo no es sobrecarga de GPU); arranque, cambio de escenario y vuelta del segundo plano no cuentan
   let warmUntil = 0;
@@ -834,6 +838,12 @@ export async function createScene3D(canvas, {
       // lo suaviza). El horizonte no se mueve: la cámara va nivelada y el encuadre lo fija el desplazamiento de lente
       if (!reduced && !(F.finale > 0) && feel.fov > 0) rig.target.fov += speedFeelFov(feel, kmhOfVisual(vNow)) * F.intro;
     }
+    // perspectiva acoplada a la cabeza: nunca con movimiento reducido (las capturas solo la ven si se pide)
+    {
+      let hp = HEAD_ZERO;
+      if (headFn && !reduced) { try { hp = headFn(now) || HEAD_ZERO; } catch { hp = HEAD_ZERO; } }
+      headCamera(hp, rig.head);
+    }
     rig.update(dt, aspect, bobX, bobY);
     // luces de tu récord: con la cámara final (desplazamiento de lente incluido). Tres fallos seguidos ⇒ se apagan y
     // cada escenario recupera su propia marca del fantasma (ctx.ghostLights); la escena sigue en 3D
@@ -1122,6 +1132,9 @@ export async function createScene3D(canvas, {
       if (destroyed) return;
       try { spectrum.set(node || null); } catch { /* idem */ }
     },
+
+    /** Perspectiva acoplada a la cabeza: fn(nowMs) → { x, y, z, yaw, pitch, w } (headpose.js) o null para quitarla. */
+    setHead(fn) { headFn = typeof fn === 'function' ? fn : null; },
 
     setStride(on) { strideOn = on !== false; },
     setStrideBob(on) { strideOn = on !== false; },

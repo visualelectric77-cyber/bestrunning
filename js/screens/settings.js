@@ -787,9 +787,14 @@ function displayHtml(s) {
    js/player/youtube.js ni el script de YouTube (contrato con ../screens/player.js). */
 const LAB_YT_KEY = 'ritmup.lab.youtube';
 const labYtOn = () => safe(() => localStorage.getItem(LAB_YT_KEY) === 'on', false);
+/* Sigue tu cabeza (beta): localStorage 'ritmup.headtrack' = 'on' (contrato con ../player/headtrack.js). */
+const LAB_HEAD_KEY = 'ritmup.headtrack';
+const labHeadOn = () => safe(() => localStorage.getItem(LAB_HEAD_KEY) === 'on', false);
 function labHtml() {
-  return group('Laboratorio', toggleRow('st-lab-yt', 'Clase con vídeo de YouTube (beta)',
-    'En la preparación, elige «Vídeo de YouTube» como fondo y pega un enlace o una lista: se ve arriba y tus datos debajo. Sin mundo 3D ni música DJ en esa clase', labYtOn()),
+  return group('Laboratorio', `${toggleRow('st-lab-head', 'Sigue tu cabeza (beta)',
+    'El escenario 3D se mueve contigo como una ventana: asómate a un lado o levanta la cabeza para ver más. Solo en la app de RITMUP: usa el sensor de Face ID, todo se procesa en tu iPhone y no se guarda ninguna imagen', labHeadOn())}
+    ${toggleRow('st-lab-yt', 'Clase con vídeo de YouTube (beta)',
+    'En la preparación, elige «Vídeo de YouTube» como fondo y pega un enlace o una lista: se ve arriba y tus datos debajo. Sin mundo 3D ni música DJ en esa clase', labYtOn())}`,
   'Funciones en pruebas: pueden cambiar o desaparecer.');
 }
 
@@ -2753,6 +2758,9 @@ const PAGES = {
       } else if (id === 'st-captions') {
         haptic('selection');
         set({ captions: !!v });
+      } else if (id === 'st-lab-head') {
+        haptic('selection');
+        safe(() => localStorage.setItem(LAB_HEAD_KEY, v ? 'on' : 'off'));
       } else if (id === 'st-lab-yt') {
         haptic('selection');
         safe(() => { if (v) localStorage.setItem(LAB_YT_KEY, 'on'); else localStorage.removeItem(LAB_YT_KEY); });
