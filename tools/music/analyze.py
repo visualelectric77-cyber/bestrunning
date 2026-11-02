@@ -325,6 +325,9 @@ def main_new():
         if tid in seen:
             raise SystemExit(f"id repetido en el manifiesto: {tid}")
         seen.add(tid)
+        # Reservas y descartes («reserve»: true, con su «note»): se quedan en el manifiesto pero no entran en la biblioteca
+        if m.get("reserve"):
+            continue
         if only is not None and tid not in only:
             continue
         if only is None and tid in by_id and not force:
