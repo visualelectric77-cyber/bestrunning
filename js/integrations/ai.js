@@ -7,6 +7,8 @@
 //   iPhone → página  ai.result {id, ok, output | error}
 //   página → iPhone  health.metrics.get {days}
 //   iPhone → página  health.metrics {resting: [[dayKey, bpm]], hrv: [[dayKey, ms]], at}
+//                    build 17 (cap 'health-sleep'): + sleep [{day, start, end, asleep, deep, core, rem, awake, stages}],
+//                    vo2 [[dayKey, ml/kg·min]], hrRecovery [[dayKey, ppm que baja en 1 min]]
 
 import { isNative, nativeStatus, post, on } from './native-bridge.js';
 
@@ -67,8 +69,13 @@ export function cachedHealthMetrics() {
   } catch { return null; }
 }
 
-/** Pide al iPhone el pulso en reposo y la VFC de los últimos `days` días. → Promise<métricas | null>. Nunca lanza. */
-export function fetchHealthMetrics(days = 35) {
+/** ¿El iPhone manda también sueño, VO2 máx y recuperación (build 17)? */
+export function healthSleepAvailable() {
+  return isNative() && caps().includes('health-sleep');
+}
+
+/** Pide al iPhone las medias de Salud de los últimos `days` días (10 semanas: «Tu forma» y «Carga» miran 8). → Promise<métricas | null>. Nunca lanza. */
+export function fetchHealthMetrics(days = 70) {
   if (!isNative() || !caps().includes('health-metrics')) return Promise.resolve(null);
   return new Promise((resolve) => {
     let done = false;
@@ -82,6 +89,9 @@ export function fetchHealthMetrics(days = 35) {
         wristTemp: Array.isArray(data?.wristTemp) ? data.wristTemp : [],
         wristTempAbsolute: !!data?.wristTempAbsolute,
         respiratory: Array.isArray(data?.respiratory) ? data.respiratory : [],
+        sleep: Array.isArray(data?.sleep) ? data.sleep : [],
+        vo2: Array.isArray(data?.vo2) ? data.vo2 : [],
+        hrRecovery: Array.isArray(data?.hrRecovery) ? data.hrRecovery : [],
         at: Number(data?.at) || Date.now(),
       };
       try { localStorage.setItem(METRICS_KEY, JSON.stringify(m)); } catch { /* sin almacenamiento */ }

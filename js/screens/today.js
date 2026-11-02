@@ -649,7 +649,7 @@ export function mount(el) {
 
   // Semáforo de fatiga: pide las métricas de Salud al iPhone (si las ofrece) y repinta si han cambiado
   let gone = false;
-  fetchHealthMetrics(35).then((m) => { if (m && !gone) render(); }).catch(() => {});
+  fetchHealthMetrics().then((m) => { if (m && !gone) render(); }).catch(() => {});
 
   // Si la app sigue abierta al cambiar de día (o vuelve de segundo plano), se actualiza sola.
   const checkDay = () => {

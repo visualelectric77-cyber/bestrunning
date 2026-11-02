@@ -1,6 +1,6 @@
 // Pruebas de js/training/health-analysis.js con clases sintéticas: efectos plantados (tiene que encontrarlos) y azar
 // puro (no puede inventarse una mejora). node tools/test-health-analysis.mjs
-import { fitnessTrend, sessionHrAt, loadBalance, sessionLoad, fitnessText, loadText } from '../js/training/health-analysis.js';
+import { fitnessTrend, sessionHrAt, loadBalance, sessionLoad, fitnessText, loadText, sleepList, sleepSummary, sleepVsHr, sleepHrText, vo2Trend, recoveryTrend, weeklyAverages, fmtSleep } from '../js/training/health-analysis.js';
 
 let fails = 0, checks = 0;
 const ok = (c, m) => { checks++; if (!c) { fails++; console.log('✗', m); } };
@@ -116,6 +116,62 @@ function session(daysAgo, base, noise = 1.5) {
   ok(loadBalance(balanced, { today: TODAY, profile: P }).status === 'balanced', `semana normal (${loadBalance(balanced, { today: TODAY, profile: P }).ratio})`);
   ok(loadText(loadBalance(loaded, { today: TODAY, profile: P }))?.title === 'Cargado', 'texto de carga');
   ok(!loadBalance([session(1, 145)], { today: TODAY, profile: P }).ok, 'carga con pocos datos: ok:false');
+}
+
+// 8 · Sueño: resumen de 7 noches (media, horas de acostarse y levantarse, frente a las 4 semanas anteriores)
+{
+  const night = (daysAgo, min, bedH = 23.5) => {
+    const day = dayAgo(daysAgo);
+    const [y, m, d] = day.split('-').map(Number);
+    const start = new Date(y, m - 1, d - 1, Math.floor(bedH), Math.round((bedH % 1) * 60)).getTime();
+    return { day, start, end: start + min * 60000, asleep: min, deep: Math.round(min * 0.14), core: Math.round(min * 0.62), rem: Math.round(min * 0.24), awake: 20, stages: true };
+  };
+  const sleep = [];
+  for (let d = 34; d >= 7; d--) sleep.push(night(d, 400));
+  for (let d = 6; d >= 0; d--) sleep.push(night(d, 430, d === 3 ? 0.5 : 23.5)); // una noche se acuesta a las 0:30
+  sleep.push({ day: 'mal', asleep: 400 }, { day: dayAgo(40), asleep: 60 }); // basura: fuera
+  const ss = sleepSummary({ sleep }, TODAY);
+  ok(ss.ok && ss.nights.length === 7 && ss.avg === 430 && ss.base === 400 && ss.delta === 30, `sueño: media 7:10 y +30 min (${JSON.stringify({ a: ss.avg, b: ss.base })})`);
+  ok(ss.bed === '23:39' && ss.last?.day === TODAY, `sueño: hora media de acostarse sin saltar a medianoche (${ss.bed})`);
+  ok(sleepList({ sleep }).length === 35, 'sueño: se descartan noches mal formadas o de menos de 2 h');
+  ok(!sleepSummary({ sleep: sleep.slice(0, 3) }, TODAY).ok && !sleepSummary(null, TODAY).ok, 'sueño: sin noches recientes, ok:false');
+  ok(fmtSleep(444) === '7:24', 'fmtSleep');
+}
+
+// 9 · Sueño ↔ pulso: efecto plantado de +7 ppm tras noches cortas, con la forma mejorando a la vez
+function sleepCase(effect, noise = 1.5) {
+  const hist = [], sleep = [];
+  for (let d = 80; d >= 0; d -= 2) {
+    const min = 330 + Math.floor(rnd() * 180); // de 5 h 30 a 8 h 30
+    sleep.push({ day: dayAgo(d), start: 0, end: 0, asleep: min, deep: 60, core: 250, rem: 90, awake: 20, stages: true });
+    const base = 141 + 6 * (d / 80) + (min < 390 ? effect : 0);
+    hist.push(session(d, base, noise));
+  }
+  return sleepVsHr(hist, { sleep }, { today: TODAY, levels: LV, days: 90 });
+}
+{
+  const c = sleepCase(7);
+  ok(c.ok && c.significant && Math.abs(c.diff - 7) <= 2, `detecta +7 ppm tras dormir poco (${JSON.stringify({ d: c.diff, t: c.t, s: c.short, l: c.long })})`);
+  ok(/cuesta 7|cuesta 6|cuesta 8/.test(sleepHrText(c)?.title || ''), `texto del cruce (${sleepHrText(c)?.title})`);
+  let claims = 0;
+  for (let r = 0; r < 200; r++) { const z = sleepCase(0, 2.5); if (z.ok && z.significant) claims++; }
+  ok(claims / 200 <= 0.05, `sueño sin efecto: falsas alarmas ${claims}/200`);
+  const few = sleepVsHr([session(1, 147)], { sleep: [{ day: dayAgo(1), asleep: 300 }] }, { today: TODAY, levels: LV });
+  ok(!few.ok && few.short === 1 && few.long === 0 && few.need === 4, 'cruce con pocas clases: ok:false con lo que falta');
+}
+
+// 10 · VO2 máx, recuperación al minuto y medias semanales
+{
+  const vo2 = [[dayAgo(56), 43.6], [dayAgo(30), 44.1], [dayAgo(2), 44.8]];
+  const v = vo2Trend({ vo2 }, TODAY);
+  ok(v && v.last === 44.8 && v.change === 1.2 && v.weeks === 8, `VO2: último y cambio (${JSON.stringify(v)})`);
+  ok(vo2Trend({ vo2: [[dayAgo(3), 44]] }, TODAY).change === null && vo2Trend({}, TODAY) === null, 'VO2: un solo dato, sin cambio');
+  const hrRecovery = [22, 22, 23, 24, 25, 26, 27, 27].map((x, i) => [dayAgo(50 - i * 7), x]);
+  const rc = recoveryTrend({ hrRecovery }, TODAY);
+  ok(rc && rc.now === 27 && rc.before === 22, `recuperación: ahora y antes (${JSON.stringify({ n: rc?.now, b: rc?.before })})`);
+  const hrv = []; for (let d = 55; d >= 0; d--) hrv.push([dayAgo(d), d < 7 ? 62 : 56]);
+  const wk = weeklyAverages(hrv, TODAY, 8);
+  ok(wk.length === 8 && wk[7].avg === 62 && wk[0].avg === 56, `VFC por semanas (${wk.map((w) => w.avg).join(' ')})`);
 }
 
 console.log(fails ? `✗ test-health-analysis: ${fails} fallos de ${checks}` : `✓ test-health-analysis: ${checks} comprobaciones correctas`);

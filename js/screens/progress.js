@@ -11,10 +11,10 @@ import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, ro
 import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
 import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integrations/watch-hr.js';
 import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integrations/session-music.js';
-import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
+import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics, fetchHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { weekReportInput } from '../training/week-report.js';
-import { fitnessTrend, loadBalance, fitnessText, loadText } from '../training/health-analysis.js';
+import { healthTab } from './health.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -712,10 +712,20 @@ function historyLink(count) {
   </div>`;
 }
 
+/** Pestañas «Entrenos | Salud» (solo con clases hechas). */
+const progressTab = (s) => (s.ui?.progressTab === 'health' ? 'health' : 'train');
+
 function view(s, animate, wr = null) {
   const history = Array.isArray(s.history) ? s.history.filter(Boolean) : [];
   const today = todayKey();
   const parts = [];
+  if (history.length) {
+    parts.push(`<div class="pg-tabs">${segmented({ name: 'pg-tab', options: [{ value: 'train', label: 'Entrenos' }, { value: 'health', label: 'Salud' }], value: progressTab(s) })}</div>`);
+    if (progressTab(s) === 'health') {
+      parts.push(safe(() => healthTab(s, today), ''));
+      return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
+    }
+  }
   if (!history.length) {
     parts.push(emptyHero());
   } else {
@@ -729,7 +739,6 @@ function view(s, animate, wr = null) {
   }
   parts.push(speedsSection(s, today));
   if (history.length) parts.push(heartSection(s, today));
-  if (history.length) parts.push(safe(() => healthSection(s, today), ''));
   if (history.length) {
     parts.push(heatSection(history, today));
     parts.push(recordsSection(history));
@@ -737,70 +746,6 @@ function view(s, animate, wr = null) {
   parts.push(achievementsSection(s));
   if (history.length) parts.push(historyLink(history.length));
   return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
-}
-
-/* ───────────── Salud y entrenos (cálculos fijos, sin IA: js/training/health-analysis.js) ───────────── */
-
-function healthSection(s, today) {
-  const history = Array.isArray(s.history) ? s.history.filter(Boolean) : [];
-  if (!history.length) return '';
-  const r = safe(() => readiness(cachedHealthMetrics(), today), null);
-  const f = safe(() => fitnessTrend(history, { today, levels: s.levels }), null);
-  const l = safe(() => loadBalance(history, { today, profile: s.profile }), null);
-  const cards = [];
-  if (r?.title) {
-    const dot = r.level === 'green' ? 'var(--ok)' : r.level === 'amber' ? 'var(--warn)' : 'var(--danger)';
-    cards.push(`<div class="card pg-card pg-health">
-      <div class="eyebrow">Recuperación · hoy</div>
-      <p class="pg-health__title"><span class="pg-health__dot" style="background:${dot}"></span>${esc(r.title)}</p>
-      <p class="pg-health__text">${esc(r.text || '')}</p>
-    </div>`);
-  }
-  const ft = f?.ok ? fitnessText(f) : null;
-  if (ft) {
-    const first = f.points[0].day;
-    const vals = f.points.map((p) => p.hr);
-    const chart = `<div class="pg-chart">${lineChart(
-      [{ name: `Pulso a ${fmt.speed(f.ref)} km/h`, color: 'var(--accent)', points: f.points.map((p) => ({ x: daysBetween(first, p.day), y: p.hr })) }],
-      { height: 140, yMin: Math.floor((Math.min(...vals) - 4) / 5) * 5, yMax: Math.ceil((Math.max(...vals) + 4) / 5) * 5, yFormat: (v) => fmt.int(v), xFormat: (x) => shortDate(addDays(first, Math.round(x))) },
-    )}</div>`;
-    cards.push(`<div class="card pg-card pg-health">
-      <div class="eyebrow">Tu forma</div>
-      <p class="pg-health__title">${esc(ft.title)}</p>
-      ${chart}
-      <p class="pg-health__text">${esc(ft.text)} Cada punto es una clase con pulso del Apple Watch.</p>
-    </div>`);
-  } else if (f) {
-    cards.push(`<div class="card pg-card pg-health">
-      <div class="eyebrow">Tu forma</div>
-      <p class="pg-health__text">${(f.have || 0) >= 6
-        ? `Ya tienes <b class="num">${fmt.int(f.have)}</b> clases que sirven. Falta tiempo: entre la primera y la última tiene que haber 2 semanas para ver una tendencia de verdad. ${14 - (f.span || 0) <= 1 ? 'Mañana' : `En <b class="num">${fmt.int(14 - (f.span || 0))}</b> días`} verás tu gráfico.`
-        : `Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). De tus <b class="num">${fmt.int(f.withHr || 0)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.`}</p>
-    </div>`);
-  }
-  const lt = l?.ok ? loadText(l) : null;
-  if (lt) {
-    const pos = Math.max(4, Math.min(96, ((l.ratio - 0.4) / 1.4) * 100));
-    cards.push(`<div class="card pg-card pg-health">
-      <div class="eyebrow">Carga y descanso</div>
-      <p class="pg-health__title">${esc(lt.title)}<span class="pg-health__meta">${fmt.int(l.sessions7)} clases · ${fmt.int(l.minutes7)} min en 7 días</span></p>
-      <div class="pg-health__gauge" role="img" aria-label="Carga de la semana frente a tu media: ${esc(lt.title)}"><i style="left:${pos.toFixed(1)}%"></i></div>
-      <div class="pg-health__scale"><span>Descansado</span><span>Equilibrado</span><span>Cargado</span></div>
-      <p class="pg-health__text">${esc(lt.text)}</p>
-    </div>`);
-  } else if (l && !l.ok) {
-    const days = Math.max(1, 20 - (l.days || 0));
-    cards.push(`<div class="card pg-card pg-health">
-      <div class="eyebrow">Carga y descanso</div>
-      <p class="pg-health__text">Para decirte si estás descansado o cargado comparo tu última semana con tu media del mes: necesito <b>3 semanas</b> de clases. ${l.days >= 7 ? `En <b class="num">${fmt.int(days)}</b> días lo tendrás.` : 'Sigue entrenando y aparecerá aquí.'}</p>
-    </div>`);
-  }
-  if (!cards.length) return '';
-  return `<section class="pg-section stack">
-    ${sectionHeader('Salud y entrenos')}
-    ${cards.join('')}
-    <p class="pg-health__foot">Tu pulso de cada clase y tus datos de Salud, cruzados en tu iPhone con cálculos fijos. Orientativo: no es un consejo médico.</p>
-  </section>`;
 }
 
 /* ───────────── hojas ───────────── */
@@ -960,6 +905,18 @@ export function mount(el) {
       name = 'pg-metric';
       value = e.target.value;
     }
+    if (name === 'pg-tab') {
+      const tab = value === 'health' ? 'health' : 'train';
+      if (progressTab(getState()) === tab) return;
+      selfAt = Date.now();
+      selfState = setState((draft) => {
+        draft.ui = draft.ui || {};
+        draft.ui.progressTab = tab;
+      });
+      render();
+      if (tab === 'health') askMetrics();
+      return;
+    }
     if (name !== 'pg-metric') return;
     const metric = value === 'min' ? 'min' : 'km';
     if ((getState().ui?.progressMetric || 'km') === metric) return;
@@ -980,7 +937,16 @@ export function mount(el) {
     if (!raf) raf = requestAnimationFrame(render);
   });
 
+  // Salud: datos frescos del iPhone (sueño, VO2, recuperación…) una vez por pantalla, al abrir la pestaña
+  let metricsAsked = false;
+  const askMetrics = () => {
+    if (metricsAsked) return;
+    metricsAsked = true;
+    fetchHealthMetrics().then((m) => { if (m && !disposed && progressTab(getState()) === 'health' && !raf) raf = requestAnimationFrame(render); }).catch(() => {});
+  };
+
   render();
+  if (progressTab(getState()) === 'health') askMetrics();
 
   return () => {
     disposed = true;

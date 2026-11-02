@@ -118,7 +118,9 @@ const SCHEMA = {
   haptic: { style: opt('str') }, // build 6: vibración de iOS (js/core/haptics.js → BRNative.post)
   // build 9: Salud para el semáforo de fatiga, IA del iPhone y avisos de la mañana (js/integrations/ai.js)
   'health.metrics.get': { days: opt('int') },
-  'health.metrics': { resting: arr('any'), hrv: arr('any'), wristTemp: opt(arr('any')), wristTempAbsolute: opt('bool'), respiratory: opt(arr('any')), at: 'num' },
+  'health.metrics': { resting: arr('any'), hrv: arr('any'), wristTemp: opt(arr('any')), wristTempAbsolute: opt('bool'), respiratory: opt(arr('any')), at: 'num',
+    // build 17 (cap 'health-sleep'): noches con fases, VO2 máx y recuperación al minuto
+    sleep: opt(arr({ day: 'str', start: 'num', end: 'num', asleep: 'int', deep: 'int', core: 'int', rem: 'int', awake: 'int', stages: 'bool' })), vo2: opt(arr('any')), hrRecovery: opt(arr('any')) },
   'ai.request': { id: 'str', task: 'str', input: 'obj' },
   'ai.result': { id: 'str', task: opt('str'), ok: 'bool', output: opt('obj'), error: opt('str'), message: opt('str') },
   'notify.config': { enabled: 'bool', weekdayTime: 'str', weekendTime: 'str', preRun: 'bool', preRunTime: 'str', thursdayPreRunTime: opt('str') },

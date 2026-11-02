@@ -207,3 +207,149 @@ export function loadText(l) {
   if (l.status === 'rested') return { title: 'Descansado', text: 'Esta semana llevas menos que tu media: hay margen para una clase más larga o más intensa.' };
   return { title: 'Equilibrado', text: 'Entrenas lo que tu cuerpo recupera. Buen punto para seguir subiendo poco a poco.' };
 }
+
+/* ───────── Build 17 del iPhone: sueño, VO2 máx y recuperación (datos de Salud) ───────── */
+
+const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : NaN);
+const keyMinus = (today, n) => {
+  const d = new Date(keyToMs(today) - n * DAY);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+/** Minutos desde las 12:00 (hora local) de un instante: así la media de horas de acostarse no salta a medianoche. */
+const fromNoon = (ms) => { const d = new Date(ms); return (d.getHours() * 60 + d.getMinutes() + 720) % 1440; };
+const hm = (minFromNoon) => { const m = (Math.round(minFromNoon) + 720) % 1440; return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+
+/** Noches de Salud limpias (de 2 a 16 h dormido), de más antigua a más nueva. */
+export function sleepList(metrics) {
+  const out = [];
+  const seen = new Set();
+  for (const n of Array.isArray(metrics?.sleep) ? metrics.sleep : []) {
+    if (!n || typeof n.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(n.day) || seen.has(n.day)) continue;
+    const asleep = num(n.asleep);
+    if (asleep < 120 || asleep > 960) continue;
+    seen.add(n.day);
+    out.push({ day: n.day, start: num(n.start), end: num(n.end), asleep, deep: num(n.deep), core: num(n.core), rem: num(n.rem), awake: num(n.awake), stages: !!n.stages });
+  }
+  return out.sort((a, b) => (a.day < b.day ? -1 : 1));
+}
+
+/**
+ * Tus últimas `nights` noches. → { ok:false, have } | { ok:true, nights, avg (min), bed, wake ('H:MM'), base (min | null),
+ * delta (min | null), last (noche de hoy | null), stages }
+ */
+export function sleepSummary(metrics, today, nights = 7) {
+  const all = sleepList(metrics);
+  const from = keyMinus(today, nights - 1);
+  const list = all.filter((n) => n.day >= from && n.day <= today);
+  if (list.length < 3) return { ok: false, have: list.length, need: 3 };
+  const prev = all.filter((n) => n.day >= keyMinus(today, nights + 27) && n.day < from);
+  const avg = Math.round(mean(list.map((n) => n.asleep)));
+  const base = prev.length >= 7 ? Math.round(mean(prev.map((n) => n.asleep))) : null;
+  const timed = list.filter((n) => n.start > 0 && n.end > n.start);
+  return {
+    ok: true, nights: list, avg, base, delta: base == null ? null : avg - base,
+    bed: timed.length ? hm(mean(timed.map((n) => fromNoon(n.start)))) : null,
+    wake: timed.length ? hm(mean(timed.map((n) => fromNoon(n.end)))) : null,
+    last: list.find((n) => n.day === today) || null,
+    stages: list.some((n) => n.stages),
+  };
+}
+
+// t de Student al 99 % (dos colas) por grados de libertad: se usa el del gl inmediatamente inferior (más exigente).
+const T99 = [[1, 63.66], [2, 9.92], [3, 5.84], [4, 4.6], [5, 4.03], [6, 3.71], [7, 3.5], [8, 3.36], [9, 3.25], [10, 3.17], [12, 3.05], [15, 2.95], [20, 2.85], [25, 2.79], [30, 2.75], [60, 2.66], [120, 2.62]];
+const tCrit99 = (df) => { let c = T99[0][1]; for (const [d, v] of T99) if (df >= d) c = v; return df > 1000 ? 2.58 : c; };
+
+/** Noche corta y larga (minutos dormido). */
+export const SHORT_NIGHT = 390, LONG_NIGHT = 420;
+
+/**
+ * ¿Te sube el pulso en clase cuando duermes poco? Cada clase (pulso a la velocidad de referencia, como en «Tu forma») se
+ * empareja con la noche de ese día. Se quita la tendencia de forma (Theil–Sen) para que mejorar con el tiempo no se
+ * confunda con dormir más, y se comparan las clases tras noches cortas (< 6 h 30) y largas (≥ 7 h) con la t de Welch:
+ * solo se afirma una diferencia si es significativa al 99 % y de al menos 3 ppm. Hacen falta 4 clases en cada grupo.
+ * → { ok:false, short, long, need, paired, ref } | { ok:true, ref, short, long, hrShort, hrLong, diff, t, significant }
+ */
+export function sleepVsHr(history, metrics, { today, levels, days = 90 } = {}) {
+  const ref = referenceSpeed(levels);
+  const end = keyToMs(today);
+  const nights = new Map(sleepList(metrics).map((n) => [n.day, n]));
+  const pts = [];
+  for (const s of Array.isArray(history) ? history : []) {
+    if (!s?.dayKey || !nights.has(s.dayKey) || !Array.isArray(s.hrSeries) || s.hrSeries.length < 3) continue;
+    const t = keyToMs(s.dayKey);
+    if (!(t <= end && t > end - days * DAY)) continue;
+    const hr = sessionHrAt(s, ref);
+    if (hr != null) pts.push({ x: (t - end) / DAY, hr, sleep: nights.get(s.dayKey).asleep });
+  }
+  let resid = pts.map((p) => p.hr - median(pts.map((q) => q.hr)));
+  if (pts.length >= 6) {
+    const { a, b } = theilSen(pts.map((p) => p.x), pts.map((p) => p.hr));
+    resid = pts.map((p) => p.hr - (a + b * p.x));
+  }
+  const S = pts.map((p, i) => ({ ...p, r: resid[i] }));
+  const short = S.filter((p) => p.sleep < SHORT_NIGHT), long = S.filter((p) => p.sleep >= LONG_NIGHT);
+  if (short.length < 4 || long.length < 4) return { ok: false, ref, short: short.length, long: long.length, need: 4, paired: pts.length };
+  const ms = mean(short.map((p) => p.r)), ml = mean(long.map((p) => p.r));
+  const varOf = (a, m) => a.reduce((s, p) => s + (p.r - m) ** 2, 0) / (a.length - 1);
+  const vs = varOf(short, ms) / short.length, vl = varOf(long, ml) / long.length;
+  const diff = Math.round((ms - ml) * 10) / 10;
+  const se = Math.sqrt(vs + vl);
+  const t = se > 0 ? (ms - ml) / se : 0;
+  const df = se > 0 ? (vs + vl) ** 2 / ((vs ** 2) / (short.length - 1) + (vl ** 2) / (long.length - 1)) : 1;
+  const significant = Math.abs(t) >= tCrit99(df) && Math.abs(diff) >= 3;
+  const hrLong = Math.round(mean(long.map((p) => p.hr)));
+  return { ok: true, ref, short: short.length, long: long.length, paired: pts.length, hrLong, hrShort: Math.round(hrLong + diff), diff, t: Math.round(t * 100) / 100, significant };
+}
+
+/** Frase fija del cruce sueño ↔ pulso. */
+export function sleepHrText(c) {
+  if (!c?.ok) return null;
+  const v = `${String(c.ref).replace('.', ',')} km/h`;
+  const d = Math.abs(Math.round(c.diff));
+  if (c.significant && c.diff > 0) return { title: `Dormir poco te cuesta ${d} ppm`, text: `Tras las noches de menos de 6 h 30, tu pulso a ${v} sube ${d} ppm a la misma velocidad. Las noches de 7 h o más se notan en clase.` };
+  if (c.significant) return { title: 'Dormir menos no te sube el pulso', text: `Tras las noches cortas tu pulso a ${v} incluso baja ${d} ppm. El sueño no es lo que más te frena ahora.` };
+  return { title: 'Tu sueño no cambia tu pulso en clase', text: `Entre noches cortas y largas hay ${d} ppm de diferencia a ${v}: dentro de lo que varía de un día a otro.` };
+}
+
+/** Serie [[dayKey, v]] de Salud entre dos días, ordenada. */
+function seriesBetween(list, from, to) {
+  return (Array.isArray(list) ? list : [])
+    .filter((p) => Array.isArray(p) && typeof p[0] === 'string' && p[0] >= from && p[0] <= to && Number(p[1]) > 0)
+    .map((p) => ({ day: p[0], v: Number(p[1]) })).sort((a, b) => (a.day < b.day ? -1 : 1));
+}
+
+/** VO2 máx que estima el Apple Watch (al caminar o correr al aire libre). → null | { last, change (null si < 3 semanas), weeks, points } */
+export function vo2Trend(metrics, today, days = 70) {
+  const pts = seriesBetween(metrics?.vo2, keyMinus(today, days - 1), today);
+  if (!pts.length) return null;
+  const first = pts[0], last = pts[pts.length - 1];
+  const span = (keyToMs(last.day) - keyToMs(first.day)) / DAY;
+  return { last: Math.round(last.v * 10) / 10, lastDay: last.day, change: span >= 21 ? Math.round((last.v - first.v) * 10) / 10 : null, weeks: Math.round(span / 7), points: pts };
+}
+
+/** Pulsaciones que bajas en el primer minuto tras un entreno (Apple Watch). → null | { now, before (null si pocos), points } */
+export function recoveryTrend(metrics, today, days = 70) {
+  const pts = seriesBetween(metrics?.hrRecovery, keyMinus(today, days - 1), today);
+  if (pts.length < 2) return null;
+  const k = Math.min(3, Math.floor(pts.length / 2));
+  const now = Math.round(mean(pts.slice(-k).map((p) => p.v)));
+  const span = (keyToMs(pts[pts.length - 1].day) - keyToMs(pts[0].day)) / DAY;
+  const before = pts.length >= 6 && span >= 14 ? Math.round(mean(pts.slice(0, k).map((p) => p.v))) : null;
+  return { now, before, points: pts };
+}
+
+/** Medias semanales de una serie de Salud alineadas con las semanas de `loadBalance` (from = semanas atrás). */
+export function weeklyAverages(list, today, weeks = 8) {
+  const out = [];
+  for (let w = weeks - 1; w >= 0; w--) {
+    const vals = seriesBetween(list, keyMinus(today, (w + 1) * 7 - 1), keyMinus(today, w * 7)).map((p) => p.v);
+    out.push({ from: w, avg: vals.length >= 2 ? Math.round(mean(vals) * 10) / 10 : null });
+  }
+  return out;
+}
+
+/** «7:24» (horas:minutos) a partir de minutos. */
+export function fmtSleep(min) {
+  const m = Math.round(num(min));
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}

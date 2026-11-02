@@ -18,6 +18,7 @@ function routes() {
   registerRoute('#/library', { load: () => import('./screens/library.js'), tab: 'library' });
   registerRoute('#/workout/:id', { load: () => import('./screens/workout.js'), tab: 'library', push: true });
   registerRoute('#/progress', { load: () => import('./screens/progress.js'), tab: 'progress' });
+  registerRoute('#/salud/:section', { load: () => import('./screens/health.js'), tab: 'progress', push: true });
   registerRoute('#/history', { load: () => import('./screens/history.js'), tab: 'progress', push: true });
   registerRoute('#/history/:id', { load: () => import('./screens/history.js'), tab: 'progress', push: true });
   registerRoute('#/settings', { load: () => import('./screens/settings.js'), tab: 'settings' });

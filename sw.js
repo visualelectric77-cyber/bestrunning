@@ -2,8 +2,8 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.10.3';
-const BUILD = '65d69e7a31';
+const VERSION = '1.11.0';
+const BUILD = 'e65e8cbeb4';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
@@ -116,6 +116,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/wakelock.js',
   './js/player/youtube-link.js',
   './js/player/youtube.js',
+  './js/screens/health.js',
   './js/screens/history.js',
   './js/screens/library.js',
   './js/screens/onboarding.js',
