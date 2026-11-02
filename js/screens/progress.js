@@ -773,7 +773,7 @@ function healthSection(s, today) {
   } else if (f) {
     cards.push(`<div class="card pg-card pg-health">
       <div class="eyebrow">Tu forma</div>
-      <p class="pg-health__text">Para ver si mejoras necesito <b>6 clases con pulso del Apple Watch</b> en al menos 2 semanas, con tramos a distintas velocidades. Llevas <b class="num">${fmt.int(f.have || 0)}</b>.</p>
+      <p class="pg-health__text">Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). De tus <b class="num">${fmt.int(f.withHr || 0)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.</p>
     </div>`);
   }
   const lt = l?.ok ? loadText(l) : null;

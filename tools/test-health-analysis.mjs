@@ -88,6 +88,19 @@ function session(daysAgo, base, noise = 1.5) {
   ok(sessionHrAt({ dayKey: TODAY, hrSeries: null, speedTrace: [[0, 10]] }, 10) === null, 'sin pulso: null');
 }
 
+// 6b · Velocidades ajustadas (8,7 / 10,4 / 11,9: ninguna es un nivel guardado) cuentan; las cuestas no
+{
+  const s1 = session(2, 147, 0);
+  s1.speedTrace = s1.speedTrace.map(([t, v]) => [t, v + 0.4]);
+  s1.hrSeries = s1.hrSeries.map(([t, h]) => [t, h + Math.round(7 * 0.4)]);
+  const hr = sessionHrAt(s1, 10);
+  ok(hr != null && Math.abs(hr - 147) < 3, `velocidades ajustadas: cuenta y ≈ 147 (${hr})`);
+  const hills = { ...session(2, 147, 0), category: 'hills' };
+  ok(sessionHrAt(hills, 10) === null, 'clase de cuestas: no cuenta');
+  const f = fitnessTrend([session(3, 147), hills], { today: TODAY, levels: LV });
+  ok(f.withHr === 2 && f.have === 1, `cuenta las clases con pulso (${f.withHr}) y las que sirven (${f.have})`);
+}
+
 // 7 · Carga: TRIMP crece con el pulso; semana muy cargada → 'loaded'; semana floja → 'rested'
 {
   const easy = session(0, 125, 0), hard = session(0, 160, 0);

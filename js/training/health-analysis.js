@@ -7,7 +7,6 @@
 //  · Carga: TRIMP de Banister por clase (minutos × reserva de pulso ponderada) o, sin pulso, minutos × intensidad media.
 //    Carga aguda (7 días) / crónica (media semanal de 28 días): < 0,8 descansado · 0,8–1,3 equilibrado · > 1,3 cargado.
 
-import { hrAtLevels } from '../integrations/watch-hr.js';
 import { DEFAULT_LEVELS } from './levels.js';
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -28,13 +27,49 @@ export function referenceSpeed(levels) {
   return Math.round(v * 2) / 2;
 }
 
+/** Pulso medio de la serie entre a y b (s de clase), con las lecturas que caen dentro. → { avg, n } | null */
+function hrBetween(series, a, b) {
+  let sum = 0, n = 0;
+  for (const [t, v] of series) { if (t >= a && t < b) { sum += v; n++; } }
+  return n >= 3 ? { avg: sum / n, n } : null;
+}
+
+const isHills = (s) => s?.category === 'hills' || /colina|cuesta|hill/i.test(String(s?.templateId || s?.workoutId || ''));
+
 /**
- * Pulso de una clase a `ref` km/h: recta pulso ~ velocidad con la media de cada nivel (ponderada por segundos estables).
- * Necesita dos niveles con ≥ 0,8 km/h de diferencia que rodeen o casi (±1,5 km/h) la referencia. → ppm | null
+ * Pulso de una clase a `ref` km/h. Cada tramo a velocidad constante (de speedTrace, sea cual sea: también los ajustados
+ * con + y −) de al menos 60 s da un punto (velocidad, pulso medio sin los primeros segundos, que el corazón tarda en
+ * subir); con ellos, recta pulso ~ velocidad ponderada por duración. Hace falta ≥ 0,8 km/h entre el tramo más lento y
+ * el más rápido y que la referencia quede cerca (±1,5 km/h). Las clases de cuestas no cuentan (la pendiente sube el
+ * pulso sin cambiar la velocidad). → ppm | null
  */
 export function sessionHrAt(session, ref) {
-  const lv = hrAtLevels(session);
-  const pts = Object.values(lv).filter((p) => p && p.sec >= 45 && p.avg > 60 && p.speed > 3);
+  if (!session || isHills(session)) return null;
+  const series = (Array.isArray(session.hrSeries) ? session.hrSeries : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number(p[1]) >= 40 && Number(p[1]) <= 230)
+    .map((p) => [Number(p[0]), Number(p[1])]).sort((a, b) => a[0] - b[0]);
+  const trace = (Array.isArray(session.speedTrace) ? session.speedTrace : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number(p[1]) > 0)
+    .map((p) => [Number(p[0]), Number(p[1])]).sort((a, b) => a[0] - b[0]);
+  if (series.length < 10 || !trace.length) return null;
+  const end = Math.max(trace[trace.length - 1][0], num(session.elapsedSec), series[series.length - 1][0]);
+  // Tramos de velocidad constante (se unen los contiguos a la misma velocidad)
+  const wins = [];
+  trace.forEach(([t, v], k) => {
+    const b = k + 1 < trace.length ? trace[k + 1][0] : end;
+    if (!(b > t)) return;
+    const last = wins[wins.length - 1];
+    if (last && Math.abs(last.v - v) < 0.05 && Math.abs(last.b - t) < 1e-6) last.b = b;
+    else wins.push({ a: t, b, v });
+  });
+  const pts = [];
+  for (const w of wins) {
+    const dur = w.b - w.a;
+    if (dur < 60 || w.v < 5) continue;
+    const lag = Math.min(60, Math.max(30, dur * 0.35));
+    const h = hrBetween(series, w.a + lag, w.b);
+    if (h && h.avg > 70) pts.push({ speed: w.v, avg: h.avg, sec: dur - lag });
+  }
   if (pts.length < 2) return null;
   const speeds = pts.map((p) => p.speed);
   const lo = Math.min(...speeds), hi = Math.max(...speeds);
@@ -45,8 +80,8 @@ export function sessionHrAt(session, ref) {
   if (!(den > 0)) return null;
   const b = (sw * sxy - sx * sy) / den;
   const a = (sy - b * sx) / sw;
-  // Pendiente fisiológica: el pulso sube con la velocidad (2–20 ppm por km/h); fuera de eso, la clase no vale
-  if (!(b >= 2 && b <= 20)) return null;
+  // Pendiente fisiológica: el pulso sube con la velocidad (1,5–20 ppm por km/h); fuera de eso, la clase no vale
+  if (!(b >= 1.5 && b <= 20)) return null;
   const hr = a + b * ref;
   return hr > 70 && hr < 220 ? Math.round(hr * 10) / 10 : null;
 }
@@ -81,16 +116,18 @@ export function fitnessTrend(history, { today, levels, days = 70 } = {}) {
   const ref = referenceSpeed(levels);
   const end = keyToMs(today);
   const points = [];
+  let withHr = 0;
   for (const s of Array.isArray(history) ? history : []) {
     if (!s?.dayKey || !Array.isArray(s.hrSeries) || s.hrSeries.length < 3) continue;
     const t = keyToMs(s.dayKey);
     if (!(t <= end && t > end - days * DAY)) continue;
+    withHr++;
     const hr = sessionHrAt(s, ref);
     if (hr != null) points.push({ day: s.dayKey, x: (t - end) / DAY, hr });
   }
   points.sort((a, b) => a.x - b.x);
   const span = points.length ? points[points.length - 1].x - points[0].x : 0;
-  if (points.length < 6 || span < 14) return { ok: false, ref, need: 6, have: points.length, span: Math.round(span) };
+  if (points.length < 6 || span < 14) return { ok: false, ref, need: 6, have: points.length, withHr, span: Math.round(span) };
   const xs = points.map((p) => p.x), ys = points.map((p) => p.hr);
   const { a, b } = theilSen(xs, ys);
   const first = a + b * xs[0], last = a + b * xs[xs.length - 1];
@@ -98,7 +135,7 @@ export function fitnessTrend(history, { today, levels, days = 70 } = {}) {
   const z = mannKendallZ(xs, ys);
   const significant = Math.abs(z) >= 2.58 && Math.abs(change) >= 3;
   const verdict = !significant ? 'same' : change < 0 ? 'better' : 'worse';
-  return { ok: true, ref, points: points.map(({ day, hr }) => ({ day, hr })), first: Math.round(first), last: Math.round(last), change, z: Math.round(z * 100) / 100, significant, verdict, weeks: Math.max(1, Math.round(span / 7)) };
+  return { ok: true, ref, withHr, points: points.map(({ day, hr }) => ({ day, hr })), first: Math.round(first), last: Math.round(last), change, z: Math.round(z * 100) / 100, significant, verdict, weeks: Math.max(1, Math.round(span / 7)) };
 }
 
 /** TRIMP de Banister de una clase (con pulso) o minutos × intensidad (sin pulso). */
