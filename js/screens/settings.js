@@ -16,7 +16,8 @@ import { AUTO_THEME, autoTheme } from '../player/scene-pick.js';
 import { esc, fmt, todayKey, mondayOf, daysBetween, round1, clamp, debounce, capitalize } from '../core/utils.js';
 import { isNative, nativeStatus, post as nativePost, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagText } from '../core/diag.js';
-import { notifyAvailable, notifyConfig, setNotifyConfig } from '../integrations/ai.js';
+import { notifyAvailable, notifyConfig, setNotifyConfig, cachedHealthMetrics, fetchHealthMetrics, syncRestingFromHealth } from '../integrations/ai.js';
+import { restingFromHealth, healthRestPatch, restSourceLabel, restIsAuto } from '../training/resting-hr.js';
 
 /* ───────────── utilidades privadas ───────────── */
 
@@ -340,6 +341,16 @@ function hrZonesFoot(s) {
   return `${p.hrRest ? `Método Karvonen con FC en reposo de ${p.hrRest}\u00a0ppm` : 'Porcentaje de tu FC máxima'} · FC máx. ${hrMax}\u00a0ppm`;
 }
 
+// FC en reposo: de dónde sale (Salud · 7 días / a mano) y, si la escribiste a mano, la que da Salud para volver a ella.
+function hrRestRowsHtml(p) {
+  const src = restSourceLabel(p) || (isNative() ? 'Se rellena sola con Salud' : 'Opcional · nada más despertar');
+  const fromHealth = p.hrRestSource === 'manual' ? safe(() => restingFromHealth(cachedHealthMetrics()?.resting, todayKey()), null) : null;
+  return `<label class="list__row st-row">${label('FC en reposo', esc(src))}<input id="st-hrrest" class="st-input st-input--num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="—" value="${p.hrRest || ''}"><span class="st-unit">ppm</span></label>
+      ${fromHealth && fromHealth.bpm !== p.hrRest ? `<div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="hr-rest-health">
+        <span class="list__title">Usar la de Salud</span><span class="list__value">${fromHealth.bpm} ppm · ${fromHealth.days} días</span>
+      </div>` : ''}`;
+}
+
 function profileHtml(s) {
   const p = s.profile || {};
   const auto = hrMaxFromAge(p.age || 46);
@@ -354,8 +365,8 @@ function profileHtml(s) {
       <div class="list__row st-row st-action st-link" role="button" tabindex="0" data-st="hr-auto">
         <span class="list__title">Calcular por edad</span><span class="list__value" data-hr-auto>${auto} ppm</span>
       </div>
-      <label class="list__row st-row">${label('FC en reposo', 'Opcional · nada más despertar')}<input id="st-hrrest" class="st-input st-input--num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="—" value="${p.hrRest || ''}"><span class="st-unit">ppm</span></label>
-    `, 'La FC máxima se estima con la fórmula de Tanaka (208 − 0,7 × edad). Si la conoces por una prueba de esfuerzo, ponla tal cual. Con la FC en reposo usamos el método Karvonen, más personal.')}
+      ${hrRestRowsHtml(p)}
+    `, `La FC máxima se estima con la fórmula de Tanaka (208 − 0,7 × edad). Si la conoces por una prueba de esfuerzo, ponla tal cual. Con la FC en reposo usamos el método Karvonen, más personal.${isNative() ? ' La de reposo se pone al día sola con Salud (mediana de tus últimos 7 días); si la escribes a mano, se queda la tuya. Bórrala para volver a la de Salud.' : ''}`)}
     <div class="st-group">
       <div class="st-group__title">Tus zonas de pulso</div>
       <div class="list st-hrzones" data-hrzones>${hrZonesHtml(s)}</div>
@@ -2566,14 +2577,37 @@ const PAGES = {
           if (input) input.value = getState().profile?.hrRest || '';
           return;
         }
-        ctx.save((d) => { d.profile.hrRest = t ? n : null; });
-        refreshZones();
+        // Escrita a mano: se queda (Salud no la pisa). Borrada: vuelve a automática y, si hay datos de Salud, se rellena ya.
+        ctx.save((d) => {
+          d.profile.hrRest = t ? n : null;
+          d.profile.hrRestSource = t ? 'manual' : null;
+          if (!t) Object.assign(d.profile, safe(() => healthRestPatch(d.profile, cachedHealthMetrics(), todayKey()), null) || {});
+        });
+        ctx.render();
       }
+    },
+    init(ctx) {
+      // Al abrir el perfil: pone al día la FC en reposo con lo último de Salud (guardado y, en la app, recién pedido).
+      if (ctx.restAsked) return;
+      ctx.restAsked = true;
+      syncRestingFromHealth(); // si cambia, el estado avisa y la página se repinta
+      // Si llega algo nuevo: la automática se repinta sola (cambia el estado); con una a mano, para ofrecer «Usar la de Salud».
+      fetchHealthMetrics().then((m) => { if (m && ctx.alive && !restIsAuto(getState().profile)) ctx.render(); }).catch(() => {});
     },
     input(id, v, ctx) {
       if (id === 'st-name') ctx.debounced('name', () => ctx.save((d) => { d.profile.name = String(v || '').trim().slice(0, 30); }));
     },
     action(name, el, ctx) {
+      if (name === 'hr-rest-health') {
+        ctx.save((d) => {
+          d.profile.hrRestSource = null;
+          Object.assign(d.profile, safe(() => healthRestPatch(d.profile, cachedHealthMetrics(), todayKey()), null) || {});
+        });
+        ctx.render();
+        haptic('success');
+        toast(`FC en reposo: ${getState().profile?.hrRest || '—'}\u00a0ppm (de Salud)`, { icon: 'heart' });
+        return;
+      }
       if (name !== 'hr-auto') return;
       const age = getState().profile?.age || 46;
       const hr = hrMaxFromAge(age);

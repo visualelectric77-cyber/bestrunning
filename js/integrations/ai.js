@@ -11,6 +11,9 @@
 //                    vo2 [[dayKey, ml/kg·min]], hrRecovery [[dayKey, ppm que baja en 1 min]]
 
 import { isNative, nativeStatus, post, on } from './native-bridge.js';
+import { getState, setState } from '../core/store.js';
+import { todayKey } from '../core/utils.js';
+import { healthRestPatch } from '../training/resting-hr.js';
 
 const AI_TIMEOUT_MS = 25000;
 const METRICS_KEY = 'ritmup.health.metrics';
@@ -95,10 +98,24 @@ export function fetchHealthMetrics(days = 70) {
         at: Number(data?.at) || Date.now(),
       };
       try { localStorage.setItem(METRICS_KEY, JSON.stringify(m)); } catch { /* sin almacenamiento */ }
+      syncRestingFromHealth(m);
       finish(m);
     });
     try { if (post('health.metrics.get', { days }) !== true) finish(null); } catch { finish(null); }
   });
+}
+
+/**
+ * Pone al día la FC en reposo del perfil con las métricas de Salud (mediana de 7 días; js/training/resting-hr.js).
+ * Una escrita a mano no se toca. → true si cambió. Nunca lanza.
+ */
+export function syncRestingFromHealth(metrics = cachedHealthMetrics()) {
+  try {
+    const patch = healthRestPatch(getState().profile, metrics, todayKey());
+    if (!patch) return false;
+    setState((d) => { d.profile = { ...(d.profile || {}), ...patch }; });
+    return true;
+  } catch { return false; }
 }
 
 /**
