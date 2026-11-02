@@ -20,11 +20,18 @@ export function setHeadTrackOn(on) {
   try { globalThis.localStorage?.setItem(HEAD_KEY, on ? 'on' : 'off'); } catch { /* sin almacenamiento */ }
 }
 
-/** Qué fuente hay: 'native' (ARKit en la app con capacidad 'head') o null (no disponible aquí). */
+/**
+ * Capacidad que exige la página. La build 18 anunciaba 'head' (ARKit) y con la cámara en marcha el iPhone se quedaba sin
+ * música ni coach (2 nov 2026): la página ya NO la usa nunca. Solo 'head-v2' (build 19+: cámara propia sin tocar la
+ * sesión de audio y con vigilante del audio en la app).
+ */
+export const HEAD_CAP = 'head-v2';
+
+/** Qué fuente hay: 'native' (la app con la capacidad HEAD_CAP) o null (no disponible aquí). */
 export function headSource() {
   if (!isNative()) return null;
   const caps = nativeStatus()?.caps;
-  return Array.isArray(caps) && caps.includes('head') ? 'native' : null;
+  return Array.isArray(caps) && caps.includes(HEAD_CAP) ? 'native' : null;
 }
 
 /**
