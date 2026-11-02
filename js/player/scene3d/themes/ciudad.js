@@ -1,4 +1,4 @@
-// RITMUP · escenarios de CIUDAD REAL (prototipo, ocultos). Corres por las calles de verdad del final de un maratón:
+// RITMUP · escenarios de CIUDAD REAL (en Ajustes desde la web 1.16.7). Corres por las calles de verdad del final de un maratón:
 //   · Berlín: Leipziger Straße, Markgrafenstraße junto al Gendarmenmarkt, Unter den Linden, la Puerta de Brandeburgo y la
 //     meta en la Straße des 17. Juni (3,4 km).
 //   · Madrid: Pirámides, Paseo de las Acacias, Embajadores, Rondas de Valencia y Atocha, Paseo del Prado (Neptuno), Cibeles y la meta en el Paseo
@@ -31,7 +31,7 @@ const TURN = 14;         // m de la media vuelta al final del tramo
  */
 const CITIES = {
   berlin: {
-    meta: { id: 'ciudad-berlin', name: 'Berlín · final del maratón', description: 'Los últimos 3,4 km del Maratón de Berlín por sus calles reales, hasta la meta tras la Puerta de Brandeburgo.' },
+    meta: { id: 'ciudad-berlin', name: 'Berlín · final del maratón', description: 'Los últimos 3,4 km del Maratón de Berlín por sus calles reales: Unter den Linden y la Puerta de Brandeburgo hasta la meta.' },
     data: 'berlin-final',
     palette: ['#d9cbb0', '#c9c6bf', '#e4dccb', '#cfb184', '#e8e6e0', '#a2a8ad', '#b8ab98', '#d4c3a3', '#8e9499', '#c7b9a6'],
     sun: { az: 140, el: 30 },            // finales de septiembre, media mañana
@@ -41,7 +41,7 @@ const CITIES = {
     treeTones: ['#3f5f24', '#4d7029', '#5c7f2e', '#6b8c35', '#7d9a3a', '#8f9f3e', '#a3a648'],   // tilo en septiembre
   },
   madrid: {
-    meta: { id: 'ciudad-madrid', name: 'Madrid · final del maratón', description: 'Los últimos 3,7 km del Maratón de Madrid: el Paseo de las Acacias, Atocha, el Paseo del Prado, Cibeles y la meta en Recoletos.' },
+    meta: { id: 'ciudad-madrid', name: 'Madrid · final del maratón', description: 'Los últimos 3,7 km del Maratón de Madrid por sus calles reales: Atocha, el Paseo del Prado, Cibeles y la meta en Recoletos.' },
     data: 'madrid-final',
     // revocos claros, ocres, ladrillo visto, granito y algún rosa pálido
     palette: ['#eadfc6', '#e3cfa6', '#d9b77e', '#b56b4f', '#9e5a43', '#ece8df', '#e6c9b4', '#b9b3a8', '#d7c39b', '#f0e7d3'],
@@ -56,7 +56,7 @@ const CITIES = {
 // Berlín, los últimos 10 km (km 32 → meta) para clases de 50–60 min: mismo aspecto, datos en trozos de 2 km
 CITIES.berlin10k = {
   ...CITIES.berlin,
-  meta: { id: 'ciudad-berlin-10k', name: 'Berlín · últimos 10 km', description: 'Del km 32 a la meta: Kurfürstendamm, la Gedächtniskirche, el KaDeWe, Potsdamer Platz, Unter den Linden y la Puerta de Brandeburgo.' },
+  meta: { id: 'ciudad-berlin-10k', name: 'Berlín · últimos 10 km', description: 'Para clases largas: del km 32 a la meta del Maratón de Berlín por el Kurfürstendamm, el KaDeWe, Potsdamer Platz y la Puerta de Brandeburgo.' },
   data: 'berlin-10k',
 };
 

@@ -6,13 +6,14 @@
 /** Valor guardado en visuals.theme cuando el escenario lo elige la clase. */
 export const AUTO_THEME = 'auto';
 /** Escenarios que se ofrecen (mismo orden que Ajustes → Pantalla de entreno). */
-export const SCENE_IDS = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'blank'];
+export const SCENE_IDS = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'ciudad-berlin', 'ciudad-berlin-10k', 'ciudad-madrid', 'blank'];
 /** Respaldo cuando ni la clase ni el usuario deciden. */
 export const BASE_THEME = 'aurora';
 
 export const SCENE_NAMES = {
   costa: 'Costa', neon: 'Neón', desierto: 'Desierto', tunel: 'Túnel', bosque: 'Bosque',
   aurora: 'Aurora', cordillera: 'Cordillera', estadio: 'Estadio', blank: 'Grafito',
+  'ciudad-berlin': 'Berlín · final del maratón', 'ciudad-berlin-10k': 'Berlín · últimos 10 km', 'ciudad-madrid': 'Madrid · final del maratón',
 };
 
 // categoría → [escenario, por qué] (el porqué se lee «Automático · Estadio — series en pista»)

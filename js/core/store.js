@@ -1,6 +1,7 @@
 // BestRunning · estado global persistente (localStorage) con suscripción.
 import { deepClone } from './utils.js';
 import { normalizeGoal } from '../training/goal.js';
+import { AUTO_THEME, SCENE_IDS } from '../player/scene-pick.js';
 
 const STATE_KEY = 'br.state.v1';
 const ACTIVE_KEY = 'br.active.v1';
@@ -14,7 +15,8 @@ const VISUAL_QUALITIES = ['auto', 'high', 'eco', 'off'];
 // Escenarios 3D que se ofrecen en Ajustes (§15.2; el 'legacy' oculto nunca se guarda). Por defecto 'auto': cada
 // clase en su mundo (js/player/scene-pick.js). El antiguo valor por defecto ('aurora') se migra una vez a 'auto';
 // un escenario elegido a mano se respeta.
-const VISUAL_THEMES = ['auto', 'aurora', 'cordillera', 'estadio', 'blank'];
+// los que ofrece Ajustes (scene-pick.js: misma lista) + 'auto'; antes faltaban Costa, Neón… y volvían a 'auto' al recargar
+const VISUAL_THEMES = [AUTO_THEME, ...SCENE_IDS];
 const DEFAULT_VISUAL_THEME = 'auto';
 const OLD_DEFAULT_THEME = 'aurora';
 const THEME_REV = 3; // 3: «Automático» para todos una vez (también quien tenía un mundo elegido a mano)

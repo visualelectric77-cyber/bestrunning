@@ -613,7 +613,7 @@ const QUALITY_DESC = {
   off: 'Desactivadas: el fondo oscuro clásico con el color de cada zona. Lo más ligero.',
 };
 /** Orden de Ajustes → Escenario: el recomendado primero y Grafito (el más ligero) al final. */
-const SCENE_ORDER = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'blank'];
+const SCENE_ORDER = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'ciudad-berlin', 'ciudad-berlin-10k', 'ciudad-madrid', 'blank'];
 const SCENES = (() => {
   const list = safe(() => listThemes(), []) || [];
   const rank = (id) => { const i = SCENE_ORDER.indexOf(id); return i < 0 ? SCENE_ORDER.length : i; };

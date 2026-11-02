@@ -20,13 +20,13 @@ export const THEMES = [
   { id: 'aurora', name: 'Aurora', description: 'Auroras sobre la noche y un río de luz que fluye a tu ritmo.', loader: () => import('./aurora.js') },
   { id: 'cordillera', name: 'Cordillera', description: 'Tu clase como una cordillera nocturna: cada intervalo, una cumbre.', loader: () => import('./cordillera.js') },
   { id: 'estadio', name: 'Estadio', description: 'Pista de atletismo de noche con luces de ritmo a tu velocidad.', loader: () => import('./estadio.js') },
+  { id: 'ciudad-berlin', name: 'Berlín · final del maratón', description: 'Los últimos 3,4 km del Maratón de Berlín por sus calles reales: Unter den Linden y la Puerta de Brandeburgo hasta la meta.', loader: () => import('./ciudad.js').then((m) => m.berlin) },
+  { id: 'ciudad-berlin-10k', name: 'Berlín · últimos 10 km', description: 'Para clases largas: del km 32 a la meta del Maratón de Berlín por el Kurfürstendamm, el KaDeWe, Potsdamer Platz y la Puerta de Brandeburgo.', loader: () => import('./ciudad.js').then((m) => m.berlin10k) },
+  { id: 'ciudad-madrid', name: 'Madrid · final del maratón', description: 'Los últimos 3,7 km del Maratón de Madrid por sus calles reales: Atocha, el Paseo del Prado, Cibeles y la meta en Recoletos.', loader: () => import('./ciudad.js').then((m) => m.madrid) },
   { id: 'blank', name: 'Grafito', description: 'Suelo de grafito y horizonte limpio. Sobrio y el más ligero.', loader: () => import('./blank.js') },
   { id: 'carrera', name: 'Carrera', description: 'Gran carrera de ciudad de noche: salida, arcos de cada kilómetro y meta con tu tiempo.', hidden: true, loader: () => import('./carrera.js') },
   { id: 'nieve', name: 'Navidad', description: 'Un camino nevado entre abetos con guirnaldas, farolillos y nieve cayendo.', hidden: true, loader: () => import('./nieve.js') },
   { id: 'halloween', name: 'Noche de Halloween', description: 'Un camino entre calabazas encendidas bajo la luna llena.', hidden: true, loader: () => import('./halloween.js') },
-  { id: 'ciudad-berlin', name: 'Berlín · final del maratón', description: 'Prototipo: los últimos 3,4 km del Maratón de Berlín por sus calles reales (OpenStreetMap), hasta la meta tras la Puerta de Brandeburgo.', hidden: true, loader: () => import('./ciudad.js').then((m) => m.berlin) },
-  { id: 'ciudad-berlin-10k', name: 'Berlín · últimos 10 km', description: 'Prototipo para clases largas: del km 32 a la meta del Maratón de Berlín (Kurfürstendamm, KaDeWe, Potsdamer Platz, Unter den Linden, la Puerta de Brandeburgo), cargado por trozos.', hidden: true, loader: () => import('./ciudad.js').then((m) => m.berlin10k) },
-  { id: 'ciudad-madrid', name: 'Madrid · final del maratón', description: 'Prototipo: los últimos 3,7 km del Maratón de Madrid por sus calles reales (OpenStreetMap): el Paseo de las Acacias, Atocha, el Paseo del Prado, Cibeles y la meta en Recoletos.', hidden: true, loader: () => import('./ciudad.js').then((m) => m.madrid) },
   { id: 'legacy', name: 'Hypertrack v1', description: 'Autopista de neón original (oculta).', hidden: true, loader: () => import('./legacy.js') },
 ];
 
