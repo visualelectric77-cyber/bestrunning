@@ -139,7 +139,8 @@ out('wordmark-white.svg', svg(VB, g('#FFFFFF')));
 out('mark.svg', svg([0, 0, R.arm, 100], markBody('#FFFFFF'), 'r'));
 out('mark-black.svg', svg([0, 0, R.arm, 100], markBody('#000000'), 'r'));
 
-// icono: la r ópticamente centrada (~58 % del alto), degradado casi negro, brillo superior y la calle que «emite»
+// icono: la r ópticamente centrada (~58 % del alto), degradado casi negro, brillo superior y la calle que «emite».
+// El del reloj va en naranja con la calle en negro: App Review rechazó la 1.0 porque con fondo negro no se ve redondo.
 function icon(round) {
   const h = round ? 1024 * 0.5 : 1024 * 0.58, s = h / 100, w = R.arm * s;
   const x = (1024 - w) / 2 + w * 0.02, y = (1024 - h) / 2 + h * 0.012; // la r pesa arriba-izquierda
@@ -149,13 +150,17 @@ function icon(round) {
     : `<rect width="1024" height="1024" fill="url(#bg)"/><rect width="1024" height="1024" fill="url(#hl2)"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="RITMUP"><title>RITMUP</title>
 <defs>
-<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#141416"/><stop offset="1" stop-color="#000000"/></linearGradient>
-<linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">${round
+  ? '<stop offset="0" stop-color="#FF6B2C"/><stop offset="1" stop-color="#F2480F"/>'
+  : '<stop offset="0" stop-color="#141416"/><stop offset="1" stop-color="#000000"/>'}</linearGradient>
+<linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="${round ? '.22' : '.14'}"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></linearGradient>
 <linearGradient id="hl2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".07"/><stop offset=".012" stop-color="#fff" stop-opacity=".025"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/></linearGradient>
 <filter id="glow" x="-1" y="-1" width="3" height="3" filterUnits="objectBoundingBox"><feGaussianBlur stdDeviation="${f(30 / s)}"/></filter>
 </defs>
 ${bg}
-<g transform="${tf}"><path fill="${EMBER}" opacity=".35" filter="url(#glow)" d="${rEmber}"/>${markBody('#FFFFFF')}</g>
+<g transform="${tf}">${round
+  ? `<path fill="#FFFFFF" fill-rule="evenodd" d="${rWhite}"/><path fill="#000000" d="${rEmber}"/>`
+  : `<path fill="${EMBER}" opacity=".35" filter="url(#glow)" d="${rEmber}"/>${markBody('#FFFFFF')}`}</g>
 </svg>
 `;
 }
