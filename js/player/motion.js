@@ -363,7 +363,8 @@ export function createMotion(root, refs = {}, opts = {}) {
         ? `${final.km} km · ${final.sec} · ${final.kcal} kcal`
         : `${dec(fin.km, 2)} km · ${clockOf(fin.sec)} · ${Math.round(fin.kcal)} kcal`;
       stats.setAttribute('aria-label', label);
-      stats.innerHTML = '<b class="mo-cu" data-k="km"></b> km · <b class="mo-cu" data-k="sec"></b> · <b class="mo-cu" data-k="kcal"></b> kcal';
+      // Cada cifra con su unidad en un bloque que no se parte: solo se salta de línea tras el «·» («12» y «kcal» juntos)
+      stats.innerHTML = '<span class="hud-done__g"><b class="mo-cu" data-k="km"></b> km ·</span> <span class="hud-done__g"><b class="mo-cu" data-k="sec"></b> ·</span> <span class="hud-done__g"><b class="mo-cu" data-k="kcal"></b> kcal</span>';
       const cells = { km: stats.querySelector('[data-k="km"]'), sec: stats.querySelector('[data-k="sec"]'), kcal: stats.querySelector('[data-k="kcal"]') };
       const paint = (f) => {
         if (f >= 1 && final) {

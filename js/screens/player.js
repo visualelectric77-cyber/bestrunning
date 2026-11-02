@@ -3698,7 +3698,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       <div class="hud-done__txt">
         <span class="hud-lbl">${esc(workout.title || 'Entrenamiento')}</span>
         <b class="hud-done__title">${esc(title)}</b>
-        <span class="hud-done__stats num">${fmt.km(session.distanceKm)} km · ${fmt.clock(session.elapsedSec)} · ${fmt.int(session.kcal)} kcal</span>
+        <span class="hud-done__stats num"><span class="hud-done__g">${fmt.km(session.distanceKm)} km ·</span> <span class="hud-done__g">${fmt.clock(session.elapsedSec)} ·</span> <span class="hud-done__g">${fmt.int(session.kcal)} kcal</span></span>
         ${recordHtml(session)}
       </div>
       <button class="hud-done__btn" data-done-go>Ver resumen</button>

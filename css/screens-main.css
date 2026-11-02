@@ -1076,6 +1076,11 @@
   font-size: var(--fs-footnote);
   color: var(--text-2);
 }
+/* «Hoy has hecho» con una clase empezada: el resumen de la derecha es largo. El título no se parte
+   («HOY HAS / HECHO») y el resumen baja a dos líneas alineadas a la derecha */
+.br-sessions .section-title { flex: none; white-space: nowrap; }
+.br-sessions .section-header__action { min-width: 0; text-align: right; text-wrap: balance; }
+.td-aside__g { white-space: nowrap; }
 
 /* Tus velocidades: lista agrupada con punto de zona */
 .td-speeds { --sep-inset: 36px; }

@@ -506,9 +506,11 @@ function sessionsBlock(state, day, dateKey, today) {
   // Las clases que no cuentan como sesión (stats.sessionCounts) se rotulan «empezada», igual que la semana
   const n = list.filter((s) => safe(() => stats.sessionCounts(s), true)).length;
   const part = list.length - n;
-  const count = [n ? `${n} ${n === 1 ? 'sesión' : 'sesiones'}` : '', part ? `${part} ${part === 1 ? 'empezada' : 'empezadas'}` : ''].filter(Boolean).join(' · ');
+  const bits = [n ? `${n} ${n === 1 ? 'sesión' : 'sesiones'}` : '', part ? `${part} ${part === 1 ? 'empezada' : 'empezadas'}` : '', `${min} min`, `${fmt.dec1(km)} km`].filter(Boolean);
+  // Cada dato con su «·» detrás en un bloque que no se parte: si no cabe en una línea, el punto queda al final
+  const aside = bits.map((b, i) => `<span class="td-aside__g">${b}${i < bits.length - 1 ? ' ·' : ''}</span>`).join(' ');
   return `<section class="td-section br-sessions" aria-label="${esc(title)}">
-    ${sectionHeader(title, `<span class="td-aside">${count} · ${min} min · ${fmt.dec1(km)} km</span>`)}
+    ${sectionHeader(title, `<span class="td-aside">${aside}</span>`)}
     <div class="list br-seslist">${list.map((s) => sessionRow(s, { planned: !!s.planDate })).join('')}</div>
   </section>`;
 }

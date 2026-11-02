@@ -20,15 +20,16 @@ Capturas: `antes/` y `despues/` (mismo número = mismo hallazgo).
 | 13 | Progreso | «Desde el primer día · Tiempo **0,7 h**». | Por debajo de una hora, en minutos («40 min»). `js/screens/progress.js` |
 | 14 | Progreso › Salud | Con cero clases con pulso: «De tus **0** clases con pulso de las últimas 10 semanas, sirven **0**». | «Aún no tienes ninguna: importa el pulso del Apple Watch al terminar la próxima.» `js/screens/health.js` |
 | 15 | Bienvenida, paso 5 | Las voces del sistema salían con el código crudo «es-ES», «es-MX». | «Español (España)», «Español (México)», igual que en Perfil › Voz y audio. Solo cambia el texto. `js/screens/onboarding.js` |
+| 11 | Fin de clase (reproductor, con tu permiso) | «0,14 km · 1:09 · 12 / kcal»: la palabra «kcal» se iba sola a otra línea. | Cada cifra va en un bloque con su unidad y solo se parte tras el «·»: queda «0,12 km · 1:03 ·» y debajo «11 kcal». `js/player/motion.js`, `js/screens/player.js`, `css/player.css` |
+| 17 | Hoy | Con una clase empezada, la cabecera se partía en «HOY HAS / HECHO» y el resumen dejaba «· 42 min» al principio de la segunda línea. | El título no se parte, y el resumen baja a dos líneas alineadas a la derecha con el «·» al final de la primera. `js/screens/today.js`, `css/screens-main.css` |
 | 16 | Perfil | «Mi semana: L–V 20′ · J 50′ · S 50′» daba a entender que el jueves también era de 20′. | «6 días · 3 h», el mismo total que «Tu semana tipo». `js/screens/settings.js` |
 
 ## Apuntado sin tocar (reproductor, audio o música): pendiente de tu decisión
 
-1. **Tarjeta de fin de clase** (captura `antes/11`): «0,14 km · 1:09 · 12 / kcal». La palabra «kcal» se va sola a otra línea. Es CSS del reproductor (`css/player.css`): se arregla con `white-space: nowrap` en cada cifra.
-2. **Clase en marcha** (`antes/09`): «KM/H» y «MIN/KM» bajo la velocidad grande se leen mal sobre los anillos claros del Túnel. Se podría dar más opacidad a esas etiquetas o ponerles una sombra suave.
-3. **BPM distintos**: el reproductor decía «Lo-Fi Disco · -SunSet- · 112 BPM» y el resumen «Sonó en tu sesión» decía 115 BPM.
-4. **Progreso › Lo que más suena** no incluyó la canción que acababa de sonar (Lo-Fi Disco). Además, los artistas salen con el usuario de Pixabay («NverAvetyanMusic», «deep_house_music»), que queda poco cuidado.
-5. **Atajo del Watch**: la guía y el propio Atajo siguen diciendo «Vuelve a BestRunning y pulsa Pegar» y «BestRunning Salud». No lo he cambiado porque el texto tiene que coincidir con el Atajo descargable (`tools/watch/build-shortcut.py`) y con sus tests. Para el cambio de nombre hay que regenerar el Atajo.
+1. **Clase en marcha** (`antes/09`): «KM/H» y «MIN/KM» bajo la velocidad grande se leen mal sobre los anillos claros del Túnel. Se podría dar más opacidad a esas etiquetas o ponerles una sombra suave.
+2. **BPM distintos**: el reproductor decía «Lo-Fi Disco · -SunSet- · 112 BPM» y el resumen «Sonó en tu sesión» decía 115 BPM.
+3. **Progreso › Lo que más suena** no incluyó la canción que acababa de sonar (Lo-Fi Disco). Además, los artistas salen con el usuario de Pixabay («NverAvetyanMusic», «deep_house_music»), que queda poco cuidado.
+4. **Atajo del Watch**: la guía y el propio Atajo siguen diciendo «Vuelve a BestRunning y pulsa Pegar» y «BestRunning Salud». No lo he cambiado porque el texto tiene que coincidir con el Atajo descargable (`tools/watch/build-shortcut.py`) y con sus tests. Para el cambio de nombre hay que regenerar el Atajo.
 
 ## Vistos y correctos
 

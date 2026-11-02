@@ -1130,6 +1130,7 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .hud-done__txt { grid-area: txt; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .hud-done__title { font: 600 var(--fs-headline)/1.2 var(--font); letter-spacing: -0.012em; color: #fff; }
 .hud-done__stats { font-weight: 600; font-size: 14px; line-height: 1.2; color: var(--ink2); }
+.hud-done__g { white-space: nowrap; } /* cifra y unidad nunca se separan («12 / kcal») */
 .hud-done__rec { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px/1.2 var(--font); color: var(--accent); }
 .hud-done__rec b { color: #fff; }
 .hud-done__btn {
