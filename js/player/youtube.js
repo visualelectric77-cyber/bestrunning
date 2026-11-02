@@ -11,6 +11,9 @@
 // OJO: en iPhone el volumen de un vídeo lo manda solo el usuario (iOS ignora el volumen por JavaScript), así que allí
 // este «agacharse» seguramente no se nota. No se usa mute() a propósito: un vídeo mudo en marcha puede dejar la sesión
 // de audio de WebKit en «ambient» (memoria «audio sagrado»).
+// Por eso, en iPhone, los AVISOS DE CAMBIO del coach (velocidad, inclinación) paran el vídeo mientras se dicen y lo
+// reanudan al acabar (holdForVoice): con el vídeo a todo volumen tapaba «sube a 10,5» (2 nov 2026). Pausar no deja el
+// vídeo mudo en marcha, así que no toca la sesión de audio.
 import { icon } from '../ui/components.js';
 import { esc } from '../core/utils.js';
 import { defaultTitle, thumbUrl, watchUrl } from './youtube-link.js';
@@ -22,6 +25,9 @@ const API_TIMEOUT_MS = 15000;
 const DUCK_VOL = 30;
 const DUCK_RELEASE_MS = 300;     // entre dos frases seguidas del coach el vídeo no sube y baja
 const VOICE_STUCK_MS = 20000;    // como music.js: si nunca llega «speaking: false», el vídeo vuelve igual
+const HOLD_RELEASE_MS = 450;     // tras un aviso, el vídeo vuelve casi enseguida
+const HOLD_NO_VOICE_MS = 1800;   // si la voz no llega a sonar (coach callado, clip que falla), el vídeo vuelve igual
+const HOLD_MAX_MS = 9000;        // tope de seguridad: nunca más de esto parado por un aviso
 const TAP_HINT_MS = 4500;        // sin reproducción tras pedirla (iOS sin gesto dentro del iframe): «toca el vídeo»
 const MAX_SKIP_ERRORS = 3;       // en una lista, un vídeo que no se puede incrustar se salta (hasta 3 seguidos)
 const READY_TIMEOUT_MS = 20000; // el reproductor no llega a estar listo (red mala, bloqueado): fuera
@@ -164,6 +170,9 @@ export function createYouTubeBackground(host, pick, on = {}) {
   let lastTitle = '';
   let readyT = null;
   let checkT = null;
+  let held = false;           // parado por un aviso del coach (holdForVoice), no por la clase
+  let holdT = null;
+  let holdVoiced = false;
   const hasList = !!pick?.list;
   const call = (fn, ...a) => (ready && player && typeof player[fn] === 'function' ? safe(() => player[fn](...a)) : undefined);
 
@@ -309,8 +318,36 @@ export function createYouTubeBackground(host, pick, on = {}) {
   }
   function onVoice(e) {
     if (dead) return;
-    if (e?.detail?.speaking) duck();
-    else { clearTimeout(relT); relT = setTimeout(unduck, DUCK_RELEASE_MS); }
+    if (e?.detail?.speaking) {
+      duck();
+      if (held) { holdVoiced = true; clearTimeout(holdT); holdT = setTimeout(release, HOLD_MAX_MS); }
+    } else {
+      clearTimeout(relT); relT = setTimeout(unduck, DUCK_RELEASE_MS);
+      if (held && holdVoiced) { clearTimeout(holdT); holdT = setTimeout(release, HOLD_RELEASE_MS); }
+    }
+  }
+
+  /* ── iPhone: un aviso de cambio para el vídeo mientras se dice (ver cabecera) ── */
+  function holdForVoice() {
+    if (dead || !ready || !want) return false;
+    if (!held) {
+      const st = Number(call('getPlayerState'));
+      if (st !== ST.PLAYING && st !== ST.BUFFERING) return false;
+      held = true;
+      holdVoiced = false;
+      call('pauseVideo');
+    }
+    clearTimeout(holdT);
+    holdT = setTimeout(release, holdVoiced ? HOLD_MAX_MS : HOLD_NO_VOICE_MS);
+    return true;
+  }
+  function release() {
+    clearTimeout(holdT);
+    holdT = null;
+    if (!held) return;
+    held = false;
+    holdVoiced = false;
+    if (!dead && want) call('playVideo');
   }
   safe(() => globalThis.addEventListener('br:voice', onVoice));
 
@@ -323,6 +360,8 @@ export function createYouTubeBackground(host, pick, on = {}) {
   }
   function pause() {
     want = false;
+    held = false;
+    clearTimeout(holdT);
     clearTimeout(tapT);
     tapT = null;
     call('pauseVideo');
@@ -334,6 +373,8 @@ export function createYouTubeBackground(host, pick, on = {}) {
   function destroy() {
     if (dead) return;
     want = false;
+    held = false;
+    clearTimeout(holdT);
     unduck();
     dead = true;
     clearTimeout(tapT);
@@ -354,6 +395,7 @@ export function createYouTubeBackground(host, pick, on = {}) {
     pause,
     stop,
     destroy,
+    holdForVoice,
     hasList,
     get shuffle() { return shuffle; },
     next() { if (hasList) { call('nextVideo'); if (want) armTapHint(); } },

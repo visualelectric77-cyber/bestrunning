@@ -43,6 +43,14 @@ globalThis.document = {
   removeEventListener() {},
 };
 
+// Eventos en globalThis (como window): la señal 'br:voice' del coach llega de verdad al reproductor de YouTube
+if (typeof globalThis.addEventListener !== 'function') {
+  const et = new EventTarget();
+  globalThis.addEventListener = et.addEventListener.bind(et);
+  globalThis.removeEventListener = et.removeEventListener.bind(et);
+  globalThis.dispatchEvent = et.dispatchEvent.bind(et);
+}
+
 const calls = [];
 class Param { constructor(v) { this.value = v; } setValueAtTime() {} linearRampToValueAtTime() {} exponentialRampToValueAtTime() {} cancelScheduledValues() {} setTargetAtTime() {} }
 class Node { connect() {} disconnect() {} }
@@ -103,6 +111,34 @@ globalThis.dispatchEvent?.(new CustomEvent('br:voice', { detail: { speaking: fal
 await wait(400);
 ok(!ytPlayer.log.includes('mute'), 'nunca se llama a mute()');
 ok(!ytPlayer.log.some((x) => x === 'vol:0'), 'nunca volumen 0');
+
+// iPhone: un aviso de cambio para el vídeo mientras se dice y lo reanuda al acabar la voz (2 nov 2026)
+ok(typeof bg.holdForVoice === 'function', 'holdForVoice existe');
+ytPlayer.log.length = 0;
+ok(bg.holdForVoice() === true, 'aviso con el vídeo sonando: se para');
+eq(ytPlayer.log.filter((x) => x === 'pause').length, 1, 'pauseVideo una vez');
+bg.holdForVoice();                       // otro aviso seguido: no vuelve a pausar
+eq(ytPlayer.log.filter((x) => x === 'pause').length, 1, 'dos avisos seguidos: una sola pausa');
+globalThis.dispatchEvent?.(new CustomEvent('br:voice', { detail: { speaking: true } }));
+await wait(700);
+ok(!ytPlayer.log.includes('play'), 'mientras habla, el vídeo sigue parado');
+globalThis.dispatchEvent?.(new CustomEvent('br:voice', { detail: { speaking: false } }));
+await wait(700);
+ok(ytPlayer.log.includes('play'), 'al acabar la voz, el vídeo vuelve');
+ok(!ytPlayer.log.includes('mute'), 'parar no es mute()');
+// la voz no llega a sonar (coach callado): el vídeo vuelve solo
+ytPlayer.log.length = 0;
+bg.holdForVoice();
+await wait(2100);
+ok(ytPlayer.log.includes('play'), 'sin voz, el vídeo vuelve igual (tope corto)');
+// la clase se pausa durante el aviso: el vídeo NO se reanuda
+ytPlayer.log.length = 0;
+bg.holdForVoice();
+bg.pause();
+globalThis.dispatchEvent?.(new CustomEvent('br:voice', { detail: { speaking: true } }));
+globalThis.dispatchEvent?.(new CustomEvent('br:voice', { detail: { speaking: false } }));
+await wait(2100);
+ok(!ytPlayer.log.includes('play'), 'clase en pausa: el aviso no reanuda el vídeo');
 bg.destroy?.();
 
 /* ───────── 2 · Motor: reassertAudio, Empezar tras YouTube, refuerzo de voz ───────── */

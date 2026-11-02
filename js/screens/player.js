@@ -52,6 +52,15 @@ const GOLD = '#FFD60A';
 const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on';
 // Subtítulos del coach: solo frases (motivación, mitad, km, final); nunca avisos de tramo ni cifras deletreadas
 const CAP_SKIP = new Set(['pre', 'change', 'tick', 'countdown', 'intro', 'adjust', 'resume', 'testStage', 'finishStats']);
+// Laboratorio YouTube: en iPhone/iPad el volumen del vídeo no se puede bajar desde la página (iOS lo ignora), así que los
+// avisos de cambio de tramo (velocidad, inclinación) paran el vídeo mientras se dicen (youtube.js · holdForVoice).
+const YT_HOLD_KINDS = new Set(['pre', 'change', 'testStage']);
+const YT_NO_VOLUME = (() => {
+  try {
+    const n = globalThis.navigator;
+    return /iPad|iPhone|iPod/.test(n?.userAgent || '') || (n?.platform === 'MacIntel' && n?.maxTouchPoints > 1);
+  } catch { return false; }
+})();
 const CAP_NUM = /\b(coma|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieci\w+|veinte|veinti\w+|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien|ciento|segundos?|minutos?)\b/i;
 const CTL_SEL = '.hud-ctl, .hud-tools';
 /** Icono de tele (modo TV / AirPlay); propio para no tocar el set de iconos compartido. */
@@ -2414,7 +2423,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
         // Comentarios de música (flow/energía) solo mientras suena la mezcla de la app
         music: appMusic && musicOn,
         // Subtítulos de retransmisión (motion.js): la frase que dice el coach, en una línea sobre el lower third
-        onCue: (cue) => { if (cue?.text && !CAP_SKIP.has(cue.kind) && !CAP_NUM.test(cue.text)) mo('caption', cue.text); },
+        onCue: (cue) => {
+          if (cue?.text && !CAP_SKIP.has(cue.kind) && !CAP_NUM.test(cue.text)) mo('caption', cue.text);
+          // Vídeo de YouTube en iPhone (no se deja bajar): el aviso de cambio para el vídeo mientras se dice
+          if (yt && !muted && YT_HOLD_KINDS.has(cue?.kind) && YT_NO_VOLUME) ytCall('holdForVoice');
+        },
       });
       try { c?.setMuted?.(muted); } catch { /* idem */ }
       return c || null;
