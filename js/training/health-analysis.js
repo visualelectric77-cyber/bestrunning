@@ -168,7 +168,7 @@ export function loadBalance(history, { today, profile } = {}) {
   const list = (Array.isArray(history) ? history : []).filter((s) => s?.dayKey && keyToMs(s.dayKey) <= end && keyToMs(s.dayKey) > end - 56 * DAY);
   const in28 = list.filter((s) => keyToMs(s.dayKey) > end - 28 * DAY);
   const oldest = list.reduce((m, s) => Math.min(m, keyToMs(s.dayKey)), end);
-  if (in28.length < 4 || (end - oldest) / DAY < 20) return { ok: false, need: 4, have: in28.length };
+  if (in28.length < 4 || (end - oldest) / DAY < 20) return { ok: false, need: 4, have: in28.length, days: Math.round((end - oldest) / DAY) };
   const loadOf = (s) => sessionLoad(s, profile);
   const sum = (from, to) => list.filter((s) => { const t = keyToMs(s.dayKey); return t > end - from * DAY && t <= end - to * DAY; }).reduce((a, s) => a + loadOf(s), 0);
   const acute = sum(7, 0);

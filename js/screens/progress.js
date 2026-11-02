@@ -773,7 +773,9 @@ function healthSection(s, today) {
   } else if (f) {
     cards.push(`<div class="card pg-card pg-health">
       <div class="eyebrow">Tu forma</div>
-      <p class="pg-health__text">Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). De tus <b class="num">${fmt.int(f.withHr || 0)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.</p>
+      <p class="pg-health__text">${(f.have || 0) >= 6
+        ? `Ya tienes <b class="num">${fmt.int(f.have)}</b> clases que sirven. Falta tiempo: entre la primera y la última tiene que haber 2 semanas para ver una tendencia de verdad. ${14 - (f.span || 0) <= 1 ? 'Mañana' : `En <b class="num">${fmt.int(14 - (f.span || 0))}</b> días`} verás tu gráfico.`
+        : `Para ver si mejoras necesito <b>6 clases con pulso</b> en al menos 2 semanas, con tramos de 1 minuto o más a distintas velocidades (las de cuestas no cuentan). De tus <b class="num">${fmt.int(f.withHr || 0)}</b> clases con pulso de las últimas 10 semanas, sirven <b class="num">${fmt.int(f.have || 0)}</b>.`}</p>
     </div>`);
   }
   const lt = l?.ok ? loadText(l) : null;
@@ -785,6 +787,12 @@ function healthSection(s, today) {
       <div class="pg-health__gauge" role="img" aria-label="Carga de la semana frente a tu media: ${esc(lt.title)}"><i style="left:${pos.toFixed(1)}%"></i></div>
       <div class="pg-health__scale"><span>Descansado</span><span>Equilibrado</span><span>Cargado</span></div>
       <p class="pg-health__text">${esc(lt.text)}</p>
+    </div>`);
+  } else if (l && !l.ok) {
+    const days = Math.max(1, 20 - (l.days || 0));
+    cards.push(`<div class="card pg-card pg-health">
+      <div class="eyebrow">Carga y descanso</div>
+      <p class="pg-health__text">Para decirte si estás descansado o cargado comparo tu última semana con tu media del mes: necesito <b>3 semanas</b> de clases. ${l.days >= 7 ? `En <b class="num">${fmt.int(days)}</b> días lo tendrás.` : 'Sigue entrenando y aparecerá aquí.'}</p>
     </div>`);
   }
   if (!cards.length) return '';
