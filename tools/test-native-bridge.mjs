@@ -129,11 +129,15 @@ const SCHEMA = {
   // RITMUP Pro (StoreKit 2): la página abre la hoja de la suscripción; el iPhone manda el estado (solo con 'store' en caps)
   'store.show': { from: opt('str') },
   'store.status': { pro: 'bool', product: opt('str'), expires: opt('int'), trial: 'bool', available: 'bool' },
+  // build 18 (cap 'head'): «Sigue tu cabeza» con ARKit (js/player/headtrack.js). `head {}` = sin cara
+  'head.start': { hz: opt('int') },
+  'head.stop': {},
+  head: { x: opt('num'), y: opt('num'), z: opt('num'), yaw: opt('num'), pitch: opt('num') },
 };
 SCHEMA['native.status'] = SCHEMA['native.hello'];
 const PAGE_TYPES = ['hello', 'today', 'class.ready', 'class.prepare', 'class.start', 'state', 'event', 'class.end', 'class.discard', 'ack',
   'backup', 'backup.get', 'health.authorize', 'audio.session', 'haptic', 'health.metrics.get', 'ai.request', 'notify.config', 'plan.days',
-  'store.show'];
+  'store.show', 'head.start', 'head.stop'];
 const PRO_PRODUCTS = ['com.nachogarcia.bestrunning.pro.mensual', 'com.nachogarcia.bestrunning.pro.anual'];
 const HAPTIC_STYLES = ['light', 'medium', 'heavy', 'soft', 'rigid', 'selection', 'success', 'warning', 'error'];
 const ID_REQUIRED = new Set(['cmd', 'workout.summary', 'backup.get']);

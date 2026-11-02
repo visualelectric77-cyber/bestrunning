@@ -9,6 +9,8 @@ import { createHeadFilter } from './headpose.js';
 import { isNative, nativeStatus, post as nativePost, on as nativeOn } from '../integrations/native-bridge.js';
 
 export const HEAD_KEY = 'ritmup.headtrack';
+/** Signo de x y yaw que llega de la app (1 = tal cual). Si en un iPhone el efecto saliera al revés, se corrige aquí. */
+export const HEAD_MIRROR = 1;
 
 /** ¿Está activado en Ajustes? */
 export function headTrackOn() {
@@ -53,7 +55,7 @@ export function createHeadTracker({ onState = () => {} } = {}) {
     const off = nativeOn('head', (d) => {
       if (stopped) return;
       const ok = d && Number.isFinite(d.x) && Number.isFinite(d.y) && Number.isFinite(d.z);
-      sample(ok ? { x: +d.x, y: +d.y, z: +d.z, yaw: +d.yaw || 0, pitch: +d.pitch || 0 } : null);
+      sample(ok ? { x: HEAD_MIRROR * d.x, y: +d.y, z: +d.z, yaw: HEAD_MIRROR * (+d.yaw || 0), pitch: +d.pitch || 0 } : null);
     });
     nativePost('head.start', { hz: 30 });
     return { stop() { try { off?.(); } catch { /* nada */ } nativePost('head.stop', {}); } };
