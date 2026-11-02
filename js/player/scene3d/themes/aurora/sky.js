@@ -5,6 +5,8 @@
 // lejano, pintado el último de lo opaco (early-Z). Estrellas: 1 draw call, finas, extinguidas cerca del horizonte, sin
 // destellos (centelleo ≤ 10 % y lento).
 
+import { SKY_SAMPLE } from '../kit/world.js';
+
 const SKY_VERT = /* glsl */ `
 varying vec2 vNdc;
 void main() { vNdc = position.xy; gl_Position = vec4(position.xy, 1.0, 1.0); }`;
@@ -17,6 +19,10 @@ uniform vec2 uLineAz;
 uniform float uVpAz, uVpK, uBandEl, uBandW, uBandK;
 uniform vec3 uSun;     // resplandor del sol bajo (amanecer/atardecer), ya escalado (0 de noche y de día)
 uniform float uSunAz;  // azimut del resplandor
+uniform sampler2D uPhotoT;   // web 1.14: cielo de foto (la Vía Láctea real, CC0) bajo la aurora, solo de noche
+uniform vec4 uPhotoCrop;
+uniform float uPhotoK;
+${SKY_SAMPLE}
 varying vec2 vNdc;
 void main() {
   vec4 p = uProjInv * vec4(vNdc, 1.0, 1.0);
@@ -26,6 +32,15 @@ void main() {
   vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.22, e));
   col = mix(col, uZenith, smoothstep(0.18, 0.85, e));
   float az = atan(dir.x, -dir.z);
+  if (uPhotoK > 0.0) {
+    // estrellas y Vía Láctea de verdad (punto negro: fuera el velo del panorama), apagadas pegadas al horizonte
+    vec3 ph = max(skyCrop(uPhotoT, uPhotoCrop, dir) - 0.09, 0.0) / 0.91;
+    float night = 1.0 - smoothstep(0.01, 0.08, dot(uZenith, vec3(0.33)));
+    // fuera el resplandor de pueblo de la foto pegado al horizonte (ahí manda la aurora) y sin tintes cálidos
+    float lphT = dot(ph, vec3(0.2126, 0.7152, 0.0722));
+    ph = mix(vec3(lphT), ph, 0.35);
+    col += ph * vec3(0.82, 0.9, 1.05) * uPhotoK * night * smoothstep(0.1, 0.32, e);
+  }
   // hora real: sol bajo bajo el horizonte ⇒ franja cálida finísima pegada al horizonte y un rubor amplio y tenue
   float sAz = abs(az - uSunAz);
   col += uSun * (exp(-e * 34.0) * (0.3 + 0.7 * exp(-sAz * 2.4)) + exp(-e * 7.0) * 0.22 * exp(-sAz * 1.3));
@@ -86,6 +101,7 @@ export function createSky(ctx) {
     uBandK: { value: 0.012 },
     uSun: { value: new THREE.Color(0, 0, 0) },
     uSunAz: { value: -0.3 },
+    uPhotoT: { value: null }, uPhotoCrop: { value: new THREE.Vector4(-1, 1, 0, 1) }, uPhotoK: { value: 0 },
   };
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));

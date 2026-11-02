@@ -7,6 +7,7 @@ import {
   DEFINES, SHARED_DECL, BEND, PNOISE, LAMPS, FENCE_X, FENCE_H, CROWD_X, LAMP_X, LAMP_HEAD_X, LAMP_Y, LAMP_P, LAMP_OFF_R,
   BUILD_X,
 } from './common.js';
+import { SKY_SAMPLE } from '../kit/world.js';
 
 const HEAD = SHARED_DECL + BEND + PNOISE + LAMPS;
 export const lin = (THREE, r, g, b) => new THREE.Color().setRGB(r, g, b);
@@ -73,6 +74,11 @@ const GROUND_FRAG = /* glsl */ `
 ${HEAD}
 uniform vec3 uRoad, uWalk, uCurb, uPaint, uBlue, uMatCol, uSpecCol;
 uniform float uSpec, uDetail, uCamH, uWet, uNearSpec;
+// realismo (web 1.14): asfalto y aceras de foto (CC0) y el cielo de foto reflejado en lo mojado
+uniform sampler2D uAsph, uAsphN, uWalkT, uSkyT;
+uniform vec4 uSkyCrop;
+uniform float uPhoto, uSkyGain;
+${SKY_SAMPLE}
 uniform vec2 uFeel;           // x contraste de las señales cercanas · y separación de las juntas (m)
 uniform vec4 uMats;           // z de: SALIDA · META · próximos dos arcos de km (1e5 = ninguno)
 varying vec2 vP;
@@ -112,10 +118,14 @@ void main() {
   float jd = abs(fract(sP / jp + 0.5 + 0.06 * (n2 - 0.5)) - 0.5) * jp;
   float joint = lineAA(jd, 0.018, fwS) * near * road * clamp(0.25 + 0.55 * uFeel.x, 0.0, 1.1);
   asph *= 1.0 - 0.55 * joint;
+  // árido de verdad: la foto del asfalto (4 m por repetición; sP mod 1000 = 250 repeticiones exactas, sin costura)
+  vec3 aph = texture2D(uAsph, vec2(x / 4.0, sP / 4.0)).rgb;
+  asph = mix(asph, asph * aph * 2.4, uPhoto);
   // acera: baldosas de 40 cm con llagas
   vec2 tl = abs(fract(vec2(x, sP) / 0.4) - 0.5) * 0.4;
   float tile = max(lineAA(tl.x, 0.006, fwX), lineAA(tl.y, 0.006, fwS)) * near;
   vec3 walkC = uWalk * (0.86 + 0.2 * n1 + 0.1 * (g - 0.5)) * (1.0 - 0.3 * tile);
+  walkC = mix(walkC, walkC * texture2D(uWalkT, vec2(x / 3.0, sP / 3.0)).rgb * 2.2, uPhoto);
   vec3 base = asph * road + uCurb * (0.9 + 0.2 * n2) * curb + walkC * walk;
 
   // ── marcas viales: discontinuas de carril (3,5 m de cada 10), bordes, línea azul, pasos de cebra ──
@@ -167,6 +177,8 @@ void main() {
   // rizado del agua: columnas finas a lo largo de la avenida (el reflejo se rompe en vetas verticales, no en manchas)
   float strk = pnoise(vec2(x * 7.0, sP * 0.6), 600.0);
   vec3 Np = normalize(vec3((strk - 0.5) * 0.05 + (n2 - 0.5) * 0.03 + (g - 0.5) * 0.03 * near, 1.0, (g - 0.5) * 0.02 * near));
+  vec3 tn = texture2D(uAsphN, vec2(x / 4.0, sP / 4.0)).rgb * 2.0 - 1.0;
+  Np = normalize(Np + vec3(tn.x, 0.0, -tn.y) * 0.18 * uPhoto * (1.0 - 0.8 * puddle));
   vec3 V = normalize(cameraPosition - P);
   float fres = 0.04 + 0.96 * pow(1.0 - clamp(V.y, 0.0, 1.0), 5.0);
   float spec = 0.0;
@@ -200,6 +212,11 @@ void main() {
   col += uSpecCol * lampC * spec * uSpec * wet * mix(0.35, 1.0, fres) * (1.0 - 0.7 * smoothstep(0.2, 0.9, fwS));
   // brillo satinado del asfalto mojado en ángulo rasante: la bruma iluminada de la ciudad
   col += uFogCol * 0.9 * fres * wet;
+  // el cielo de la ciudad (skyline de foto) reflejado en los charcos y lo mojado
+  if (uPhoto > 0.0) {
+    vec3 Rr = reflect(-V, Np); Rr.y = abs(Rr.y);
+    col += skyCrop(uSkyT, uSkyCrop, Rr) * uSkyGain * fres * wet * (0.35 + 0.65 * puddle) * uPhoto;
+  }
 
   // ── niebla ──
   col = mix(col, uFogCol, fogK(dist));
@@ -230,6 +247,8 @@ export function buildGround(THREE, shared) {
     uSpec: { value: 1 }, uDetail: { value: 1 }, uCamH: { value: 1.7 }, uWet: { value: 1 }, uNearSpec: { value: 1 },
     uFeel: { value: new THREE.Vector2(1, 5) },
     uMats: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) },
+    uAsph: { value: null }, uAsphN: { value: null }, uWalkT: { value: null }, uSkyT: { value: null },
+    uSkyCrop: { value: new THREE.Vector4(-1, 1, 0, 1) }, uPhoto: { value: 0 }, uSkyGain: { value: 0.5 },
   };
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: GROUND_VERT, fragmentShader: GROUND_FRAG, defines: DEFINES });
   const mesh = new THREE.Mesh(geo, mat);
@@ -274,6 +293,10 @@ const BUILD_FRAG = /* glsl */ `
 ${HEAD}
 uniform vec3 uFacade, uGlass, uWarm, uCool, uShop;
 uniform float uLit, uDetail;
+uniform sampler2D uFacT, uSkyT;
+uniform vec4 uSkyCrop;
+uniform float uPhoto, uSkyGain;
+${SKY_SAMPLE}
 varying vec3 vL;
 varying vec3 vN;
 varying vec3 vW;
@@ -310,7 +333,17 @@ void main() {
   float tone = h12(cell + 11.0 + vSeed);
   vec3 wc = mix(uWarm, uCool, step(0.72, tone)) * (0.3 + 0.7 * h12(cell + 5.0)) * mix(1.0, 0.5, smoothstep(12.0, 60.0, v));
   float upper = step(shopH + 0.2, v) * (1.0 - top);
-  vec3 winC = mix(uGlass, wc, lit);
+  // cristal de verdad: las ventanas apagadas reflejan el cielo de la ciudad (más en ángulo rasante)
+  vec3 Vw = normalize(cameraPosition - vW);
+  float fresW = 0.06 + 0.94 * pow(1.0 - clamp(abs(dot(N, Vw)), 0.0, 1.0), 4.0);
+  vec3 glass = uGlass + skyCrop(uSkyT, uSkyCrop, reflect(-Vw, N)) * uSkyGain * fresW * 0.8 * uPhoto;
+  // interior encendido: más luz abajo (techo y lámpara), algún estor a media altura
+  float blind = step(0.62, h12(cell + 4.4)) * smoothstep(0.55, 0.6, fr.y);
+  wc *= mix(1.0, (0.65 + 0.5 * smoothstep(0.9, 0.3, fr.y)) * (1.0 - 0.7 * blind), uPhoto);
+  vec3 winC = mix(glass, wc, lit);
+  // carpintería: parteluz central, travesaño alto y marco (de cerca se ven las hojas de la ventana)
+  float frame = max(lineAA(abs(fr.x - 0.5) * colW, 0.035, fwq.x), lineAA(abs(fr.y - 0.72) * fh, 0.03, fwq.y));
+  winC = mix(winC, uFacade * 0.35, frame * lod * uPhoto);
   float winM = mix(0.42 * (0.35 + uLit), win, lod) * upper * (1.0 - top);
   vec3 winAvg = mix(uGlass, (uWarm + uCool) * 0.3, uLit * 0.6);
   vec3 winCol = mix(winAvg, winC, lod);
@@ -331,7 +364,8 @@ void main() {
   // fachada: luz de las farolas (las plantas bajas) + un velo de ambiente
   vec3 P = vec3(vP0.x, v, vP0.z);
   float E = lampsAt(P, N, sP) * uLight;
-  vec3 fac = uFacade * (0.12 + 0.06 * pnoise(vec2(u * 0.5, v * 0.5), 1e4) + E * uLampCol * 1.7);
+  vec3 facBase = mix(uFacade, uFacade * texture2D(uFacT, vec2(u / 7.0, v / 7.0)).rgb * 2.6, uPhoto);
+  vec3 fac = facBase * (0.12 + 0.06 * pnoise(vec2(u * 0.5, v * 0.5), 1e4) + E * uLampCol * 1.7);
   fac *= mix(1.0, 0.55, smoothstep(10.0, 60.0, v));   // las plantas altas, en penumbra
   float slab = lineAA(abs(fract((v - shopH) / fh) - 0.02) * fh, 0.12, fwq.y) * upper * lod;
   fac *= 1.0 + 0.5 * slab;
@@ -394,6 +428,8 @@ export function buildBuildings(THREE, shared, rand) {
     uCool: { value: lin(THREE, 0.12, 0.14, 0.18) },
     uShop: { value: lin(THREE, 0.15, 0.095, 0.05) },
     uLit: { value: 0.24 }, uDetail: { value: 1 },
+    uFacT: { value: null }, uSkyT: { value: null }, uSkyCrop: { value: new THREE.Vector4(-1, 1, 0, 1) },
+    uPhoto: { value: 0 }, uSkyGain: { value: 0.5 },
   };
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: BUILD_VERT, fragmentShader: BUILD_FRAG, defines: DEFINES });
   const mesh = new THREE.Mesh(geo, mat);

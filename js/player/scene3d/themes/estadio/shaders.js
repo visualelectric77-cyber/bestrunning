@@ -98,6 +98,8 @@ uniform vec4 uMoment;         // x σrel MITAD, y intensidad, z σrel META de la
 uniform vec4 uBank[6];        // focos (mundo) + intensidad (reflejo satinado)
 uniform vec2 uLaneCam;        // calle de la cámara [r0, r1]
 uniform vec2 uFeel;           // sensación de velocidad: x contraste de las señales cercanas, y separación de las marcas (σ)
+uniform sampler2D uTartanT, uTartanN, uGrassT;   // web 1.14: tartán y césped de foto (CC0)
+uniform float uPhoto;
 varying vec3 vW;
 varying vec2 vP;
 NOISE_CHUNK
@@ -147,6 +149,12 @@ void main() {
   float stripe = 0.5 + 0.5 * cos(p.x * (PI / 6.0));
   float sw = 1.0 - smoothstep(0.5, 3.0, fwidth(p.x) * 2.0);
   vec3 grass = uGrass * (0.8 + 0.32 * mix(0.5, stripe, sw) + 0.12 * (n1 - 0.5));
+  // realismo: grano de caucho del tartán y hierba de foto (sin repetición visible: dos escalas)
+  float tA = dot(texture2D(uTartanT, p / 1.3).rgb, vec3(0.3, 0.59, 0.11));
+  float tB = dot(texture2D(uTartanT, p / 7.1 + 0.37).rgb, vec3(0.3, 0.59, 0.11));
+  synth = mix(synth, synth * (tA * 1.7 + tB * 0.9), uPhoto);
+  vec3 gT = texture2D(uGrassT, p / 2.4).rgb * 0.6 + texture2D(uGrassT, p / 9.0 + 0.21).rgb * 0.4;
+  grass = mix(grass, grass * gT * 3.2, uPhoto);
   // áreas de concursos en los fondos (dentro de las curvas): sintético algo más oscuro, sin borde marcado con el césped
   float dArea = step(TA, ax) * (1.0 - trackM);
   synth *= 1.0 - 0.35 * dArea;
@@ -178,7 +186,7 @@ void main() {
   col *= uLight;
   vec3 V = -toCam / max(dist, 1e-3);
   float spec = 0.0;
-  float rough = 160.0 * (0.7 + 0.6 * mott);
+  float rough = 160.0 * (0.7 + 0.6 * mott) * mix(1.0, 0.55 + 0.9 * tA, uPhoto);
   for (int i = 0; i < 6; i++) {
     vec3 L = normalize(uBank[i].xyz - vW);
     vec3 H = normalize(L + V);

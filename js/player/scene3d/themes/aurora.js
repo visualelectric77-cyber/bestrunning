@@ -38,6 +38,7 @@ import { createRiver } from './aurora/river.js';
 import { createGround, RIPS } from './aurora/ground.js';
 import { createTags } from './aurora/tags.js';
 import { ENERGY, INDIGO, BODY, MEANDER_PERIOD, RIVER_LEN, riverX } from './aurora/common.js';
+import { worldUrl, loadTex, loadJson } from './kit/world.js';
 
 export const meta = {
   id: 'aurora',
@@ -51,7 +52,7 @@ const GATES = 3;
 const NR = 4;
 const RECOVERY = { walk: 1, cooldown: 1, warmup: 0.45, jog: 0.5 };
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, rig, post, timeline: tl, util, camera } = ctx;
   const { clamp, clamp01, smoothstep, lerp } = util;
   const C = (hex) => new THREE.Color(hex);
@@ -75,6 +76,17 @@ export function createTheme(ctx) {
     uGhost: { value: new THREE.Vector4(1.9, -40, 0, 0) },
   };
   const sky = createSky(ctx);
+  // realismo (web 1.14): las estrellas y la Vía Láctea de verdad (panorama CC0 del Desierto) bajo la aurora
+  try {
+    const [skyMeta, skyTex] = await Promise.all([
+      loadJson('desierto', 'sky.json'),
+      loadTex(ctx, worldUrl('desierto', 'sky.jpg'), { srgb: true, aniso: 1 }),
+    ]);
+    const r = (v) => (v * Math.PI) / 180;
+    sky.u.uPhotoT.value = skyTex;
+    sky.u.uPhotoCrop.value.set(r(skyMeta.az[0]), r(skyMeta.az[1]), r(skyMeta.el[0]), r(skyMeta.el[1]));
+    sky.u.uPhotoK.value = 0.55;
+  } catch { /* sin red: el cielo de siempre */ }
   const ground = createGround(ctx, shared);
   const ribbons = createRibbons(ctx);
   const river = createRiver(ctx, shared);

@@ -33,3 +33,17 @@ Todo es **CC0** (dominio público) de [Poly Haven](https://polyhaven.com), salvo
 | Navidad | `snow_*` | textura «Snow 02» |
 
 Los rótulos de Neón (HOTEL, BAR, CINE…) se dibujan en la app. No hay marcas reales.
+
+## Escenarios de siempre con texturas de foto (web 1.14)
+
+| Escenario | Archivo | Origen |
+|---|---|---|
+| Carrera | (usa `neon/`) | cielo «Shanghai Bund», asfalto «Asphalt 02», aceras «Patterned Paving 02», fachadas «Concrete Tile Facade» |
+| Estadio | `tartan_*` | textura «Rubberized Track» |
+| Estadio | `grass_*` | textura «Leafy Grass» |
+| Cordillera | `rock_*` | textura «Aerial Rocks 02» |
+| Cordillera | `snow_*` | textura «Snow 02» |
+| Aurora | (usa `desierto/sky.*`) | HDRI «Qwantani Night (Pure Sky)»: estrellas y Vía Láctea |
+| Halloween | `mud_*` | textura «Forest Floor» |
+| Grafito | `floor_*` | textura «Smooth Concrete Floor» |
+

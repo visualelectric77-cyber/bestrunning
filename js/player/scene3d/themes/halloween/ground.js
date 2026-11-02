@@ -19,6 +19,8 @@ const GROUND_FRAG = /* glsl */ `
 uniform vec3 uDirt, uMud, uVerge, uLeafA, uLeafB, uSkyRef;
 uniform vec2 uFeel;           // x contraste de las señales cercanas, y -
 uniform float uDetail, uLight;
+uniform sampler2D uMudT;      // web 1.14: suelo de bosque de foto (hojarasca, tierra; CC0)
+uniform float uPhoto;
 varying vec3 vW;
 NOISE_CHUNK
 COMMON_CHUNK
@@ -93,6 +95,12 @@ void main() {
   float edgeK = exp(-pow((ar - pw - 0.4) / 0.9, 2.0)) + 0.35;
   float leaf = (1.0 - smoothstep(0.1, 0.17, length(lr * vec2(1.0, 1.9)))) * step(1.0 - 0.5 * edgeK, lh) * mid;
   verge = mix(verge, mix(uLeafA, uLeafB, hash12(lid + 4.4)), leaf * (0.55 + 0.3 * cue));
+  if (uPhoto > 0.0) {
+    // foto (4 m por repetición: 512 / 4 = 128, sin costura al envolver S mod 512) en dos escalas, oscurecida a noche
+    vec3 mt = texture2D(uMudT, vec2(r, sa) / 4.0).rgb * 0.65 + texture2D(uMudT, vec2(r, sa) / 16.0 + 0.27).rgb * 0.35;
+    path = mix(path, path * mt * 3.0, uPhoto);
+    verge = mix(verge, verge * mt * 3.4, uPhoto);
+  }
   vec3 base = mix(verge, path, pathM);
   // las hojas también caen sobre el camino, más sueltas
   base = mix(base, mix(uLeafA, uLeafB, hash12(lid + 4.4)) * 0.8, leaf * pathM * 0.35 * step(0.82, lh));
@@ -138,6 +146,7 @@ export function createGround(ctx, shared) {
     uFeel: { value: new THREE.Vector2(1, 1) },
     uDetail: { value: 1 },
     uLight: { value: 1 },
+    uMudT: { value: null }, uPhoto: { value: 0 },
   };
   // plano en XZ del marco del corredor: de 30 m por detrás a 2 km por delante
   const geo = new THREE.PlaneGeometry(2400, 2030, 1, 1);

@@ -27,6 +27,7 @@ import { buildSky, buildGround, buildBuildings, buildFences, buildCrowd, buildLa
 import { buildRunners } from './carrera/runners.js';
 import { buildArches, SLOTS } from './carrera/arches.js';
 import { fenceBannerTexture, makeArchAtlas } from './carrera/graphics.js';
+import { worldUrl, loadTex, loadJson, skyDome, envFrom } from './kit/world.js';
 
 export const meta = {
   id: 'carrera',
@@ -77,7 +78,7 @@ function readRace(wk, totalSec) {
 
 const fmtKm = (km) => (Math.round(km * 100) / 100).toString().replace('.', ',');
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, root, camera, rig, post, timeline: tl, util } = ctx;
   const { clamp, clamp01, damp, smoothstep, easeInOutSine, easeOutCubic } = util;
   const aniso = Math.min(8, ctx.renderer.capabilities.getMaxAnisotropy?.() || 1);
@@ -112,6 +113,36 @@ export function createTheme(ctx) {
   const arches = buildArches(THREE, SH, atlas);
   root.add(arches.mesh);
   const G = ground.u;
+
+  // ── realismo (web 1.14): cielo de foto de una ciudad de noche con su skyline al fondo de la avenida, asfalto y
+  //    aceras de foto, charcos y ventanas que reflejan ese cielo (recursos de Neón, CC0). Sin red: el aspecto de antes ──
+  let photoSky = null;
+  try {
+    const [skyMeta, skyTex, envTex, asph, asphN, walk, fac] = await Promise.all([
+      loadJson('neon', 'sky.json'),
+      loadTex(ctx, worldUrl('neon', 'sky.jpg'), { srgb: true, aniso: 1 }),
+      loadTex(ctx, worldUrl('neon', 'env.jpg'), { srgb: true, aniso: 1 }),
+      loadTex(ctx, worldUrl('neon', 'road_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+      loadTex(ctx, worldUrl('neon', 'road_nor.jpg'), { repeat: [1, 1], aniso: 8 }),
+      loadTex(ctx, worldUrl('neon', 'walk_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+      loadTex(ctx, worldUrl('neon', 'facade_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 4 }),
+    ]);
+    photoSky = skyDome(ctx, skyTex, skyMeta, { gain: 0.5, grad: 0.6, gradEl: 0.4, black: 0.02 });
+    root.add(photoSky.mesh);
+    sky.mesh.visible = false;
+    ctx.scene.environment = envFrom(ctx, envTex);
+    ctx.scene.environmentIntensity = 0.25;
+    const crop = photoSky.u.uCrop.value;
+    G.uAsph.value = asph; G.uAsphN.value = asphN; G.uWalkT.value = walk; G.uSkyT.value = skyTex;
+    G.uSkyCrop.value = crop; G.uPhoto.value = 1; G.uSkyGain.value = 0.45;
+    const BU = builds.mesh.material.uniforms;
+    BU.uFacT.value = fac; BU.uSkyT.value = skyTex; BU.uSkyCrop.value = crop; BU.uPhoto.value = 1; BU.uSkyGain.value = 0.5;
+    // ventanas encendidas menos naranjas (luz de interior real, no recortes planos)
+    BU.uWarm.value.setRGB(0.2, 0.14, 0.085); BU.uCool.value.setRGB(0.11, 0.13, 0.16);
+    BU.uLit.value = 0.17;
+    // la bruma se funde con el horizonte de la foto
+    SH.uFogCol.value.setRGB(...skyMeta.horizon).multiplyScalar(0.06);
+  } catch { /* sin red: cielo y materiales de antes */ }
   const RU = runners.u;
   const CU = crowd.u;
 
@@ -401,6 +432,7 @@ export function createTheme(ctx) {
       SH.uLight.value = mood.light * (1 - 0.1 * pauseK) * (1 + 0.3 * fe);
       SH.uAccent.value.copy(f.accent);
       sky.u.uGoldK.value = 0.6 * fe;
+      if (photoSky) photoSky.u.uTint.value.setRGB(1 + 0.5 * fe, 1 + 0.15 * fe, 1 - 0.3 * fe);
       fences.u.uLed.value = mood.led * (1 - 0.5 * pauseK) * (1 - 0.6 * fe);
       CU.uEnergy.value = clamp01(Math.max(mood.crowd, 0.85 * cheer, fe) * (1 - 0.6 * pauseK));
       CU.uMotionK.value = rm ? 0.3 : 1;

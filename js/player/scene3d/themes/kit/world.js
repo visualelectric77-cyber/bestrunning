@@ -70,6 +70,16 @@ export function pbr(ctx, set, o = {}) {
 
 /* ─────────────────────────────── cielo de foto ─────────────────────────────── */
 
+/** GLSL: color del cielo de foto recortado en la dirección d (marco del corredor: azimut 0 al frente, −z). */
+export const SKY_SAMPLE = /* glsl */ `
+vec3 skyCrop(sampler2D tex, vec4 crop, vec3 d) {
+  float az = atan(d.x, -d.z);
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2((az - crop.x) / (crop.y - crop.x), (max(el, crop.z + 0.002) - crop.z) / (crop.w - crop.z));
+  return texture2D(tex, clamp(uv, vec2(0.002), vec2(0.998))).rgb;
+}
+`;
+
 const SKY_VERT = /* glsl */ `
 varying vec3 vDir;
 void main() {

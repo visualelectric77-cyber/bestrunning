@@ -21,6 +21,7 @@ import { RC, LANE_W, LS, LC, BEND, wrapS, pathPoint, easeCubicIntegral, A as HAL
 import { buildSky, buildGround, buildStands, buildLights } from './estadio/stadium.js';
 import { DECAL_VERT, DECAL_FRAG } from './estadio/shaders.js';
 import { laneNumbersTexture, makePaint, makeBug, makeFinalGraphic } from './estadio/graphics.js';
+import { worldUrl, loadTex } from './kit/world.js';
 
 export const meta = {
   id: 'estadio',
@@ -52,7 +53,7 @@ const MOODS = {
   cooldown: { dh: 0.2, fov: -1, light: 0.84, rail: 0.05, plen: 9, pint: 0.75, exp: 0.9 },
 };
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, root, camera, rig, post, timeline: tl, util } = ctx;
   const { clamp, clamp01, damp, smoothstep, easeInOutSine, easeOutCubic, easeInOutCubic } = util;
   const C = (hex) => new THREE.Color(hex);
@@ -73,6 +74,14 @@ export function createTheme(ctx) {
   const sky = buildSky(THREE, camera);
   root.add(sky.mesh);
   const ground = buildGround(THREE, ctx.shaders.NOISE);
+  // realismo (web 1.14): tartán y césped de foto (CC0). Sin red, la pista de siempre
+  try {
+    const [tartan, grassT] = await Promise.all([
+      loadTex(ctx, worldUrl('estadio', 'tartan_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+      loadTex(ctx, worldUrl('estadio', 'grass_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+    ]);
+    ground.u.uTartanT.value = tartan; ground.u.uGrassT.value = grassT; ground.u.uPhoto.value = 1;
+  } catch { /* sin red */ }
   world.add(ground.mesh);
   const stands = buildStands(THREE, ctx.shaders.NOISE, ctx.spectrumTexture);
   world.add(stands.mesh);

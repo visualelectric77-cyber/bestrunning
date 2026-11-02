@@ -13,6 +13,7 @@ export const meta = {
   description: 'Suelo de grafito y horizonte limpio. Sobrio y el más ligero.',
 };
 
+import { worldUrl, loadTex } from './kit/world.js';
 const LANE = 0.62;      // semiancho de la calle (m)
 const GATES = 3;        // líneas de cambio de tramo visibles a la vez
 const PERIOD = 1200;    // múltiplo de los espaciados del suelo (precisión del flotante)
@@ -51,6 +52,8 @@ const FLOOR_FRAG = /* glsl */ `
 uniform vec3 uGround, uHorizon, uGlow, uLane, uGhostCol;
 uniform float uS, uFogD, uMid, uGhostZ, uGhostA, uLaneK, uAcross, uAcrossBase;
 uniform vec2 uFeel;              // sensación de velocidad: contraste de las señales cercanas, densidad de las juntas
+uniform sampler2D uFloorT;       // web 1.14: hormigón pulido de foto (CC0), una sola muestra: sigue siendo el más ligero
+uniform float uPhoto;
 uniform vec4 uGate[${GATES}];     // z (relativo, < 0 delante), intensidad, -, -
 uniform vec3 uGateCol[${GATES}];
 varying vec3 vW;
@@ -71,6 +74,7 @@ void main() {
   // material: grafito con variación muy suave
   float n = vnoise(vec2(x * 0.11, s * 0.11)) * 0.6 + vnoise(vec2(x * 1.7, s * 1.7)) * 0.4;
   vec3 col = uGround * (0.82 + 0.36 * n);
+  if (uPhoto > 0.0) col = mix(col, col * texture2D(uFloorT, vec2(x, s) / 5.0).rgb * 2.1, uPhoto);
   // satinado: refleja el horizonte en ángulos rasantes (Fresnel de Schlick, F0 = 0,04)
   float cosT = clamp(abs(toCam.y) / max(dist, 1e-3), 0.0, 1.0);
   float fr = 0.04 + 0.96 * pow(1.0 - cosT, 5.0);
@@ -120,7 +124,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, root, rig, post, timeline: tl, util } = ctx;
   const { clamp, clamp01, smoothstep } = util;
   const C = (hex) => new THREE.Color(hex);
@@ -160,7 +164,12 @@ export function createTheme(ctx) {
     uFeel: { value: new THREE.Vector2(1, 1) },
     uGate: { value: gateArr },
     uGateCol: { value: gateCol },
+    uFloorT: { value: null }, uPhoto: { value: 0 },
   };
+  try {
+    floorU.uFloorT.value = await loadTex(ctx, worldUrl('blank', 'floor_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 });
+    floorU.uPhoto.value = 1;
+  } catch { /* sin red: el grafito de siempre */ }
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), new THREE.ShaderMaterial({
     uniforms: floorU, vertexShader: FLOOR_VERT,
     fragmentShader: FLOOR_FRAG.replace('NOISE_CHUNK', ctx.shaders.NOISE),

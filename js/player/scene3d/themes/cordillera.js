@@ -19,6 +19,7 @@ import { createProfile, bendAt, DS, S0, BASE, ZONE_KEYS } from './cordillera/pro
 import { NB, TERRAIN_VERT, TERRAIN_FRAG, SKY_VERT, SKY_FRAG, DOT_VERT, DOT_FRAG } from './cordillera/glsl.js';
 import { LODS, bandsFor, forwardGeometry, backGeometry, updateBands } from './cordillera/terrain.js';
 import { createTag } from './cordillera/tags.js';
+import { worldUrl, loadTex } from './kit/world.js';
 
 export const meta = {
   id: 'cordillera',
@@ -39,7 +40,7 @@ const MARK_NEAR = 360;      // el rótulo de KM/MITAD/META solo aparece en sus �
 /** Nivel de calidad → detalle de malla (la media tiene su propio LOD: bajar de alta alivia de verdad los vértices). */
 const lodFor = (level) => (level >= 3 ? 'high' : level === 2 ? 'med' : level === 1 ? 'low' : 'eco');
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, root, rig, post, util, camera } = ctx;
   const { clamp, clamp01, smoothstep, damp } = util;
   const tl = ctx.timeline;
@@ -92,10 +93,19 @@ export function createTheme(ctx) {
     uFog: { value: new THREE.Vector4(1 / 3000, 1 / 1100, 30, 0) },
     uMisc: { value: new THREE.Vector4(0, 0, 0, 1) },
     uLines: { value: new THREE.Vector4(2, 160, 0.2, 1) },
+    uRockT: { value: null }, uSnowT: { value: null }, uPhoto: { value: 0 },
     uRoute: { value: new THREE.Vector2(-1e9, 1e9) },
     uFeel: { value: new THREE.Vector2(1, 1) },
   };
   const NOISE = ctx.shaders.NOISE;
+  // realismo (web 1.14): roca y nieve de foto (CC0) sobre el relieve de la clase. Sin red, el aspecto de siempre
+  try {
+    const [rockT, snowT] = await Promise.all([
+      loadTex(ctx, worldUrl('cordillera', 'rock_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+      loadTex(ctx, worldUrl('cordillera', 'snow_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 }),
+    ]);
+    U.uRockT.value = rockT; U.uSnowT.value = snowT; U.uPhoto.value = 1;
+  } catch { /* sin red */ }
   const terrainMat = (back) => new THREE.ShaderMaterial({
     uniforms: U,
     vertexShader: TERRAIN_VERT.replace('NOISE_CHUNK', NOISE),

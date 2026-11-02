@@ -25,6 +25,7 @@ import { createSky } from './halloween/sky.js';
 import { createGround } from './halloween/ground.js';
 import { createPumpkins } from './halloween/pumpkins.js';
 import { createTrees, createGraves } from './halloween/forest.js';
+import { worldUrl, loadTex } from './kit/world.js';
 
 export const meta = {
   id: 'halloween',
@@ -63,7 +64,7 @@ const MOODS = {
   cooldown: { dh: 0.04, fov: -1, exp: 0.93 },
 };
 
-export function createTheme(ctx) {
+export async function createTheme(ctx) {
   const { THREE, root, camera, rig, post, timeline: tl, util } = ctx;
   const { clamp, clamp01, damp, easeInOutSine, easeOutCubic } = util;
   const tlRaw = ctx.tl;
@@ -78,6 +79,11 @@ export function createTheme(ctx) {
   const shared = createShared(THREE);
   const sky = createSky(ctx, shared);
   const ground = createGround(ctx, shared);
+  // realismo (web 1.14): tierra y hojarasca de foto en el camino y las cunetas (CC0). Sin red, el suelo de siempre
+  try {
+    const mud = await loadTex(ctx, worldUrl('halloween', 'mud_diff.jpg'), { srgb: true, repeat: [1, 1], aniso: 8 });
+    ground.u.uMudT.value = mud; ground.u.uPhoto.value = 1;
+  } catch { /* sin red */ }
   const maxPump = Math.ceil((BACK.pumpkins + 40 + RANGE.pumpkins[3]) / (PUMP_D / 1.5)) + 2;
   const pumpkins = createPumpkins(ctx, shared, maxPump);
   const trees = createTrees(ctx, shared, Math.ceil((BACK.trees + 20 + RANGE.trees[3]) / TREE_D) + 2, 4);

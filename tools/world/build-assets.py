@@ -21,6 +21,11 @@ THEMES = {
     'desierto': {'sky': ('qwantani_night_puresky', 32, 80, -2, 76), 'sets': {'sand': 'aerial_sand', 'road': 'asphalt_02'}},
     'neon': {'sky': ('shanghai_bund', 196, 70, -2.5, 62), 'sets': {'road': 'asphalt_02', 'facade': 'concrete_tile_facade', 'walk': 'patterned_paving_02'}},
     'tunel': {'env': 'shanghai_bund', 'envA': 196, 'sets': {}},
+    # web 1.14: el Estadio de siempre con tartán y césped de foto (sin cielo propio)
+    'estadio': {'sets': {'tartan': 'rubberized_track', 'grass': 'leafy_grass'}},
+    'cordillera': {'sets': {'rock': 'aerial_rocks_02', 'snow': 'snow_02'}},
+    'halloween': {'sets': {'mud': 'forest_floor'}},
+    'blank': {'sets': {'floor': 'smooth_concrete_floor'}},
     'bosque': {'sky': ('kloofendal_misty_morning_puresky', 0, 80, -2, 72), 'sets': {'floor': 'forest_floor'}},
     'nieve': {'sky': ('kloppenheim_07_puresky', 200, 80, -2, 72), 'sets': {'snow': 'snow_02'}},
 }

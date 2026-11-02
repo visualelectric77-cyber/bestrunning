@@ -162,6 +162,8 @@ uniform vec4 uLines;    // separación de curvas, radio del acento cercano, inte
 uniform vec2 uRoute;    // maqueta final: tramo de la ruta dibujado (s rel. al ancla: salida, meta)
 uniform vec2 uFeel;     // sensación de velocidad: contraste de las señales cercanas, densidad
 uniform float uAnchor, uFrac;
+uniform sampler2D uRockT, uSnowT;   // web 1.14: roca y nieve de foto (CC0)
+uniform float uPhoto;
 varying vec3 vW;
 varying vec3 vN;
 varying float vH;
@@ -194,6 +196,17 @@ void main() {
   float m1 = vnoise(vec2(vX * 0.42, sAbs * 0.42));
   float m2 = vnoise(vec2(vX * 0.045, sAbs * 0.045));
   vec3 col = uAlb * (0.8 + 0.2 * m1 + 0.28 * m2);
+  if (uPhoto > 0.0) {
+    // roca de foto (dos escalas, sin repetición visible) y nieve en lo alto y en lo llano; las sierras lejanas se
+    // quedan con su tono medio (sin moaré)
+    vec2 uvR = vec2(vX, sAbs);
+    float farK = smoothstep(220.0, 900.0, dist);
+    vec3 rock = texture2D(uRockT, uvR / 9.0).rgb * 0.6 + texture2D(uRockT, uvR / 53.0 + 0.31).rgb * 0.4;
+    vec3 snow = texture2D(uSnowT, uvR / 6.0).rgb;
+    float snowK = smoothstep(0.62, 0.9, n.y + 0.25 * (m2 - 0.5)) * smoothstep(uLines.x * 2.0, uLines.x * 9.0, vH + 30.0 * (m1 - 0.5));
+    vec3 mat_ = mix(rock * vec3(0.78, 0.8, 0.86), snow * vec3(0.85, 0.9, 1.05) * 1.6, snowK);
+    col = mix(col, uAlb * 3.2 * mix(mat_, vec3(dot(mat_, vec3(0.33))), farK), uPhoto);
+  }
   // luz: luna baja (envolvente suave), relleno del cielo por arriba
   float ndl = dot(n, uMoonDir);
   float dif = max(ndl, 0.0) * 0.8 + max((ndl + 0.3) / 1.3, 0.0) * 0.2;
@@ -218,7 +231,7 @@ void main() {
   vec3 grey = uLineCol * uLines.w;
   vec3 lineCol = mix(grey, uAccent * uLines.z * (1.0 + 0.12 * uMisc.z), nearK);
   float lines = minor * 0.34 + major * mix(0.8, 0.42, finale) + index * mix(1.15, 0.95, finale);
-  col += lineCol * lines * edgeK * min(offPath, 1.0);
+  col += lineCol * lines * edgeK * min(offPath, 1.0) * mix(1.0, 0.22, uPhoto);
 
   // camino de luz en la cresta: acento del tramo actual, el siguiente tras la línea de cambio, neutro más allá
   float fwX = fwidth(vX);
