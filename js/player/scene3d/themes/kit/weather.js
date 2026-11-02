@@ -1,6 +1,7 @@
 // RITMUP · kit de los escenarios REALISTAS · EL TIEMPO QUE CAMBIA durante la clase (escenarios vivos, web 1.15).
 // Todo es función del reloj de la clase (frame.t) o del tiempo de animación (frame.time): capturas deterministas, nada
 // de Math.random. Sin destellos ni rayos (§15.2): la lluvia es fina y la intensidad cambia despacio.
+import { quickLiveWeather, fetchLiveWeather, weatherPref } from '../../../weather-live.js';
 
 /**
  * Onda lenta 0..1 para el tiempo: sube y baja con periodo `period` (s) y desfase `phase` (rad). `sharp` > 1 alarga
@@ -87,17 +88,23 @@ export function setLiveWeather(w) { live = w && typeof w === 'object' ? w : null
 export function liveWeather() { return live; }
 
 /**
- * Lo llama cada escenario con tiempo al cargarse: con «Tiempo real» activado en Ajustes consulta el tiempo (en segundo
- * plano, sin esperar: el escenario empieza con su propio tiempo y cambia en cuanto llega) y lo deja en liveWeather();
- * con «El del escenario», lo borra. Nunca lanza.
+ * Lo llama cada escenario con tiempo al cargarse: con «Tiempo real» activado en Ajustes pone al instante la hora real y
+ * el último tiempo conocido, y consulta el tiempo en segundo plano (y cada 3 min); con «El del escenario», lo borra.
+ * Nunca lanza.
  */
 let liveReq = 0;
+let liveTimer = null;
 export function startLiveWeather() {
   const req = ++liveReq;
-  import('../../../weather-live.js')
-    .then((m) => {
-      if (m.weatherPref().mode === 'scene') { if (req === liveReq) setLiveWeather(null); return null; }
-      return m.fetchLiveWeather().then((w) => { if (req === liveReq) setLiveWeather(w); });
-    })
-    .catch(() => { if (req === liveReq) setLiveWeather(null); });
+  clearInterval(liveTimer);
+  // al instante (sin red, síncrono): la hora real por la posición del sol y el último tiempo conocido ⇒ desde el
+  // primer fotograma, nunca la «hora azul» por esperar a la red
+  try { setLiveWeather(quickLiveWeather()); } catch { setLiveWeather(null); }
+  const pull = () => {
+    if (weatherPref().mode === 'scene') { if (req === liveReq) setLiveWeather(null); return; }
+    fetchLiveWeather().then((w) => { if (req === liveReq && w) setLiveWeather(w); }).catch(() => { /* se queda con el último */ });
+  };
+  pull();
+  // cada 3 min: el sol se mueve durante la clase y, si el servicio estaba caído, se reintenta
+  liveTimer = setInterval(() => { if (req === liveReq) pull(); else clearInterval(liveTimer); }, 3 * 60 * 1000);
 }

@@ -1,6 +1,6 @@
 // RITMUP · tests del tiempo real de los escenarios (js/player/weather-live.js): posición del sol y traducción del
 // tiempo de Open-Meteo a lo que pintan los escenarios. Uso: node tools/test-weather-live.mjs
-import { sunElevation, weatherState, CITIES, cityById, weatherPref, WEATHER_KEY } from '../js/player/weather-live.js';
+import { sunElevation, weatherState, CITIES, cityById, weatherPref, WEATHER_KEY, cityFromTimeZone, quickLiveWeather } from '../js/player/weather-live.js';
 
 let failures = 0;
 let passes = 0;
@@ -65,6 +65,22 @@ section('preferencia', () => {
   ok(weatherPref().mode === 'scene', 'ciudad desconocida → el del escenario');
   store.set(WEATHER_KEY, 'here');
   ok(weatherPref().mode === 'here', 'aquí');
+});
+
+section('respaldo sin red ni permisos', () => {
+  ok(cityFromTimeZone('Europe/Madrid').id === 'madrid' && cityFromTimeZone('America/New_York').id === 'nueva-york', 'zona horaria → ciudad');
+  ok(cityFromTimeZone('Pacific/Fiji').id === 'madrid', 'zona desconocida → Madrid');
+  ok(cityFromTimeZone('Atlantic/Canary').name === 'Canarias', 'Canarias');
+  const store = new Map();
+  globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)) };
+  store.set(WEATHER_KEY, 'scene');
+  ok(quickLiveWeather() === null, 'el del escenario: sin estado inmediato');
+  store.set(WEATHER_KEY, 'here');
+  store.set('ritmup.weather.here', JSON.stringify({ lat: 40.0, lon: -0.1 }));
+  const q = quickLiveWeather();
+  ok(q && Number.isFinite(q.day) && q.label.startsWith('Aquí'), `«aquí» al instante con la última posición: «${q?.label}»`);
+  store.set(WEATHER_KEY, 'city:nueva-york');
+  ok(quickLiveWeather()?.label.startsWith('Nueva York'), 'ciudad al instante');
 });
 
 process.stdout.write(`\n${failures ? '✗' : '✓'} tiempo real: ${passes} comprobaciones, ${failures} fallos\n`);

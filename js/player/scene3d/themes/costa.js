@@ -265,6 +265,12 @@ export async function createTheme(ctx) {
   const fogBase = scene.fog.color.clone();
   const blue = new THREE.Color(0.5, 0.64, 1.05);
   const white = new THREE.Color(1, 1, 1);
+  // pleno día (solo con «Tiempo real» a mediodía): la foto es de amanecer; se enfría hacia azul cielo, se quita el
+  // degradado oscuro de arriba y el sol pasa de naranja a blanco
+  const noonTint = new THREE.Color(0.86, 1.0, 1.22);
+  const sunWarm = sun.color.clone();
+  const sunNoon = new THREE.Color(1.0, 0.95, 0.88);
+  const grad0 = sky.u.uGrad.value.x;
   const P0 = { bulb: bulbs.material.uniforms.uPower.value, halo: lampHalo.material.uniforms.uPower.value, lamp: lampU.uLampPower.value };
   const totalSec = Math.max(60, ctx.timeline.totalSec);
   const grey = new THREE.Color(0.7, 0.74, 0.8);
@@ -278,14 +284,18 @@ export async function createTheme(ctx) {
     const p = Math.min(1, Math.max(0, f.t / (totalSec * 0.92)));
     const d = w ? w.day : p * p * (3 - 2 * p);
     const cloud = w ? w.cloud : 0;
-    const g = (0.42 + 0.46 * d) * (1 - 0.4 * cloud) * (w && d < 0.05 ? 0.6 : 1);
+    // mediodía: solo el tiempo real llega aquí (sol alto); el amanecer de la clase se queda en la luz dorada
+    const noon = w ? Math.min(1, Math.max(0, (w.sunEl - 12) / 22)) * (1 - 0.6 * cloud) : 0;
+    const g = (0.42 + 0.46 * d + 0.32 * noon) * (1 - 0.4 * cloud) * (w && d < 0.05 ? 0.6 : 1);
     sky.u.uGain.value = g; waterU.uGain.value = g;
-    sky.u.uTint.value.copy(blue).lerp(white, d).lerp(grey, 0.75 * cloud);
+    sky.u.uGrad.value.x = grad0 * (1 - 0.7 * noon);
+    sky.u.uTint.value.copy(blue).lerp(white, d).lerp(noonTint, noon).lerp(grey, 0.75 * cloud);
+    sun.color.copy(sunWarm).lerp(sunNoon, noon);
     scene.fog.density = fogD0 * (1 + 1.4 * cloud + (w ? 3 * w.mist : 0));
     rain.update(f, S, w ? w.rain : 0);
-    sun.intensity = (0.25 + 1.45 * d) * (1 - 0.75 * cloud);
-    hemi.intensity = 0.25 + 0.22 * d;
-    scene.environmentIntensity = 0.45 + 0.4 * d;
+    sun.intensity = (0.25 + 1.45 * d + 0.35 * noon) * (1 - 0.75 * cloud);
+    hemi.intensity = 0.25 + 0.22 * d + 0.3 * noon;
+    scene.environmentIntensity = 0.45 + 0.4 * d + 0.3 * noon;
     scene.fog.color.copy(fogBase).multiplyScalar(0.55 + 0.45 * d).multiply(sky.u.uTint.value);
     const on = 1 - Math.min(1, Math.max(0, (d - 0.62) / 0.3));
     bulbs.material.uniforms.uPower.value = P0.bulb * (0.12 + 0.88 * on);

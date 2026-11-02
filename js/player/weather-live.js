@@ -2,13 +2,16 @@
 // escenario»). Con «Tiempo real» el escenario toma la hora del día (posición del sol, calculada aquí) y el tiempo que
 // hace ahora (nubes, lluvia, nieve, niebla) en TU ubicación o en una ciudad elegida (Madrid, Nueva York…).
 // El tiempo lo da Open-Meteo (open-meteo.com: gratis, sin clave ni cuenta). Solo se le manda la ciudad elegida o tu
-// posición REDONDEADA a 0,1° (unos 10 km); se guarda 15 min en el iPhone. Sin red o sin permiso: el escenario sigue
-// con su propio tiempo (los escenarios vivos), nunca se rompe nada.
+// posición REDONDEADA a 0,1° (unos 10 km); se guarda 15 min en el iPhone.
+// LA HORA DEL DÍA NUNCA DEPENDE DE LA RED: la posición del sol se calcula aquí. Si Open-Meteo falla (sin red, o
+// «service overloaded», como el 2 nov 2026), se usa el último tiempo guardado (hasta 6 h) o cielo despejado; si no
+// hay permiso de ubicación, la zona aproximada de tu zona horaria (Europe/Madrid ⇒ Madrid…).
 // Funciones puras (posición del sol, traducción del tiempo) probadas en Node: tools/test-weather-live.mjs.
 
 export const WEATHER_KEY = 'ritmup.weather';      // 'scene' (por defecto) · 'here' · 'city:<id>'
 const CACHE_KEY = 'ritmup.weather.cache';
 const CACHE_MS = 15 * 60 * 1000;
+const STALE_MS = 6 * 60 * 60 * 1000;     // con el servicio caído, el último tiempo conocido vale hasta 6 h
 
 /** Ciudades para elegir (id → nombre y coordenadas). */
 export const CITIES = [
@@ -86,12 +89,24 @@ export function weatherState(cur, sunEl, place = '') {
 
 const round1 = (v) => Math.round(v * 10) / 10;
 
-function readCache(key) {
+function readCache(key, maxAge = CACHE_MS) {
   try {
     const c = JSON.parse(globalThis.localStorage?.getItem(CACHE_KEY) || 'null');
-    if (c && c.key === key && Date.now() - c.at < CACHE_MS) return c.cur;
+    if (c && c.key === key && Date.now() - c.at < maxAge) return c.cur;
   } catch { /* nada */ }
   return null;
+}
+
+/** Zona horaria del iPhone → ciudad aproximada (respaldo sin permiso de ubicación). */
+const TZ_CITY = {
+  'Europe/Madrid': 'madrid', 'Europe/London': 'londres', 'Europe/Paris': 'paris', 'America/New_York': 'nueva-york',
+  'Asia/Tokyo': 'tokio', 'Australia/Sydney': 'sidney',
+};
+export function cityFromTimeZone(tz = null) {
+  let z = tz;
+  try { z = z || Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { z = null; }
+  if (z === 'Atlantic/Canary') return { id: 'canarias', name: 'Canarias', lat: 28.1, lon: -15.4 };
+  return cityById(TZ_CITY[z] || 'madrid');
 }
 function writeCache(key, cur) {
   try { globalThis.localStorage?.setItem(CACHE_KEY, JSON.stringify({ key, at: Date.now(), cur })); } catch { /* nada */ }
@@ -101,7 +116,11 @@ function here() {
   return new Promise((resolve, reject) => {
     const g = globalThis.navigator?.geolocation;
     if (!g) { reject(new Error('sin geolocalización')); return; }
-    g.getCurrentPosition((p) => resolve({ lat: round1(p.coords.latitude), lon: round1(p.coords.longitude) }), reject,
+    g.getCurrentPosition((p) => {
+      const pos = { lat: round1(p.coords.latitude), lon: round1(p.coords.longitude) };
+      try { globalThis.localStorage?.setItem(LAST_HERE, JSON.stringify(pos)); } catch { /* nada */ }
+      resolve(pos);
+    }, reject,
       { enableHighAccuracy: false, timeout: 6000, maximumAge: 30 * 60 * 1000 });
   });
 }
@@ -115,23 +134,53 @@ export async function fetchLiveWeather(opts = {}) {
   if (pref.mode === 'scene') return null;
   try {
     let pos; let place;
-    if (pref.mode === 'city') { pos = { lat: pref.city.lat, lon: pref.city.lon }; place = pref.city.name; } else { pos = await here(); place = 'Aquí'; }
+    if (pref.mode === 'city') { pos = { lat: pref.city.lat, lon: pref.city.lon }; place = pref.city.name; } else {
+      try { pos = await here(); place = 'Aquí'; } catch {
+        const c = cityFromTimeZone();            // sin permiso o sin GPS: tu zona horaria
+        pos = { lat: c.lat, lon: c.lon }; place = `${c.name} (aprox.)`;
+      }
+    }
     const key = `${pos.lat},${pos.lon}`;
     let cur = readCache(key);
+    let offline = false;
     if (!cur) {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${pos.lat}&longitude=${pos.lon}`
-        + '&current=temperature_2m,cloud_cover,precipitation,rain,showers,snowfall,weather_code,is_day&timezone=auto';
-      const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-      const t = setTimeout(() => ctl?.abort(), 6000);
-      const r = await fetch(url, { signal: ctl?.signal, cache: 'no-store' });
-      clearTimeout(t);
-      if (!r.ok) return null;
-      cur = (await r.json())?.current || null;
-      if (!cur) return null;
-      writeCache(key, cur);
+      try {
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${pos.lat}&longitude=${pos.lon}`
+          + '&current=temperature_2m,cloud_cover,precipitation,rain,showers,snowfall,weather_code,is_day&timezone=auto';
+        const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+        const t = setTimeout(() => ctl?.abort(), 6000);
+        const r = await fetch(url, { signal: ctl?.signal, cache: 'no-store' });
+        clearTimeout(t);
+        const j = r.ok ? await r.json() : null;
+        cur = j && !j.error && j.current ? j.current : null;
+        if (cur) writeCache(key, cur);
+      } catch { cur = null; }
+      if (!cur) { cur = readCache(key, STALE_MS) || { cloud_cover: 0, weather_code: 0 }; offline = true; }
     }
-    return weatherState(cur, sunElevation(pos.lat, pos.lon, new Date()), place);
+    const st = weatherState(cur, sunElevation(pos.lat, pos.lon, new Date()), place);
+    if (offline) { st.offline = true; st.label = `${place} · sin datos del tiempo ahora · hora real`; }
+    return st;
   } catch {
     return null;
   }
+}
+
+const LAST_HERE = 'ritmup.weather.here';   // última posición (redondeada) de «aquí», para el estado inmediato
+
+/**
+ * Estado INMEDIATO, sin red ni permisos (síncrono): la hora real por la posición del sol en la ciudad elegida, tu última
+ * posición conocida o tu zona horaria, con el último tiempo guardado (hasta 6 h) o despejado. El escenario lo usa desde
+ * el primer fotograma; fetchLiveWeather lo afina en cuanto llega. null con «El del escenario».
+ */
+export function quickLiveWeather() {
+  const pref = weatherPref();
+  if (pref.mode === 'scene') return null;
+  let pos = null; let place = '';
+  if (pref.mode === 'city') { pos = { lat: pref.city.lat, lon: pref.city.lon }; place = pref.city.name; } else {
+    try { pos = JSON.parse(globalThis.localStorage?.getItem(LAST_HERE) || 'null'); } catch { pos = null; }
+    place = 'Aquí';
+    if (!pos) { const c = cityFromTimeZone(); pos = { lat: c.lat, lon: c.lon }; place = `${c.name} (aprox.)`; }
+  }
+  const cur = readCache(`${pos.lat},${pos.lon}`, STALE_MS) || { cloud_cover: 0, weather_code: 0 };
+  return weatherState(cur, sunElevation(pos.lat, pos.lon, new Date()), place);
 }
