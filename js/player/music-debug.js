@@ -1,6 +1,8 @@
 // BestRunning · panel de depuración del audio (solo con ?debug=music en la URL). Se carga bajo demanda desde
 // player.js y no toca nada del motor: lee music.status() y el contexto de audio-engine dos veces por segundo para que
 // el dueño pueda hacer una captura en el iPhone a mitad de clase. Un toque lo pliega o despliega.
+// La línea «escena» (arriba del todo) sale de scene.getInfo() de js/player/scene3d.js: fps reales de los últimos 2 s,
+// ms de CPU por fotograma, peldaño de calidad (eco/low/med·78/med·88/med/high) y modo, DPR, escenario y bajadas.
 import { audioContextInfo } from '../audio/audio-engine.js';
 import { isWakeLockSupported } from './wakelock.js';
 
@@ -9,8 +11,23 @@ const ms = (s) => `${Math.round((Number(s) || 0) * 1000)}`;
 const r1 = (x) => (Number.isFinite(Number(x)) ? (Math.round(Number(x) * 10) / 10).toFixed(1) : '–');
 const yes = (v) => (v ? 'sí' : 'NO');
 
-function lines(music) {
+/** Línea de la escena 3D (o null sin escena). Exportada para las pruebas. */
+export function sceneLine(info) {
+  if (!info || info.level === -1) return info ? 'escena: fondo 2D (3D apagado)' : null;
+  const q = info.rung || info.quality;
+  const mode = info.mode === 'auto' ? `auto, techo ${info.ceil ?? 'high'}` : 'fija';
+  const st = info.parked ? ' · PREPARACIÓN' : info.running === false ? ' · PARADA' : '';
+  const log = (info.qLog || []).length ? ` (${info.qLog.join(' · ')})` : '';
+  return `escena ${info.theme ?? '—'} · ${info.fps} fps · cpu ${r1(info.cost)} ms · ${q} (${mode}) · dpr ${info.dpr}/${info.devDpr ?? '—'}`
+    + `${info.throttled ? ' · iOS a 30 fps' : ''}${st} · bajadas ${info.drops ?? 0}${log}`;
+}
+
+function lines(music, scene) {
   const out = [];
+  let info = null;
+  try { info = scene?.getInfo?.() || null; } catch { info = null; }
+  const sl = sceneLine(info);
+  if (sl) out.push(sl);
   const nav = globalThis.navigator || {};
   const holdOk = typeof globalThis.AudioParam === 'function' && typeof globalThis.AudioParam.prototype?.cancelAndHoldAtTime === 'function';
   out.push(`https ${yes(globalThis.isSecureContext)} · wakeLock ${yes(isWakeLockSupported())} · sesión ${nav.audioSession?.type ?? '—'} · cancelAndHold ${yes(holdOk)}`);
@@ -66,7 +83,7 @@ function lines(music) {
 }
 
 /** Monta el panel en `host`. Devuelve la función que lo quita. */
-export function mountMusicDebug(host, { getMusic } = {}) {
+export function mountMusicDebug(host, { getMusic, getScene } = {}) {
   const doc = globalThis.document;
   if (!doc || !host) return () => {};
   const el = doc.createElement('pre');
@@ -82,10 +99,11 @@ export function mountMusicDebug(host, { getMusic } = {}) {
   });
   function paint() {
     let text;
-    try { text = lines(getMusic?.()); } catch (err) { text = [`error: ${err?.message || err}`]; }
-    // la línea de volumen y nivel, la más útil, arriba del todo
+    try { text = lines(getMusic?.(), getScene?.()); } catch (err) { text = [`error: ${err?.message || err}`]; }
+    // la línea de volumen y nivel, la más útil, arriba del todo (tras la de la escena, que es corta)
     const k = text.findIndex((l) => l.startsWith('volumen '));
-    if (k > 0) text.unshift(text.splice(k, 1)[0]);
+    const top = text[0]?.startsWith('escena') ? 1 : 0;
+    if (k > top) text.splice(top, 0, text.splice(k, 1)[0]);
     el.textContent = text.join('\n');
   }
   host.appendChild(el);

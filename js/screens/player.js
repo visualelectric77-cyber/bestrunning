@@ -204,7 +204,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   })();
   if (/[?&]debug=music(?:&|$)/.test(globalThis.location?.search || '') || nativeMusicDebug) {
     import('../player/music-debug.js')
-      .then((m) => { if (!disposed) disposers.push(m.mountMusicDebug(globalThis.document?.body, { getMusic: () => music })); })
+      .then((m) => { if (!disposed) disposers.push(m.mountMusicDebug(globalThis.document?.body, { getMusic: () => music, getScene: () => scene })); })
       .catch(() => {});
   }
   // Escena 3D: el módulo (three.js) se descarga ya en la preparación para que esté listo al empezar
@@ -357,6 +357,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
   // Escena 3D
   const visuals = { ...VISUAL_DEFAULTS, ...(state.visuals || {}) };
   let sessionTheme = null;    // escenario elegido en Preparación SOLO para esta clase ('auto' o un id; null = el de Perfil)
+  // diagnóstico (?debug=music&escena=nieve): fuerza un escenario, también los especiales (Navidad, Carrera), para medirlo
+  {
+    const q = globalThis.location?.search || '';
+    const m = /[?&]debug=music(?:&|$)/.test(q) && /[?&]escena=([a-z]+)/.exec(q);
+    if (m) sessionTheme = m[1];
+  }
   let sceneThemeId = null;    // escenario con el que se creó (o al que se cambió) la escena
   let scene = null;           // controlador de createScene3D (null = fondo 2D)
   let head = null;            // seguimiento de cabeza (js/player/headtrack.js), solo con Ajustes › «Sigue tu cabeza»

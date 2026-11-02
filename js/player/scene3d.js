@@ -33,7 +33,9 @@
 //                                         //   localStorage 'ritmup.speedfeel' al crear la escena y en cada escenario
 //   Calidad 'auto': baja por cadencia Y coste de CPU por fotograma (un rAF a 30 fps del modo de bajo consumo con poco
 //   coste no es sobrecarga ⇒ se mantienen DPR y bloom); ignora ~8 s tras arrancar/escenario/volver; sube con
-//   histéresis (un nivel que falló espera 45 s, 90 s… hasta 8 min), también desde 'eco'.
+//   histéresis (un nivel que falló espera 45 s, 90 s… hasta 8 min), también desde 'eco'. Entre 'med' y 'low' baja
+//   antes la resolución en dos peldaños (RUNGS); con Bosque, Navidad, Neón y Carrera en pantallas táctiles no pasa de
+//   'med' (HEAVY_THEMES). getInfo() da fps, coste, peldaño, DPR, bajadas y los últimos cambios (panel ?debug=music).
 //   Capturas deterministas (laboratorio): createScene3D(canvas, { …, snapshot: { width, height, dpr } }) ⇒ reloj
 //   virtual, sin rAF ni listeners, tamaño fijo; luego scene.snapshot.sync() y scene.snapshot.step(1/60) N veces.
 //
@@ -121,6 +123,19 @@ const QUALITY = [
   { name: 'high', dpr: 2.0, bloom: true, bloomScale: 0.5, fps: 60, level: 3, msaa: 0 },
 ];
 const QUALITY_INDEX = { eco: 0, low: 1, med: 2, high: 3, auto: 3 };
+// Escalera de 'auto': entre 'med' y 'low' hay dos peldaños que solo bajan la resolución (×0,88 y ×0,78 del DPR de
+// 'med'). Los escenarios no cambian nada entre 'med' y 'high' (qualityLevel ≥ 2: bosque entero, lluvia, gente, bloom),
+// así que ahí se gana GPU sin perder el aspecto; 'low' (menos árboles y gente) queda para cuando ni eso basta.
+const RUNGS = [
+  { q: 0, s: 1, name: 'eco' }, { q: 1, s: 1, name: 'low' },
+  { q: 2, s: 0.78, name: 'med·78' }, { q: 2, s: 0.88, name: 'med·88' }, { q: 2, s: 1, name: 'med' },
+  { q: 3, s: 1, name: 'high' },
+];
+const RUNG_OF_LEVEL = [0, 1, 4, 5];
+// Escenarios caros en fragmento (Neón, Carrera) o con follaje de recorte alfa (Bosque, Navidad: el discard anula el
+// descarte de píxeles ocultos de las GPU de Apple). En pantallas táctiles 'auto' no pasa de 'med' con ellos: 'high'
+// solo sube el DPR de 1,6 a 2, invisible a un metro del móvil y ~55 % más píxeles que pintar.
+const HEAVY_THEMES = new Set(['bosque', 'nieve', 'neon', 'carrera']);
 const INTERNAL_BPM = { warmup: 100, walk: 90, jog: 120, run: 140, fast: 156, sprint: 172, cooldown: 92 };
 const ZONE_ENERGY = { walk: 0.15, warmup: 0.25, cooldown: 0.2, jog: 0.4, run: 0.6, fast: 0.8, sprint: 1 };
 const CLEAR = 0x050608;
@@ -232,6 +247,8 @@ export async function createScene3D(canvas, {
   let qMode = QUALITY_INDEX[quality] !== undefined ? quality : 'auto';
   let qIndex = QUALITY_INDEX[qMode];
   let Q = QUALITY[qIndex];
+  let dprScale = 1; // peldaño de resolución dentro del nivel (RUNGS)
+  const touch = !snap && typeof matchMedia === 'function' && (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
   let reduced = !!reducedMotion;
   const mql = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   if (mql?.matches) reduced = true;
@@ -303,8 +320,10 @@ export async function createScene3D(canvas, {
   let cadence33 = 0;
   let costAvg = 0;
   let throttled = false;
-  const blockedUntil = [0, 0, 0, 0]; // histéresis: un nivel que no aguantó no se reintenta hasta pasado un tiempo
-  const blockMs = [0, 0, 0, 0];      // …que se dobla en cada fallo (45 s → 90 s → … → 8 min)
+  const blockedUntil = RUNGS.map(() => 0); // histéresis: un peldaño que no aguantó no se reintenta hasta pasado un tiempo
+  const blockMs = RUNGS.map(() => 0);      // …que se dobla en cada fallo (45 s → 90 s → … → 8 min)
+  let qDrops = 0;                          // bajadas de 'auto' desde que se creó la escena (panel de diagnóstico)
+  const qLog = [];                         // últimos cambios de peldaño: 'high→med 0:42'
 
   // Temporales sin asignación por frame
   const tmpColor = new THREE.Color();
@@ -473,6 +492,8 @@ export async function createScene3D(canvas, {
     try {
       mod = await (entry.loader || entry.load)();
       if (typeof mod?.createTheme !== 'function') throw new Error('escenario sin createTheme');
+      // escenario caro en el móvil: 'auto' se queda en 'med' ANTES de construirlo (nada que recompilar luego)
+      if (qMode === 'auto' && !snap && req === themeReq && rungNow() > rungCeil(entry.id)) setRung(rungCeil(entry.id));
       ctx = makeCtx();
       inst = await mod.createTheme(ctx);
       if (!inst || typeof inst !== 'object') throw new Error('createTheme no devolvió nada');
@@ -552,7 +573,7 @@ export async function createScene3D(canvas, {
     const w = snap ? snap.width : Math.max(1, Math.round(canvas.clientWidth || canvas.width || 1));
     const h = snap ? snap.height : Math.max(1, Math.round(canvas.clientHeight || canvas.height || 1));
     const devDpr = snap ? snap.dpr : typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
-    const dpr = Math.min(devDpr, snap ? 2 : Q.dpr, 2);
+    const dpr = Math.round(Math.min(devDpr, snap ? 2 : Q.dpr * dprScale, 2) * 100) / 100;
     if (!force && w === width && h === height && dpr === dprNow) return;
     width = w;
     height = h;
@@ -575,6 +596,27 @@ export async function createScene3D(canvas, {
     lastQChange = nowMs();
     resetQualityWindow();
     callTheme('event', 'quality', { name: Q.name, level: Q.level });
+  }
+
+  const rungNow = () => {
+    const i = RUNGS.findIndex((r) => r.q === qIndex && r.s === dprScale);
+    return i < 0 ? RUNG_OF_LEVEL[qIndex] : i;
+  };
+  /** Techo de 'auto': 'med' con los escenarios caros en pantallas táctiles, 'high' en el resto. */
+  const rungCeil = (id = theme?.id) => (touch && HEAVY_THEMES.has(id) ? 4 : 5);
+
+  /** Pasa a otro peldaño de RUNGS: solo resolución si el nivel no cambia (el escenario no se entera). */
+  function setRung(r) {
+    const from = rungNow();
+    const R = RUNGS[clamp(r, 0, RUNGS.length - 1)];
+    if (RUNGS[from] === R) return;
+    qLog.push(`${RUNGS[from].name}→${R.name} ${fmtClock(localT)}`);
+    if (qLog.length > 4) qLog.shift();
+    dprScale = R.s;
+    if (R.q !== qIndex) { applyQuality(R.q); return; }
+    resize(true);
+    lastQChange = nowMs();
+    resetQualityWindow();
   }
 
   function resetQualityWindow() {
@@ -869,14 +911,23 @@ export async function createScene3D(canvas, {
     resetQualityWindow();
     if (qMode !== 'auto' || snap || throttled) return;
     const since = (now - lastQChange) / 1000;
+    const r = rungNow();
     const fail = () => {
-      blockMs[qIndex] = Math.min(480000, blockMs[qIndex] ? blockMs[qIndex] * 2 : 45000);
-      blockedUntil[qIndex] = now + blockMs[qIndex];
+      blockMs[r] = Math.min(480000, blockMs[r] ? blockMs[r] * 2 : 45000);
+      blockedUntil[r] = now + blockMs[r];
+      qDrops++;
     };
-    if (fps < 50 && qIndex > 1 && since > 3) { fail(); applyQuality(qIndex - 1); }
-    else if (fps < 38 && qIndex === 1 && since > 4) { fail(); applyQuality(0); }
-    else if (qIndex === 0 && fps >= 28.5 && costAvg < 6 && since > 20 && now >= blockedUntil[1]) applyQuality(1);
-    else if (qIndex > 0 && qIndex < 3 && fps > 58.5 && since > 12 && now >= blockedUntil[qIndex + 1]) applyQuality(qIndex + 1);
+    if (fps < 50 && r > 1 && since > 3) {
+      // muy por debajo (< 42 fps) ⇒ dos peldaños de golpe; y se salta el peldaño que no cambiaría el DPR (pantalla
+      // de DPR bajo): no se pierden 5 s en un escalón que no da ni un fps
+      let to = fps < 42 ? r - 2 : r - 1;
+      const devDpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
+      while (to > 1 && RUNGS[to].q === qIndex && Math.min(devDpr, Q.dpr * RUNGS[to].s, 2) >= dprNow - 0.01) to--;
+      fail();
+      setRung(Math.max(1, to));
+    } else if (fps < 38 && r === 1 && since > 4) { fail(); setRung(0); }
+    else if (r === 0 && fps >= 28.5 && costAvg < 6 && since > 20 && now >= blockedUntil[1]) setRung(1);
+    else if (r > 0 && r < rungCeil() && fps > 58.5 && since > 12 && now >= blockedUntil[r + 1]) setRung(r + 1);
   }
 
   function renderFrame(dt, now) {
@@ -1082,7 +1133,8 @@ export async function createScene3D(canvas, {
       qMode = QUALITY_INDEX[q] !== undefined ? q : 'auto';
       blockedUntil.fill(0);
       blockMs.fill(0);
-      applyQuality(QUALITY_INDEX[qMode]);
+      dprScale = 1;
+      applyQuality(qMode === 'auto' ? RUNGS[Math.min(5, rungCeil())].q : QUALITY_INDEX[qMode]);
       start();
     },
 
@@ -1159,6 +1211,8 @@ export async function createScene3D(canvas, {
       return {
         fps: Math.round(fps), quality: Q.name, mode: qMode, level: qIndex, dpr: dprNow, theme: theme?.id ?? null,
         cost: +costAvg.toFixed(2), throttled, running, parked,
+        rung: RUNGS[rungNow()].name, dprScale, ceil: RUNGS[rungCeil()].name, drops: qDrops, qLog: qLog.slice(),
+        devDpr: typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, width, height,
         t: +localT.toFixed(2), reduced, tv, calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
         ghost: F.ghost.active ? Math.round(F.ghost.deltaM) : null, golden: goldOn, audio: spectrum.out.live,
         stride: strideOn && !reduced, post: { ...post.settings }, director: director.info(), speedFeel: feel.id,
