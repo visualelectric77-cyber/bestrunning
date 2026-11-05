@@ -3062,6 +3062,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(`Hoy tu pulso va ${over} ppm más alto de lo normal a esta velocidad. Si no te encuentras bien, baja el ritmo: hoy cuenta igual.`, { icon: 'heart', duration: 8000 });
   }
 
+  const hrCoachAdj = {};
   function hrCoachTick(s) {
     const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
@@ -3078,7 +3079,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { target = hrTargetForZone(seg.zone, getState().profile || {}); } catch { target = null; }
     const r = st.coach.step({
       nowMs: now, running: true, segIndex: s.segIndex, zone: seg.zone, segSec: seg.sec,
-      segElapsed: s.segElapsed, segRemaining: s.segRemaining,
+      segElapsed: s.segElapsed, segRemaining: s.segRemaining, classElapsed: s.totalElapsed,
       hr: live ? { bpm: Number(live.bpm), atMs: Number(live.at) || now } : null, target,
     });
     // «Hoy te guío por tu pulso»: una vez por clase, cuando ya llega el pulso del reloj y la clase tiene tramos que el
@@ -3097,6 +3098,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let applied = 0;
     for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm' })) applied++;
     if (!applied) return;
+    // Lo que mueve el modo pulso no cuenta como «subiste tú» para la progresión (ver hrCoachAdj al guardar)
+    hrCoachAdj[seg.zone] = Math.round(((hrCoachAdj[seg.zone] || 0) + r.dir * applied / 10) * 10) / 10;
     const delta = fmt.speed(applied / 10);
     diagMark('pulso.ajuste', { dir: r.dir, kmh: applied / 10, ppm: r.avg });
     notify(r.dir < 0
@@ -3618,6 +3621,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // Campos de la fase 2 (§12, §13): el pulso lo añade luego el resumen con el Atajo del Watch
     for (const k of ['hrMin', 'hrSeries', 'hrZones']) if (session[k] === undefined) session[k] = null;
     session.music = { tracks: playedTracks(s.totalElapsed) };
+    const coachAdj = Object.fromEntries(Object.entries(hrCoachAdj).filter(([, v]) => v));
+    if (Object.keys(coachAdj).length) session.hrCoachAdj = coachAdj;
     // Carrera en la cinta: tu tiempo oficial (de la salida a la meta) para el resumen y tu historial
     if (raceResult) session.race = { ...raceResult };
     // Fin anticipado, tiempo saltado, rangos saltados y línea de tiempo (progresión, perfil «Real» y pulso del Watch)

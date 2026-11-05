@@ -1,11 +1,23 @@
 // RITMUP · modo pulso: con el pulso en directo del reloj, propone subir o bajar la velocidad para ir en la zona del
 // tramo. Lógica pura (sin DOM ni audio): el reproductor le pasa el estado cada segundo y aplica lo que devuelve con el
 // mismo ajuste que los botones − / + (que ya confirma la velocidad nueva con la voz).
-// Prudente a propósito: solo en tramos largos y constantes, con el pulso medio de los últimos 25 s, tras ≥ 45 s fuera
-// de zona, ±0,2 km/h por ajuste, 90 s de calma entre ajustes y como mucho 8 por clase. Sin pulso no hace nada.
+// Prudente a propósito: con el pulso medio de los últimos 25 s, tras ≥ 45 s fuera de zona, ±0,2 km/h por ajuste, 90 s
+// de calma entre ajustes y como mucho 8 por clase. Sin pulso no hace nada.
+// Con las clases reales del usuario (nov 2026) vimos dos fallos y los corregimos:
+// · subía la velocidad en los primeros minutos porque el pulso aún no había llegado (va ~3 min por detrás), y luego
+//   la deriva lo dejaba por encima de la zona; esas subidas además se aprendían como «vas sobrado». Ahora no sube en
+//   los primeros 8 min de la clase ni mientras el pulso siga subiendo.
+// · no bajaba en tramos de 2 min (las recuperaciones de las series), donde el pulso se iba acumulando. Ahora en tramos
+//   de 2–3 min puede bajar (nunca subir), salvo si el pulso ya está bajando solo.
 
 export const HR_COACH_ZONES = new Set(['jog', 'run', 'fast']);
-const MIN_SEG_SEC = 180;      // solo tramos de ≥ 3 min (en series cortas el pulso llega tarde)
+const MIN_SEG_SEC = 180;      // subir: solo en tramos de ≥ 3 min (en series cortas el pulso llega tarde)
+const MIN_SHORT_SEC = 120;    // bajar: también en tramos de 2–3 min (recuperaciones entre series)
+const SHORT_TAIL_SEC = 10;    // en esos, se decide hasta 10 s antes del final
+const OUT_HIGH_SHORT = 30;    // y basta con 30 s por encima
+const RAISE_AFTER_SEC = 480;  // nunca subir en los primeros 8 min de la clase
+const TREND_PPM = 3;          // ≥ 3 ppm de diferencia dentro de la ventana = el pulso aún se está moviendo
+const IMPLAUSIBLE_LOW = 35;   // > 35 ppm por debajo de la zona corriendo: el reloj está leyendo mal (pasó un día a 80)
 const SETTLE_SEC = 60;        // el pulso tarda en subir: nada en el primer minuto del tramo
 const TAIL_SEC = 45;          // ni en los últimos 45 s
 const AVG_SEC = 25;           // pulso medio de los últimos 25 s
@@ -26,7 +38,8 @@ const OK_GAP_SEC = 300;
 
 /**
  * Crea el estado del modo pulso de una clase.
- * step({ nowMs, running, segIndex, zone, segSec, segElapsed, segRemaining, hr: {bpm, atMs}|null, target: {min,max} })
+ * step({ nowMs, running, segIndex, zone, segSec, segElapsed, segRemaining, classElapsed?, hr: {bpm, atMs}|null,
+ *        target: {min,max} })
  * → null o { dir: -1|1, tenths: 2|3, reason: 'high'|'low'|'alarm', avg }
  */
 export function createHrCoach() {
@@ -67,18 +80,27 @@ export function createHrCoach() {
         if (!buf.length || buf[buf.length - 1][0] !== hr.atMs) buf.push([Number(hr.atMs) || now, hr.bpm]);
       }
       buf = buf.filter((p) => now - p[0] <= AVG_SEC * 1000);
-      const eligible = HR_COACH_ZONES.has(o.zone) && o.segSec >= MIN_SEG_SEC && o.segElapsed >= SETTLE_SEC
-        && o.segRemaining >= TAIL_SEC && count < MAX_PER_CLASS && o.target && o.target.max > o.target.min;
+      const short = o.segSec < MIN_SEG_SEC;
+      const eligible = HR_COACH_ZONES.has(o.zone) && o.segSec >= MIN_SHORT_SEC && o.segElapsed >= SETTLE_SEC
+        && o.segRemaining >= (short ? SHORT_TAIL_SEC : TAIL_SEC) && count < MAX_PER_CLASS && o.target && o.target.max > o.target.min;
       if (!eligible || buf.length < 3) { outSince = 0; outDir = 0; inSince = 0; return null; } // el reloj manda pulso cada ~5 s
       const avg = buf.reduce((a, p) => a + p[1], 0) / buf.length;
       lastAvg = avg;
-      const dir = avg > o.target.max + MARGIN_HIGH ? -1 : avg < o.target.min - MARGIN_LOW ? 1 : 0;
+      const trend = buf[buf.length - 1][1] - buf[0][1];
+      if (avg < o.target.min - IMPLAUSIBLE_LOW) { outSince = 0; outDir = 0; inSince = 0; return null; }
+      let dir = avg > o.target.max + MARGIN_HIGH ? -1 : avg < o.target.min - MARGIN_LOW ? 1 : 0;
+      const alarm = dir < 0 && avg > o.target.max + ALARM_OVER;
+      // Subir solo si el pulso ya se ha asentado: tramo largo, pasados 8 min de clase y sin seguir subiendo
+      if (dir > 0 && (short || trend >= TREND_PPM || (Number.isFinite(o.classElapsed) && o.classElapsed < RAISE_AFTER_SEC))) {
+        outSince = 0; outDir = 0; inSince = 0; return null;
+      }
+      // Bajar no, si ya baja solo (salvo alarma)
+      if (dir < 0 && !alarm && trend <= -TREND_PPM) { outSince = 0; outDir = 0; inSince = 0; return null; }
       if (!dir) { outSince = 0; outDir = 0; if (!inSince) inSince = now; return null; }
       inSince = 0;
       if (dir !== outDir) { outDir = dir; outSince = now; }
       if (now - lastAdjustAt < COOLDOWN_SEC * 1000) return null;
-      const alarm = dir < 0 && avg > o.target.max + ALARM_OVER;
-      const need = alarm ? 20 : dir < 0 ? OUT_HIGH_SEC : OUT_LOW_SEC;
+      const need = alarm ? 20 : dir < 0 ? (short ? OUT_HIGH_SHORT : OUT_HIGH_SEC) : OUT_LOW_SEC;
       if (now - outSince < need * 1000) return null;
       lastAdjustAt = now;
       outSince = now;

@@ -8,12 +8,13 @@ const ok = (c, msg) => { n++; if (!c) { bad++; console.log(`  ✗ ${msg}`); } };
 
 const target = { min: 140, max: 155 };
 /** Simula `sec` segundos de un tramo con pulso constante; devuelve los ajustes. */
-function run({ bpm, zone = 'run', segSec = 600, from = 0, sec = 300, hr = true, coach = createHrCoach(), seg = 0 }) {
+function run({ bpm, zone = 'run', segSec = 600, from = 0, sec = 300, hr = true, coach = createHrCoach(), seg = 0, classAt }) {
   const out = [];
   for (let t = from; t < from + sec; t++) {
     const ms = 1_000_000 + seg * 10_000_000 + t * 1000;
     const r = coach.step({
       nowMs: ms, running: true, segIndex: seg, zone, segSec, segElapsed: t, segRemaining: segSec - t,
+      classElapsed: classAt == null ? undefined : classAt + t,
       hr: hr ? { bpm: typeof bpm === 'function' ? bpm(t) : bpm, atMs: ms } : null, target,
     });
     if (r) out.push({ t, ...r });
@@ -44,7 +45,19 @@ ok(lo[0]?.dir === 1 && lo[0].tenths === 2 && lo[0].t >= 60 + 60 - 1, 'pulso bajo
 ok(run({ bpm: 175, zone: 'sprint' }).length === 0, 'nunca en sprint');
 ok(run({ bpm: 175, zone: 'warmup' }).length === 0, 'nunca en calentamiento');
 ok(run({ bpm: 175, zone: 'cooldown' }).length === 0, 'nunca en vuelta a la calma');
-ok(run({ bpm: 175, segSec: 120, sec: 120 }).length === 0, 'nunca en tramos de < 3 min');
+ok(run({ bpm: 175, segSec: 100, sec: 100 }).length === 0, 'nunca en tramos de < 2 min');
+{
+  // Recuperación de 2 min entre series con el pulso acumulado (las de «Trece sustos»): baja, nunca sube
+  const h = run({ bpm: 160, segSec: 120, sec: 120 });
+  ok(h.length === 1 && h[0].dir === -1 && h[0].t >= 60 + 30 - 1 && 120 - h[0].t >= 10, `tramo de 2 min con pulso alto → baja (t=${h[0]?.t})`);
+  ok(run({ bpm: 120, segSec: 170, sec: 170 }).length === 0, 'en tramos de 2–3 min nunca sube');
+  ok(run({ bpm: (t) => 175 - t * 0.4, segSec: 120, sec: 120 }).every((r) => r.reason === 'alarm'), 'si el pulso ya baja solo, no baja (salvo alarma)');
+}
+// El pulso va por detrás: nada de subir al principio de la clase ni mientras siga subiendo
+ok(run({ bpm: 125, classAt: 0, sec: 400 }).length === 0, 'no sube en los primeros 8 min de clase');
+ok(run({ bpm: 80, classAt: 600 }).length === 0, 'un pulso imposible corriendo (80) es el sensor: no sube');
+ok(run({ bpm: 125, classAt: 600 }).some((r) => r.dir === 1), 'pasados 8 min sí sube');
+ok(run({ bpm: (t) => 100 + t * 0.15, classAt: 600, sec: 240 }).length === 0, 'no sube mientras el pulso sigue subiendo');
 ok(run({ bpm: 175, segSec: 200, sec: 200 }).every((r) => 200 - r.t >= 45), 'nunca en los últimos 45 s');
 
 // Lecturas viejas no cuentan

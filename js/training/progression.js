@@ -259,10 +259,11 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
     if (!reachedEnd) p.loadAdjust -= 0.03;
   }
 
-  // Ajustes manuales: si completó y subió ≥ 0,2 en un nivel, adoptamos la mitad
+  // Ajustes manuales: si completó y subió ≥ 0,2 en un nivel, adoptamos la mitad. Lo que movió el modo pulso no cuenta
+  // (hrCoachAdj): sus subidas salían a veces de que el pulso aún no había llegado, y no son una pista tuya.
   if (session.completed && eff !== 'fail' && eff !== 'max') {
     for (const k of LEVEL_KEYS) {
-      const adj = num(session.adjustments?.[k]);
+      const adj = r1(num(session.adjustments?.[k]) - num(session.hrCoachAdj?.[k]));
       if (adj >= 0.2 - 1e-9) raise(k, Math.max(STEP, r1(adj / 2)), 'adjust');
     }
   }

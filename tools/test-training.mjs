@@ -426,6 +426,11 @@ const progState = (o = {}) => deepFreeze(makeState(o));
   ok(ra.levels.fast === 11.7 && ra.levels.jog === 8.3 && ra.changes.find((c) => c.level === 'fast').reason === 'adjust', 'ajuste manual ≥ +0,2 → adopta la mitad');
   const ra2 = applyFeedback(progState(), ses({ adjustments: { fast: 0.6 }, completed: false, completionPct: 0.9 }), { feeling: 'ok' });
   ok(ra2.levels.fast === 11.5, 'ajuste manual sin completar no se adopta');
+  // lo que subió el modo pulso no cuenta como ajuste tuyo
+  const rhc = applyFeedback(progState(), ses({ adjustments: { fast: 0.4 }, hrCoachAdj: { fast: 0.4 } }), { feeling: 'ok' });
+  ok(rhc.levels.fast === 11.5, 'subidas del modo pulso: no se adoptan');
+  const coachB = applyFeedback(progState(), ses({ adjustments: { fast: 0.6 }, hrCoachAdj: { fast: 0.2 } }), { feeling: 'ok' });
+  ok(coachB.levels.fast === 11.7, 'tu parte sí: +0,6 con +0,2 del modo pulso → adopta la mitad de +0,4');
   // tope de 28 días
   const capSt = progState({
     levels: { jog: 8.3, run: 10.1, fast: 12.1, sprint: 13.0 },
