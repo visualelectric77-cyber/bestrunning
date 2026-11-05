@@ -579,7 +579,9 @@ function checkPackSchedule(tag, w, cues, { avail, clipSec, mode, lead, watch, st
     const pre = cues.find((c) => c.kind === 'pre' && c.at === T - lead);
     const ch = cues.find((c) => c.kind === 'change' && c.segIndex === n.idx);
     const sc = speedClip(n.speed);
-    const canPack = inPackRange(n.speed) && !inclCh;
+    // la inclinación va con la voz grabada si es 0 o un % entero de 1 a 12 (y caben los clips); si no, voz del sistema
+    const inclOk = !inclCh || n.incline === 0 || (Number.isInteger(n.incline) && n.incline >= 1 && n.incline <= 12);
+    const canPack = inPackRange(n.speed) && inclOk;
     if (speedCh || inclCh) {
       ok(ch && ch.at === T && ch.priority === 3 && ch.beep === 'go', `${tag}: cambio en ${T}`);
       for (const d of [1, 2, 3]) if (T - d > starts[k - 1]) ok(cues.some((c) => c.kind === 'tick' && c.at === T - d), `${tag}: tick en ${T - d}`);
@@ -589,8 +591,15 @@ function checkPackSchedule(tag, w, cues, { avail, clipSec, mode, lead, watch, st
     for (const c of [pre, ch]) {
       if (!c) continue;
       if (!canPack) ok(c.voice === 'tts', `${tag}: ${c.kind}@${c.at} a ${n.speed}${inclCh ? ' con inclinación' : ''} debe ir con voz del sistema`);
-      else if (avail === ALL_IDS) ok(c.voice === 'pack', `${tag}: ${c.kind}@${c.at} a ${n.speed} no se compuso con el pack («${c.text}»)`);
-      if (c.voice === 'pack') {
+      else if (avail === ALL_IDS && !inclCh) ok(c.voice === 'pack', `${tag}: ${c.kind}@${c.at} a ${n.speed} no se compuso con el pack («${c.text}»)`);
+      if (c.voice === 'pack' && inclCh) {
+        // cuesta: primero la inclinación; la velocidad solo si cambia, y entonces al final
+        const want = n.incline === 0 ? (c.kind === 'pre' ? 'inclflat_1' : 'inclflatnow_1') : `pct_${n.incline}`;
+        ok(c.clips.includes(want), `${tag}: ${c.kind}@${c.at} dice la inclinación ${n.incline} (${c.clips})`);
+        ok(/^incl/.test(c.clips.find((id) => !id.startsWith('rep_'))), `${tag}: ${c.kind}@${c.at} empieza por la inclinación (${c.clips})`);
+        if (speedCh) ok(c.clips[c.clips.length - 1] === sc && c.clips.includes('speedalso_1'), `${tag}: ${c.kind}@${c.at} acaba en la velocidad ${n.speed} (${c.clips})`);
+        else ok(!c.clips.some((id) => /^s_\d/.test(id)), `${tag}: ${c.kind}@${c.at} sin velocidad si no cambia (${c.clips})`);
+      } else if (c.voice === 'pack') {
         ok(c.clips.includes(sc), `${tag}: ${c.kind}@${c.at} dice ${n.speed} (${c.clips})`);
         if (c.kind === 'pre') ok(c.clips[c.clips.length - 1] === sc, `${tag}: el pre-aviso acaba en la velocidad (${c.clips})`);
         if (c.kind === 'change' && w.isTest && n.stage > 0) ok(c.clips[0] === `stage_${n.stage}` || (!avail.has(`stage_${n.stage}`) && /^up_\d$/.test(c.clips[0])), `${tag}: escalón ${n.stage} compuesto (${c.clips})`);

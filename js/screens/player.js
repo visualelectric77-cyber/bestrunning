@@ -1087,6 +1087,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
             <div class="hud-speed__core">
               <div class="hud-state">${icon('pause', 11)}<span>En pausa</span></div>
               <div class="hud-zone" data-ref="zoneBox"><i class="hud-zone__dot"></i><span data-ref="zoneName"></span></div>
+              <div class="hud-incl" data-ref="incl" hidden><span class="hud-incl__ic" aria-hidden="true">${icon('incline', 22, { stroke: 2.4 })}</span><span class="hud-incl__txt" data-ref="inclTxt"></span><span class="hud-incl__cd num" data-ref="inclCd"></span></div>
               <div class="hud-speed__row">
                 <button class="hud-adj hud-adj--minus" data-adj="-1" aria-label="Bajar 0,1 km/h">${icon('minus', 22, { stroke: 2.6 })}</button>
                 <span class="hud-speed__fig">
@@ -2902,6 +2903,51 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
+  /**
+   * Inclinación, solo cuando hay que tocarla (con la cinta en cuesta casi no se notaba): antes de cada cambio, «Sube a
+   * 4 %» con la cuenta atrás (desde el pre-aviso de la voz) y, al cambiar, «Inclinación 4 %» destacado 6 s con
+   * vibración. El resto del tiempo no ocupa pantalla (queda el «· 4 %» pequeño junto al ritmo).
+   */
+  function renderIncline(s) {
+    const box = refs.incl;
+    if (!box) return;
+    const seg = s.segment;
+    const cur = Number(seg?.incline) || 0;
+    const nx = s.nextSegment;
+    const now = Date.now();
+    if (cache.inclIdx !== s.segIndex) {
+      const prev = cache.inclIdx == null ? 0 : cache.inclCur || 0;
+      if (cache.inclIdx != null && Math.abs(cur - prev) >= 0.25 && s.status === 'running') {
+        cache.inclFlashUntil = now + 6000;
+        timerHaptic('warning');
+      }
+      cache.inclIdx = s.segIndex;
+      cache.inclCur = cur;
+    }
+    const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
+    const left = Math.ceil(s.segRemaining - 1e-6);
+    const nInc = Number(nx?.incline) || 0;
+    let st = 'off';
+    let txt = '';
+    let cd = '';
+    if (nx && Math.abs(nInc - cur) >= 0.25 && left <= lead && s.status === 'running') {
+      st = 'pre';
+      txt = nInc === 0 ? 'Inclinación a 0' : `${nInc > cur ? 'Sube' : 'Baja'} a ${fmt.dec1(nInc).replace(',0', '')} %`;
+      cd = `en ${left} s`;
+    } else if (now < (cache.inclFlashUntil || 0)) {
+      st = 'now';
+      txt = cur === 0 ? 'Cinta plana' : `Inclinación ${fmt.dec1(cur).replace(',0', '')} %`;
+    }
+    const key = `${st}|${txt}|${cd}`;
+    if (cache.inclKey === key) return;
+    cache.inclKey = key;
+    box.hidden = st === 'off';
+    box.dataset.st = st;
+    box.dataset.dir = st === 'pre' ? (nInc > cur ? 'up' : 'down') : '';
+    setText('inclTxt', txt);
+    setText('inclCd', cd);
+  }
+
   function renderNext(s) {
     if (!refs.next || !s.segment) return;
     const seg = s.segment;
@@ -2973,6 +3019,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         if (refs.speedGlow) refs.speedGlow.textContent = sp;
       }
       setText('pace', fmtPaceKmh(s.currentSpeed || seg.speed));
+      renderIncline(s);
       const a = s.adjustments?.[seg.zone];
       setText('adjBadge', a ? `${a > 0 ? '+' : '−'}${fmt.speed(Math.abs(a))}` : '');
     }

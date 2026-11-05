@@ -791,6 +791,46 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   background: #fff;
   text-shadow: none;
 }
+/* Inclinación bajo la zona, solo cuando hay que tocarla: con cuenta atrás antes del cambio («pre») y destacada 6 s al
+   cambiar («now»). Ámbar de cuesta (blanco si baja); el resto del tiempo no se ve. */
+.hud-incl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  margin-top: 10px;
+  padding: 7px 14px;
+  border-radius: var(--r-pill);
+  background: rgba(0, 0, 0, 0.55);
+  border: var(--hairline) solid rgba(255, 214, 10, 0.55);
+  color: #ffd60a;
+  font: 700 16px/1.1 var(--font);
+  letter-spacing: 0.01em;
+  text-shadow: none;
+}
+.hud-incl[hidden] { display: none; }
+.hud-incl__ic { display: grid; }
+.hud-incl__txt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hud-incl__cd:empty { display: none; }
+.hud-incl__cd { flex: none; padding-left: 9px; border-left: 1.5px solid currentColor; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hud-incl[data-st="pre"],
+.hud-incl[data-st="now"] {
+  padding: 11px 18px;
+  font-size: 21px;
+  color: #000;
+  background: #ffd60a;
+  border-color: #ffd60a;
+  box-shadow: 0 6px 28px rgba(255, 214, 10, 0.35);
+}
+.hud-incl[data-st="pre"] { animation: hud-incl-pulse 1s ease-in-out infinite; }
+.hud-incl[data-st="pre"][data-dir="down"] { background: #fff; border-color: #fff; box-shadow: 0 6px 28px rgba(255, 255, 255, 0.25); }
+.hud-incl[data-st="now"] { animation: hud-incl-in 420ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+@keyframes hud-incl-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+@keyframes hud-incl-in { from { transform: scale(0.8); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .hud-incl[data-st="pre"], .hud-incl[data-st="now"] { animation: none; } }
+.pl.is-tv .hud-incl { font-size: 19px; }
+.pl.is-tv .hud-incl[data-st="pre"], .pl.is-tv .hud-incl[data-st="now"] { font-size: 26px; }
+
 /* Pulso en directo: la segunda cifra del héroe, casi tan grande como la velocidad. La cifra va en el color de tu zona de
    FC (como en Entreno del reloj); la barra enseña la zona objetivo del tramo y una marca donde vas. */
 .hud-pulse {

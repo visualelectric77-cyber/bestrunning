@@ -38,6 +38,11 @@ REPS.push({ id: 'rep_last', text: '¡Última serie!' });
 const KMS = [{ id: 'km_1', text: '¡Primer kilómetro!' }];
 for (let k = 2; k <= 21; k++) KMS.push({ id: `km_${k}`, text: `¡Kilómetro ${numberWords(k, 0)}!` }); // hasta 21: la media maratón en la cinta
 
+/** Inclinación en %, de 1 a 12 (la que cabe en una cinta doméstica). */
+export const PACK_INCLINE_MAX = 12;
+const PERCENTS = [];
+for (let n = 1; n <= PACK_INCLINE_MAX; n++) PERCENTS.push({ id: `pct_${n}`, text: `${cap(numberWords(n, 0))} por ciento.`, kind: 'number' });
+
 const STAGES = [];
 for (let n = 1; n <= 16; n++) STAGES.push({ id: `stage_${n}`, text: `Escalón ${numberWords(n, 0)}.` });
 
@@ -55,6 +60,14 @@ const GROUPS = {
   hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
   hrok: ['Pulso perfecto. Mantén este ritmo.', 'Vas en tu zona. Muy bien.'],
   hron: ['Hoy te guío por tu pulso.'],
+  // Inclinación (cintas con cuesta): portadoras seguidas del porcentaje («Uno por ciento.» … «Doce por ciento.»)
+  inclup: ['¡Atención! Sube la inclinación al…', 'Viene cuesta. Inclinación al…'],
+  incldown: ['Atento, baja la inclinación al…'],
+  inclnow: ['¡Ahora! Inclinación al…'],
+  inclflat: ['Atento: se acaba la cuesta. Inclinación a cero.'],
+  inclflatnow: ['¡Ahora! Cinta plana, sin inclinación.'],
+  // tras la inclinación, si además cambia la velocidad
+  speedalso: ['Y la velocidad, a…'],
   // Arranque de cada tramo, seguido de la velocidad (y la duración si encaja).
   now_sprint: ['¡Ahora! ¡Sprint!', '¡Vamos, a tope!'],
   now_fast: ['¡Ahora! Correr rápido.', '¡Vamos, ritmo rápido!'],
@@ -121,7 +134,7 @@ export const MUSIC_CUES = {
 };
 
 /** Portadoras: conservar un poco de cola al recortar para que la pausa antes del número suene natural. */
-const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set', 'hrhigh', 'hrlow']);
+const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set', 'hrhigh', 'hrlow', 'inclup', 'incldown', 'inclnow', 'speedalso']);
 
 function buildScript() {
   const out = [];
@@ -133,6 +146,7 @@ function buildScript() {
   out.push(...REPS.map((r) => ({ ...r, kind: 'phrase' })));
   out.push(...KMS.map((r) => ({ ...r, kind: 'phrase' })));
   out.push(...STAGES.map((r) => ({ ...r, kind: 'phrase' })));
+  out.push(...PERCENTS);
   return out;
 }
 

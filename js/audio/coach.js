@@ -672,6 +672,27 @@ function buildPackSchedule(workout, opts, base, avail) {
     return null;
   };
 
+  /* Inclinación con la voz grabada, lo primero del aviso (en una cuesta es lo que hay que tocar):
+     «¡Atención! Sube la inclinación al… cuatro por ciento.» antes del cambio y «¡Ahora! Inclinación al… cuatro por
+     ciento.» en el cambio; si además cambia la velocidad, detrás «Y la velocidad, a… ocho coma siete.».
+     Solo % enteros de 1 a 12; lo demás, con la voz del sistema. */
+  const inclCue = (tr, when) => {
+    const { p, n } = tr;
+    let ids;
+    if (n.incline === 0) ids = [when === 'pre' ? 'inclflat_1' : 'inclflatnow_1'];
+    else {
+      const v = n.incline;
+      const pct = Number.isInteger(v) && v >= 1 && v <= 12 ? `pct_${v}` : null;
+      let car;
+      if (when === 'change') car = 'inclnow_1';
+      else if (n.incline > p.incline) car = picker.pick(['inclup_1', 'inclup_2'].filter(has)) || null;
+      else car = 'incldown_1';
+      ids = [car, pct];
+    }
+    if (tr.speedCh) ids.push('speedalso_1', speedClip(n.speed));
+    return ids.every(has) ? ids : null;
+  };
+
   /* Pre-avisos (T − lead): "Serie tres. ¡Atención! Subimos a… once coma cinco." */
   const repSaid = new Set();
   for (const tr of trans) {
@@ -682,7 +703,11 @@ function buildPackSchedule(workout, opts, base, avail) {
     const room = Math.max(1.5, (beforeLast10 ? lead - 10 : lead) - GAP - 0.1);
     let clips = null;
     picker.setAt(at);
-    if (tr.speedCh && !tr.inclCh) {
+    if (tr.inclCh) {
+      const inc = inclCue(tr, 'pre');
+      const rep = tr.repStart ? repClip(n.rep, avail) : null;
+      clips = inc ? firstFit([() => (rep ? [rep, ...inc] : null), () => inc], room) : null;
+    } else if (tr.speedCh) {
       const vars = {
         speed: n.speed, dir: n.speed > p.speed ? 'up' : 'down',
         zone: isTest && n.stage > 0 ? 'stage' : n.zone,
@@ -715,7 +740,11 @@ function buildPackSchedule(workout, opts, base, avail) {
     const room = nextFixedAfter(T) - T - GAP;
     let clips = null;
     picker.setAt(T);
-    if (!tr.inclCh) {
+    if (tr.inclCh) {
+      const inc = inclCue(tr, 'change');
+      const rep = tr.repStart && !repSaid.has(tr.k) ? repClip(n.rep, avail) : null;
+      clips = inc ? firstFit([() => (rep ? [rep, ...inc] : null), () => inc], room) : null;
+    } else {
       const stage = isTest && n.stage > 0;
       const rep = tr.repStart && !repSaid.has(tr.k) ? repClip(n.rep, avail) : null;
       const jogPick = (inner) => (ids) => {
