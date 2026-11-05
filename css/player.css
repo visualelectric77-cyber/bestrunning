@@ -791,6 +791,91 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   background: #fff;
   text-shadow: none;
 }
+/* Pulso en directo: la segunda cifra del héroe, casi tan grande como la velocidad. La cifra va en el color de tu zona de
+   FC (como en Entreno del reloj); la barra enseña la zona objetivo del tramo y una marca donde vas. */
+.hud-pulse {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, calc(var(--speed-fs) * 2.3));
+  margin-top: calc(var(--pace-gap) + 6px);
+  --pulse-fs: calc(var(--speed-fs) * 0.74);
+}
+.hud-pulse[hidden] { display: none; }
+.hud-pulse__row { display: flex; align-items: center; justify-content: center; gap: calc(var(--pulse-fs) * 0.1); }
+.hud-pulse__heart {
+  display: grid;
+  width: calc(var(--pulse-fs) * 0.3);
+  color: var(--hz, #ff375f);
+  transition: color 600ms ease;
+  animation: hud-beat var(--beat, 1s) ease-out infinite;
+}
+.hud-pulse__heart svg { width: 100%; height: auto; fill: currentColor; stroke: none; filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.5)); }
+.hud-pulse__num {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--pulse-fs);
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--hz, #fff);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.4);
+  -webkit-font-smoothing: antialiased;
+  transition: color 600ms ease;
+}
+.hud-pulse__u { align-self: flex-end; margin-bottom: calc(var(--pulse-fs) * 0.1); }
+.hud-pulse__gauge {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  margin-top: 14px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+.hud-pulse__band { position: absolute; top: 0; bottom: 0; left: var(--b0, 0); width: var(--bw, 0); border-radius: 3px; background: var(--tz, #fff); }
+.hud-pulse__mark {
+  position: absolute;
+  top: -6px;
+  left: var(--m, 0);
+  width: 4px;
+  height: 18px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+  transition: left 900ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hud-pulse__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: 10px;
+  font: 700 12px/1 var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  text-shadow: var(--ink-shadow);
+}
+.hud-pulse__st { color: #fff; }
+.hud-pulse[data-st="in"] .hud-pulse__st { color: var(--tz, #30d158); }
+.hud-pulse[data-st="high"] .hud-pulse__st { color: #ff9f0a; }
+.hud-pulse[data-st="low"] .hud-pulse__st { color: #64d2ff; }
+.hud-pulse[data-st="wait"] .hud-pulse__num,
+.hud-pulse[data-st="wait"] .hud-pulse__heart { color: var(--ink2); animation: none; }
+.hud-pulse[data-st="wait"] .hud-pulse__mark { display: none; }
+@keyframes hud-beat {
+  0%, 100% { transform: scale(1); }
+  12% { transform: scale(1.16); }
+  24% { transform: scale(1); }
+  36% { transform: scale(1.08); }
+  50% { transform: scale(1); }
+}
+.pl[data-status="paused"] .hud-pulse__heart { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hud-pulse__heart { animation: none; } .hud-pulse__mark { transition: none; } }
+
 /* Fantasma (tu récord en esta clase): por delante en el acento, igualado en blanco, por detrás en gris */
 .hud-ghost {
   display: inline-flex;
@@ -1175,12 +1260,21 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 @media (orientation: portrait) and (max-height: 760px) {
   .pl--live { --cd-fs: 44px; --top-h: 36px; }
   .hud-speed { padding-bottom: 8%; }
+  .hud-pulse { --pulse-fs: calc(var(--speed-fs) * 0.62); margin-top: var(--pace-gap); }
+  .hud-pulse__gauge { margin-top: 10px; }
+  .hud-pulse__meta { margin-top: 8px; }
   .hud-strip { height: 28px; margin-top: 8px; }
   .hud-lt__bar { margin-top: 10px; }
   .hud-ctl { gap: 10px; padding-bottom: 8px; }
   .hud-play { width: 60px; height: 60px; }
   .hud-ctl .hud-btn { width: 44px; height: 44px; }
   .hud-test { min-height: 50px; margin-bottom: 8px; }
+}
+/* iPhone SE / mini: el bloque del pulso, un poco más bajo para que la zona no toque ✕ y TV en pausa */
+@media (orientation: portrait) and (max-height: 700px) {
+  .hud-pulse { --pulse-fs: calc(var(--speed-fs) * 0.54); margin-top: calc(var(--pace-gap) * 0.7); }
+  .hud-pulse__gauge { margin-top: 8px; }
+  .hud-pulse__meta { margin-top: 6px; }
 }
 @media (max-width: 380px) {
   .hud-ctl { gap: 8px; }
@@ -1208,6 +1302,11 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
     padding-bottom: max(10px, calc(var(--safe-b) + 4px));
   }
   .hud-speed { grid-column: 1; grid-row: 2 / -1; padding: 6px 0 3%; }
+  /* con el pulso debajo, las dos cifras caben en la columna izquierda: velocidad algo menor y pulso al 64 % */
+  .pl--live:has(.hud-pulse:not([hidden])) { --speed-fs: clamp(76px, 25dvh, 150px); }
+  .hud-pulse { --pulse-fs: calc(var(--speed-fs) * 0.64); margin-top: 10px; }
+  .hud-pulse__gauge { margin-top: 8px; }
+  .hud-pulse__meta { margin-top: 7px; }
   .hud-test { grid-area: test; align-self: end; justify-self: center; max-width: 420px; margin: 0; }
   .hud-ctl, .hud-lockbar { padding: 0 0 10px; }
   .hud-ctl { gap: 12px; }

@@ -39,6 +39,7 @@ const CAT_NAMES = {
 };
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MIN_SAVE_SEC = 60;
+const DEBUG_HR = /[?&]debug=hr(?:&|$)/.test(globalThis.location?.search || '');
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const zoneColor = (z) => ZONES[z]?.color || '#ff6a1a';
 const zoneName = (z) => ZONES[z]?.name || 'Correr';
@@ -1097,6 +1098,15 @@ export function mount(el, { params = {}, query = {} } = {}) {
                 <span class="num" data-ref="pace">–:––</span><span class="hud-u">min/km</span>
                 <span class="hud-pace__inc num" data-ref="incline"></span>
                 <span class="hud-adjbadge num" data-ref="adjBadge"></span>
+              </div>
+              <div class="hud-pulse" data-ref="pulse" hidden>
+                <div class="hud-pulse__row">
+                  <span class="hud-pulse__heart" aria-hidden="true">${icon('heart', 30)}</span>
+                  <span class="hud-pulse__num num" data-ref="pulseNum">–</span>
+                  <span class="hud-u hud-pulse__u">ppm</span>
+                </div>
+                <div class="hud-pulse__gauge" aria-hidden="true"><i class="hud-pulse__band" data-ref="pulseBand"></i><i class="hud-pulse__mark" data-ref="pulseMark"></i></div>
+                <div class="hud-pulse__meta"><span class="hud-pulse__st" data-ref="pulseSt"></span><span class="num" data-ref="pulseObj"></span></div>
               </div>
               <div class="hud-ghost num" data-ref="ghost" hidden></div>
             </div>
@@ -2791,36 +2801,92 @@ export function mount(el, { params = {}, query = {} } = {}) {
     });
   }
 
+  /** Pulso en directo del reloj. Con ?debug=hr en la URL se simula (oscila alrededor de la zona del tramo) para probar
+   *  la pantalla y el modo pulso en el navegador. */
+  function liveHr() {
+    const v = nb.liveHr?.();
+    if (v || !DEBUG_HR || !engine) return v || null;
+    const seg = engine.getState().segment;
+    if (!seg) return null;
+    let t;
+    try { t = hrTargetForZone(seg.zone, getState().profile || {}); } catch { return null; }
+    const now = Date.now();
+    const at = now - (now % 5000);
+    return { bpm: Math.round((t.min + t.max) / 2 + 11 * Math.sin(at / 30000)), at };
+  }
+
   /**
    * FC del HUD: con la app nativa y el reloj, tu pulso en directo (lectura de hace ≤ 15 s) y su zona de FC; si no,
    * el rango objetivo del tramo (lo de siempre en Safari).
    */
   function renderHr(seg = engine?.getState().segment) {
     if (!root || !refs.hr) return;
-    const live = nb.liveHr();
+    const live = liveHr();
+    const p = getState().profile || {};
+    let target = null;
+    try { target = seg ? hrTargetForZone(seg.zone, p) : null; } catch { target = null; }
     if (live) {
-      const p = getState().profile || {};
       let z = 0;
       try { z = hrZoneOf(live.bpm, p); } catch { z = 0; }
-      setText('hrZone', z ? `Z${z}` : '');
-      setText('hr', String(Math.round(live.bpm)));
+      // abajo, con la cifra grande arriba: la media de la clase
+      if (cache.hrAt !== live.at && engine?.getState().status === 'running') {
+        cache.hrAt = live.at;
+        cache.hrSum = (cache.hrSum || 0) + Number(live.bpm);
+        cache.hrN = (cache.hrN || 0) + 1;
+      }
+      setText('hrZone', cache.hrN ? 'Media' : '');
+      setText('hr', cache.hrN ? String(Math.round(cache.hrSum / cache.hrN)) : '–');
       let color = '';
       try { color = hrZones(p.hrMax || hrMaxFromAge(p.age || 46), p.hrRest)[z - 1]?.color || ''; } catch { color = ''; }
-      if (cache.hrColor !== color) { cache.hrColor = color; refs.hrZone?.style.setProperty('--hz', color); }
+      if (cache.hrColor !== color) { cache.hrColor = color; refs.pulse?.style.setProperty('--hz', color || '#fff'); }
       cache.hrZoneKey = '';
     } else if (seg && (cache.hrLive || cache.hrZoneKey !== seg.zone)) {
-      try {
-        const hr = hrTargetForZone(seg.zone, getState().profile || {});
-        setText('hrZone', `Z${hr.zone}`);
-        setText('hr', `${hr.min}–${hr.max}`);
-      } catch { setText('hrZone', ''); setText('hr', '–'); }
+      if (target) { setText('hrZone', `Z${target.zone}`); setText('hr', `${target.min}–${target.max}`); } else { setText('hrZone', ''); setText('hr', '–'); }
       cache.hrZoneKey = seg.zone;
     }
+    renderPulse(live, target, p);
     const on = !!live;
     if (cache.hrLive !== on) {
       cache.hrLive = on;
       refs.hr.closest('.hud-m--hr')?.classList.toggle('is-live', on);
     }
+  }
+
+  /**
+   * Pulso grande bajo la velocidad (tan importante como ella): la cifra en el color de tu zona de FC, una barra con la
+   * zona objetivo del tramo y una marca donde vas, y «En zona / Alto / Bajo». Con el reloj en la app y aún sin lectura,
+   * espera con la zona objetivo; en Safari, sin reloj, no sale (abajo queda el objetivo de siempre).
+   */
+  function renderPulse(live, target, p) {
+    const box = refs.pulse;
+    if (!box) return;
+    const show = !!live || nb.watchManaged?.() || DEBUG_HR;
+    if (box.hidden === show) box.hidden = !show;
+    if (!show) return;
+    const hrMax = p.hrMax || hrMaxFromAge(p.age || 46);
+    const zones = hrZones(hrMax, p.hrRest);
+    const lo = zones[0].min;
+    const pos = (v) => `${Math.max(0, Math.min(100, ((v - lo) / Math.max(1, hrMax - lo)) * 100)).toFixed(1)}%`;
+    const bpm = live ? Math.round(Number(live.bpm)) : 0;
+    let st = 'wait';
+    if (bpm && target) st = bpm > target.max ? 'high' : bpm < target.min ? 'low' : 'in';
+    else if (bpm) st = 'in';
+    const key = `${bpm}|${target?.min}|${target?.max}|${st}`;
+    if (cache.pulseKey === key) return;
+    cache.pulseKey = key;
+    box.dataset.st = st;
+    setText('pulseNum', bpm ? String(bpm) : '–');
+    box.style.setProperty('--beat', bpm ? `${(60 / bpm).toFixed(3)}s` : '1s');
+    if (target) {
+      const zc = zones[target.zone - 1]?.color || '#fff';
+      box.style.setProperty('--tz', zc);
+      box.style.setProperty('--b0', pos(target.min));
+      box.style.setProperty('--bw', `calc(${pos(target.max)} - ${pos(target.min)})`);
+      setText('pulseObj', `Z${target.zone} · ${target.min}–${target.max}`);
+    } else setText('pulseObj', '');
+    if (bpm) box.style.setProperty('--m', pos(bpm));
+    const d = target && bpm ? (st === 'high' ? bpm - target.max : st === 'low' ? target.min - bpm : 0) : 0;
+    setText('pulseSt', st === 'wait' ? 'Esperando al reloj' : st === 'high' ? `Alto · +${d}` : st === 'low' ? `Bajo · −${d}` : 'En zona');
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
@@ -3047,7 +3113,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
    *  durante 2 min. Se avisa una vez por clase; el modo pulso ya se encarga de la velocidad. */
   function fatigueCheck(st, s, now) {
     if (st.warned) return;
-    const live = nb.liveHr?.();
+    const live = liveHr();
     if (live && Number(live.bpm) > 0) st.buf.push([now, Number(live.bpm)]);
     st.buf = st.buf.filter((p) => now - p[0] <= 60000);
     const seg = s.segment;
@@ -3073,7 +3139,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
     if (off || !engine || countingDown || s.inTestStage) return;
-    const live = nb.liveHr?.();
+    const live = liveHr();
     const seg = s.segment;
     if (!seg) return;
     let target = null;
