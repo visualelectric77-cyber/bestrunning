@@ -7,6 +7,27 @@
 // Sin DOM ni UI: la fábrica createNativeBridge() se prueba en Node (tools/test-native-bridge.mjs).
 import { clamp, round1, todayKey, addDays, mondayOf, weekdayOf, capitalize, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, hrZones, hrMaxFromAge, hrTargetForZone } from '../training/levels.js';
+import { readiness } from '../training/readiness.js';
+import { readinessTarget, WORK_ZONES } from '../training/hr-shape.js';
+
+/** Zona de pulso del tramo para el reloj: la misma que enseña el iPhone (ajustada a tu recuperación de hoy). */
+let dayLevel = { day: '', level: null };
+function dayHrTarget(zone, profile) {
+  const t = hrTargetForZone(zone, profile);
+  if (!WORK_ZONES.includes(zone)) return t;
+  const day = new Date().toDateString();
+  if (dayLevel.day !== day) {
+    let level = null;
+    try {
+      const m = JSON.parse(globalThis.localStorage?.getItem('ritmup.health.metrics') || 'null');
+      const d = new Date();
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      level = m && Array.isArray(m.resting) && Array.isArray(m.hrv) ? readiness(m, key)?.level || null : null;
+    } catch { level = null; }
+    dayLevel = { day, level };
+  }
+  return readinessTarget(t, dayLevel.level);
+}
 import { hrFromSamples, hrFieldsFrom, hrAtLevels, hasHrSeries, HR_MIN, HR_MAX } from './watch-hr.js';
 import { diagMark } from '../core/diag.js';
 
@@ -897,7 +918,7 @@ export function createNativeBridge(opts = {}) {
         const nx = s.nextSegment;
         if (nx) d.next = { zone: String(nx.zone), label: zoneLabel(nx), kmh: round1(num(nx.speed)), sec: int(nx.sec), dir: dirOf(seg.speed, nx.speed) };
         try {
-          const t = hrTargetForZone(seg.zone, st.profile || {});
+          const t = dayHrTarget(seg.zone, st.profile || {});
           d.hrTarget = { z: int(t.zone), min: int(t.min), max: int(t.max) };
         } catch { /* sin perfil */ }
         const u = usualFor(seg.zone, s.segIndex, st);

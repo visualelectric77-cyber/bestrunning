@@ -2,8 +2,8 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.17.0';
-const BUILD = '2984328716';
+const VERSION = '1.18.0';
+const BUILD = 'b7ddcecaf0';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
@@ -148,6 +148,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/training/goal.js',
   './js/training/health-analysis.js',
   './js/training/hr-model.js',
+  './js/training/hr-shape.js',
   './js/training/levels.js',
   './js/training/plan-intent.js',
   './js/training/planner.js',

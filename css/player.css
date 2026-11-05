@@ -1915,3 +1915,21 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .pl-brief__wait { display: flex; flex-direction: column; gap: 10px; margin: 6px 0 0; font-size: 14px; color: var(--text-2); }
 .pl-brief:not(.is-loading) { animation: sm-fade-up 260ms var(--ease-out) both; }
 @media (prefers-reduced-motion: reduce) { .pl-brief:not(.is-loading) { animation: none; } }
+
+/* Resumen · «En tu zona»: qué parte de los tramos de trabajo fuiste en la zona de pulso de la clase */
+.sm-iz__big { display: flex; align-items: baseline; gap: 2px; margin-top: 6px; }
+.sm-iz__big .num { font: 700 44px/1 var(--font-display); letter-spacing: -0.03em; color: var(--text); }
+.sm-iz__big small { font: 700 20px/1 var(--font-display); color: var(--text-2); }
+.sm-iz__bar { display: flex; gap: 3px; height: 10px; margin-top: 12px; border-radius: 5px; overflow: hidden; }
+.sm-iz__seg { min-width: 4px; }
+.sm-iz__seg.is-in { background: #30d158; }
+.sm-iz__seg.is-high { background: #ff9f0a; }
+.sm-iz__seg.is-low { background: #64d2ff; }
+.sm-iz__legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font: 600 12px/1.2 var(--font); color: var(--text-2); }
+.sm-iz__legend .is-in { color: #30d158; }
+.sm-iz__legend .is-high { color: #ff9f0a; }
+.sm-iz__legend .is-low { color: #64d2ff; }
+.sm-iz__zones { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 12px; font: 500 14px/1.2 var(--font); color: var(--text-2); }
+.sm-iz__z { display: inline-flex; gap: 6px; }
+.sm-iz__z b { font-weight: 600; color: var(--text); }
+.sm-iz__note { margin: 12px 0 0; font: 400 14px/1.4 var(--font); color: var(--text-2); }

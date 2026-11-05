@@ -5,6 +5,7 @@ import { fmt, esc, clamp, round1, todayKey, capitalize } from '../core/utils.js'
 import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels, hrMaxFromAge } from '../training/levels.js';
 import { raisedHrMax } from '../training/race-predict.js';
 import { buildHrModel, sessionHrOffset } from '../training/hr-model.js';
+import { zoneCompliance } from '../training/hr-shape.js';
 import { getState, setState, subscribe, lastPersistOk } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, toast, confirmDialog, celebrate, emptyState } from '../ui/components.js';
@@ -586,12 +587,38 @@ export function mount(el, { params = {} } = {}) {
           </span></div>`;
   }
 
+  /** «En tu zona»: qué parte de los tramos de trote, correr y rápido fuiste en la zona de pulso que pedía la clase. */
+  function inZoneHtml(s, st) {
+    let c = null;
+    try { c = workout?.segments ? zoneCompliance(workout.segments, s.hrSeries, st.profile) : null; } catch { c = null; }
+    if (!c) return '';
+    const parts = [['lowSec', 'is-low', 'Bajo'], ['inSec', 'is-in', 'En zona'], ['highSec', 'is-high', 'Alto']]
+      .filter(([k]) => c[k] > 0)
+      .map(([k, cls]) => `<span class="sm-iz__seg ${cls}" style="flex:${Math.round(c[k])} 1 0"></span>`).join('');
+    const rows = ['jog', 'run', 'fast'].filter((k) => c.byZone[k]?.sec >= 30)
+      .map((k) => `<span class="sm-iz__z"><b>${esc(ZONES[k].name)}</b><span class="num">${c.byZone[k].pct}%</span></span>`).join('');
+    const hi = Math.round((c.highSec / c.sec) * 100);
+    const lo = Math.round((c.lowSec / c.sec) * 100);
+    const note = c.pct >= 70 ? 'Clase bien hecha a tu pulso.'
+      : hi >= lo ? `Fuiste por encima de tu zona el ${hi}\u00a0% del tiempo: el modo pulso y las velocidades se irán ajustando.`
+        : `Fuiste por debajo de tu zona el ${lo}\u00a0% del tiempo: tenías margen para apretar un poco más.`;
+    return `
+      <section class="card sm-card sm-iz" style="--i:5">
+        <div class="sm-card__head"><span class="sm-card__title">En tu zona</span><span class="sm-opt">Trote, correr y rápido</span></div>
+        <div class="sm-iz__big"><span class="num">${c.pct}</span><small>%</small></div>
+        <div class="sm-iz__bar" role="img" aria-label="Bajo ${lo} %, en zona ${c.pct} %, alto ${hi} %">${parts}</div>
+        <div class="sm-iz__legend"><span class="is-low">Bajo ${lo}\u00a0%</span><span class="is-in">En zona ${c.pct}\u00a0%</span><span class="is-high">Alto ${hi}\u00a0%</span></div>
+        ${rows ? `<div class="sm-iz__zones">${rows}</div>` : ''}
+        <p class="sm-iz__note">${note}</p>
+      </section>`;
+  }
+
   function hrAnalysis(s, st) {
     let trends = {};
     try { trends = hrLevelTrends(st, s) || {}; } catch { trends = {}; }
     let zt = null;
     try { zt = hrZoneTimes(s.hrSeries, st.profile); } catch { zt = s.hrZones || null; }
-    return `
+    return `${inZoneHtml(s, st)}
       <section class="card sm-card" style="--i:5">
         <div class="sm-card__head"><span class="sm-card__title">Zonas de pulso</span><span class="sm-opt">Apple Watch</span></div>
         ${hrZonesHtml(zt, st.profile)}

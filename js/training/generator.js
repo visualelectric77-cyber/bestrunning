@@ -1,6 +1,7 @@
 // BestRunning · generador de clases (sin DOM).
 // Convierte una plantilla + contexto en un Workout completo, con id reversible
 // 'plantilla~minutos~semilla(base36)~carga×100' para poder reconstruirlo desde la URL.
+import { shapeForHr } from './hr-shape.js';
 import { isRaceTemplate, buildRaceWorkout, RACE_PREFIX } from './race.js';
 import { round1, roundTo, clamp, hashStr, makeRng, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, kcalPerMinute, clampSpeed } from './levels.js';
@@ -165,6 +166,8 @@ export function buildWorkout(templateId, {
   if (!segs.length) segs = [{ zone: 'jog', speed: clampSpeed(lv.jog, tm), incline: 0, sec: mins * 60, label: ZONES.jog.name, cue: '' }];
   if (!isTest) segs = fitToDuration(segs, mins * 60);
   segs = mergeAdjacent(segs);
+  // A tu pulso: trote más suave al final de las clases largas y en las recuperaciones entre arreones (hr-shape.js)
+  segs = shapeForHr(segs, { isTest, minSpeed: tm.minSpeed ?? 1, jog: lv.jog });
   const sum = summarizeSegments(segs, weightKg);
   return {
     id: workoutId({ templateId, minutes: mins, seed: sd, loadFactor: load }),

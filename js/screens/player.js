@@ -20,6 +20,8 @@ import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, se
 import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
+import { readiness } from '../training/readiness.js';
+import { readinessTarget, WORK_ZONES } from '../training/hr-shape.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../player/scene-pick.js';
@@ -2801,6 +2803,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     });
   }
 
+  /** Zona de pulso objetivo del tramo; en los de trabajo, ajustada a tu recuperación de hoy (semáforo de Salud). */
+  function segHrTarget(seg) {
+    const t = hrTargetForZone(seg.zone, getState().profile || {});
+    if (!WORK_ZONES.includes(seg.zone)) return t;
+    if (cache.dayLevel === undefined) {
+      try { cache.dayLevel = readiness(cachedHealthMetrics(), todayKey())?.level || null; } catch { cache.dayLevel = null; }
+    }
+    return readinessTarget(t, cache.dayLevel);
+  }
+
   /** Pulso en directo del reloj. Con ?debug=hr en la URL se simula (oscila alrededor de la zona del tramo) para probar
    *  la pantalla y el modo pulso en el navegador. */
   function liveHr() {
@@ -2824,7 +2836,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const live = liveHr();
     const p = getState().profile || {};
     let target = null;
-    try { target = seg ? hrTargetForZone(seg.zone, p) : null; } catch { target = null; }
+    try { target = seg ? segHrTarget(seg) : null; } catch { target = null; }
     if (live) {
       let z = 0;
       try { z = hrZoneOf(live.bpm, p); } catch { z = 0; }
@@ -2882,7 +2894,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       box.style.setProperty('--tz', zc);
       box.style.setProperty('--b0', pos(target.min));
       box.style.setProperty('--bw', `calc(${pos(target.max)} - ${pos(target.min)})`);
-      setText('pulseObj', `Z${target.zone} · ${target.min}–${target.max}`);
+      setText('pulseObj', `${target.capped ? 'Hoy suave · ' : ''}Z${target.zone} · ${target.min}–${target.max}`);
     } else setText('pulseObj', '');
     if (bpm) box.style.setProperty('--m', pos(bpm));
     const d = target && bpm ? (st === 'high' ? bpm - target.max : st === 'low' ? target.min - bpm : 0) : 0;
@@ -3143,7 +3155,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const seg = s.segment;
     if (!seg) return;
     let target = null;
-    try { target = hrTargetForZone(seg.zone, getState().profile || {}); } catch { target = null; }
+    try { target = segHrTarget(seg); } catch { target = null; }
     const r = st.coach.step({
       nowMs: now, running: true, segIndex: s.segIndex, zone: seg.zone, segSec: seg.sec,
       segElapsed: s.segElapsed, segRemaining: s.segRemaining, classElapsed: s.totalElapsed,
