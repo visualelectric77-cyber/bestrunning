@@ -276,6 +276,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let coach = null;
   let root = null;
   let refs = {};
+  // Lo que ha movido el modo pulso en esta clase, por zona (se guarda como hrCoachAdj: no cuenta como ajuste tuyo)
+  const hrCoachAdj = {};
   const cache = {};
   let muted = false;
   let locked = false;
@@ -3062,7 +3064,6 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(`Hoy tu pulso va ${over} ppm más alto de lo normal a esta velocidad. Si no te encuentras bien, baja el ritmo: hoy cuenta igual.`, { icon: 'heart', duration: 8000 });
   }
 
-  const hrCoachAdj = {};
   function hrCoachTick(s) {
     const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
