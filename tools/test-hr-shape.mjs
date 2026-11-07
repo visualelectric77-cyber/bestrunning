@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // RITMUP · pruebas de las clases a tu pulso (js/training/hr-shape.js).  node tools/test-hr-shape.mjs
-import { shapeForHr, readinessTarget, zoneCompliance } from '../js/training/hr-shape.js';
+import { shapeForHr, readinessTarget, zoneCompliance, recoverySpeed } from '../js/training/hr-shape.js';
+import { buildCueSchedule } from '../js/audio/coach.js';
+import { PACK_SCRIPT } from '../js/audio/voice-pack.js';
 import { buildWorkout } from '../js/training/generator.js';
 import { TEMPLATES } from '../js/training/templates.js';
 
@@ -75,6 +77,41 @@ const seg = (zone, speed, sec) => ({ zone, speed, sec });
   ok(c && c.pct === 72 && c.highSec === 300 && c.lowSec === 0, `total 72 % (${c?.pct}), 300 s alto (${c?.highSec})`);
   ok(zoneCompliance(segs, [], prof) === null, 'sin pulso → null');
   ok(zoneCompliance([seg('warmup', 7, 600)], series, prof) === null, 'sin tramos de trabajo → null');
+}
+
+// Recuperación según cómo llegas (Olas de tempo, 7 nov: 9,9 entre olas de 11,0 con el pulso a 160–165)
+{
+  const z3 = { min: 143, max: 154 };
+  const z2 = { min: 132, max: 143 };
+  ok(recoverySpeed({ cur: seg('fast', 11), next: seg('run', 9.9), hr: 162, nextTarget: z3, curSpeed: 11 }) === 9.6, 'llegas a 162 (zona 143–154): la ola suave baja a 9,6');
+  ok(recoverySpeed({ cur: seg('fast', 11), next: seg('run', 9.9), hr: 185, nextTarget: z3, curSpeed: 11 }) === 9.1, 'muy pasado: tope −0,8');
+  ok(recoverySpeed({ cur: seg('fast', 11), next: seg('run', 9.9), hr: 152, nextTarget: z3, curSpeed: 11 }) === null, 'en zona: no se toca');
+  ok(recoverySpeed({ cur: seg('jog', 8.9), next: seg('run', 10.3), hr: 170, nextTarget: z3, curSpeed: 8.9 }) === null, 'si lo que viene es más duro, no es recuperación');
+  ok(recoverySpeed({ cur: seg('run', 10.3), next: seg('jog', 9.9), hr: 140, nextTarget: z2, curSpeed: 10.1, coachLowered: true }) === 9.6, 'el modo pulso te bajó a 10,1: la recuperación va a 9,6 como mucho');
+  ok(recoverySpeed({ cur: seg('run', 10.3), next: seg('jog', 8.9), hr: 140, nextTarget: z2, curSpeed: 10.1, coachLowered: true }) === null, 'si ya va bastante más lenta, se queda');
+}
+// Beber, nunca en un tramo duro (Olas de tempo: el aviso caía en una ola de 11,0)
+{
+  const lv = { jog: 8.9, run: 10.3, fast: 11.6, sprint: 13 };
+  const all = PACK_SCRIPT.map((c) => c.id);
+  let checked = 0;
+  let wrong = 0;
+  for (const id of ['tempo-waves', 'halloween-thirteen', 'pyramid', 'long-mixed', 'mountain-walk']) {
+    const w = buildWorkout(id, { minutes: 45, levels: lv, seed: 3, hasIncline: true, treadmill: { hasIncline: true, maxIncline: 12 } });
+    if (!w) continue;
+    const starts = [];
+    let t = 0;
+    for (const x of w.segments) { starts.push(t); t += x.sec; }
+    for (const pack of [null, { id: 'lucia', available: all }]) {
+      for (const c of buildCueSchedule(w, { pack, seed: 5, chattiness: 'chatty' }).filter((x) => x.kind === 'hydration')) {
+        checked++;
+        const k = starts.findLastIndex((st) => st <= c.at);
+        const sg = w.segments[k];
+        if (!['walk', 'jog', 'warmup', 'cooldown'].includes(sg.zone) || (sg.incline || 0) >= 3) { wrong++; console.log(`  · ${id}: beber en ${sg.zone} ${sg.speed} @${c.at}`); }
+      }
+    }
+  }
+  ok(checked > 0 && wrong === 0, `beber solo en tramos suaves (${checked} avisos, ${wrong} mal)`);
 }
 
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ clases a tu pulso: ${n} comprobaciones`);

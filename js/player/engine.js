@@ -403,6 +403,21 @@ function makeEngine(workout, opts, snap) {
     return true;
   }
 
+  /**
+   * Velocidad de UN tramo que aún no ha empezado (la recuperación que viene), sin tocar los demás de su zona ni los
+   * ajustes de la clase: lo usa el modo pulso para que la recuperación sea de verdad más suave cuando llegas pasado.
+   */
+  function setSegmentSpeed(index, speed) {
+    if (destroyed || (status !== 'running' && status !== 'paused')) return false;
+    const i = Math.floor(Number(index));
+    if (!(i > segIndex && i < n)) return false;
+    const v = clampSpeed(Number(speed), treadmill);
+    if (!Number.isFinite(v) || Math.abs(v - segs[i].speed) < 0.05) return false;
+    segs[i].speed = v;
+    flush();
+    return true;
+  }
+
   function endTest() {
     if (destroyed || !isTest || (status !== 'running' && status !== 'paused')) return false;
     catchUp();
@@ -518,7 +533,7 @@ function makeEngine(workout, opts, snap) {
   }
 
   return {
-    start, pause, resume, togglePause, skip, adjustSpeed, endTest, finish,
+    start, pause, resume, togglePause, skip, adjustSpeed, setSegmentSpeed, endTest, finish,
     getState, snapshot, destroy, tick, getSegments,
   };
 }

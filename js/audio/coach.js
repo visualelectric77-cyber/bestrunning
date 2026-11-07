@@ -75,6 +75,25 @@ function startsOf(segs) {
   return { starts, total: acc };
 }
 
+/**
+ * Momento tranquilo para el aviso de beber cerca de `t` (± `span` s, 7 min): dentro de un tramo suave (caminar, trotar,
+ * calentar, calma; sin cuesta de ≥ 3 %), lejos de sus bordes. Nunca en un tramo duro: a tope nadie para a beber.
+ * → { at, lo, hi, k } o null.
+ */
+const CALM_ZONES = new Set(['walk', 'jog', 'warmup', 'cooldown']);
+function calmSpot(starts, segs, t, span = 420) {
+  let best = null;
+  segs.forEach((s, k) => {
+    if (!CALM_ZONES.has(s.zone) || (Number(s.incline) || 0) >= 3 || s.sec < 60) return;
+    const lo = starts[k] + 15;
+    const hi = starts[k] + s.sec - 20;
+    if (hi <= lo || hi < t - span || lo > t + span) return;
+    const at = Math.min(Math.max(t, lo), hi);
+    if (!best || Math.abs(at - t) < Math.abs(best.at - t)) best = { at, lo, hi, k };
+  });
+  return best;
+}
+
 function indexAt(starts, segs, t) {
   let lo = 0;
   let hi = starts.length - 1;
@@ -418,7 +437,8 @@ function buildTtsSchedule(workout, { chattiness = 'normal', announceLead = 10, n
     /* 10 · Hidratación (sesiones ≥ 45′) */
     if (total >= 45 * 60 - 30) {
       for (let t = 900; t < total - 300; t += 900) {
-        place('hydration', 2, t, t - 150, t + 150, simple('hydration'), segs[segAt(t)].idx, { space: 12 });
+        const c = calmSpot(starts, segs, t);
+        if (c) place('hydration', 2, c.at, c.lo, c.hi, simple('hydration'), segs[c.k].idx, { space: 12 });
       }
     }
 
@@ -871,7 +891,8 @@ function buildPackSchedule(workout, opts, base, avail) {
     /* Hidratación (sesiones ≥ 45′) */
     if (total >= 45 * 60 - 30) {
       for (let t = 900; t < total - 300; t += 900) {
-        place('hydration', 2, t, t - 150, t + 150, simple('hydration'), segs[segAt(t)].idx, { space: 12 });
+        const c = calmSpot(starts, segs, t);
+        if (c) place('hydration', 2, c.at, c.lo, c.hi, simple('hydration'), segs[c.k].idx, { space: 12 });
       }
     }
 

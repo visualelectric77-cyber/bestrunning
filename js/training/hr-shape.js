@@ -99,3 +99,31 @@ export function zoneCompliance(segments, hrSeries, profile) {
   for (const z of Object.values(out.byZone)) z.pct = z.sec ? Math.round((z.inSec / z.sec) * 100) : 0;
   return out;
 }
+
+/* ───────── Recuperación que mira tu pulso ───────── */
+
+const ZONE_RANK = { walk: 0, warmup: 1, cooldown: 1, jog: 2, run: 3, fast: 4, sprint: 5 };
+const REC_OVER = 3;        // ppm por encima del máximo de la zona de la recuperación para tocarla
+const REC_STEP_PPM = 3;    // −0,1 km/h por cada 3 ppm de más
+const REC_MAX_DROP = 0.8;
+const REC_GAP = 0.5;       // si el modo pulso ya te bajó, la recuperación va al menos 0,5 por debajo de lo que corrías
+
+/**
+ * Velocidad de la recuperación que viene, según cómo llegas (en «Olas de tempo» la ola suave iba a 9,9 con el pulso a
+ * 160–165 y no bajaba). Solo si el tramo siguiente es más suave que el actual. Nunca la sube, nunca más de −0,8.
+ * { cur: {zone, speed}, next: {zone, speed}, hr, nextTarget: {min, max}, curSpeed, coachLowered } → velocidad nueva o null
+ */
+export function recoverySpeed({ cur, next, hr, nextTarget, curSpeed, coachLowered = false } = {}) {
+  if (!cur || !next || !(Number(next.speed) > 0)) return null;
+  const easier = (ZONE_RANK[next.zone] ?? 9) < (ZONE_RANK[cur.zone] ?? -1);
+  if (!easier) return null;
+  const planned = Number(next.speed);
+  let v = planned;
+  const over = Number(hr) - Number(nextTarget?.max);
+  if (Number.isFinite(over) && over > REC_OVER) v = Math.min(v, planned - Math.min(REC_MAX_DROP, 0.1 * Math.ceil(over / REC_STEP_PPM)));
+  const cs = Number(curSpeed);
+  if (coachLowered && cs > 0) v = Math.min(v, cs - REC_GAP);
+  v = r1(Math.max(planned - REC_MAX_DROP, v));
+  return v <= planned - 0.1 + 1e-9 ? v : null;
+}
+

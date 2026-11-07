@@ -21,7 +21,7 @@ import { logoDataUrl } from '../integrations/share-card.js';
 import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
-import { readinessTarget, WORK_ZONES } from '../training/hr-shape.js';
+import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../player/scene-pick.js';
@@ -3189,6 +3189,43 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(`Hoy tu pulso va ${over} ppm más alto de lo normal a esta velocidad. Si no te encuentras bien, baja el ritmo: hoy cuenta igual.`, { icon: 'heart', duration: 8000 });
   }
 
+  /**
+   * Recuperación a tu pulso: unos segundos antes del pre-aviso de la voz, si el tramo que viene es más suave y llegas
+   * pasado de su zona (o el modo pulso ya te bajó en este), la recuperación baja (hr-shape.js recoverySpeed). Así la
+   * voz anuncia ya la velocidad buena y la recuperación nunca queda casi igual que lo que te acaba de bajar.
+   */
+  function recoveryCheck(st, s, now) {
+    const live = liveHr();
+    st.rbuf = (st.rbuf || []).filter((p) => now - p[0] <= 20000);
+    if (live && Number(live.bpm) > 0 && now - (Number(live.at) || now) <= 15000) st.rbuf.push([now, Number(live.bpm)]);
+    const seg = s.segment;
+    const nx = s.nextSegment;
+    if (!seg || !nx || s.status !== 'running' || st.recSeg === s.segIndex) return;
+    const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
+    if (s.segRemaining > lead + 5 || s.segRemaining < 1.5) return;
+    if (st.rbuf.length < 3) return;
+    st.recSeg = s.segIndex;
+    const hr = st.rbuf.reduce((a, p) => a + p[1], 0) / st.rbuf.length;
+    let nextTarget = null;
+    try { nextTarget = segHrTarget(nx); } catch { nextTarget = null; }
+    const v = recoverySpeed({
+      cur: seg, next: nx, hr, nextTarget, curSpeed: s.currentSpeed, coachLowered: (hrCoachAdj[seg.zone] || 0) < 0,
+    });
+    if (v == null || !engine.setSegmentSpeed?.(s.segIndex + 1, v)) return;
+    diagMark('pulso.recupera', { ppm: Math.round(hr), kmh: v, era: nx.speed });
+    renderNext(engine.getState());
+    renderProfile();
+    // la voz se rehace con la velocidad nueva (el pre-aviso y el cambio ya la dicen)
+    if (coach) {
+      const s2 = engine.getState();
+      coachCall('destroy');
+      coach = makeCoach();
+      coachCall('seek', s2.totalElapsed);
+      lastCoachPos = s2.totalElapsed;
+    }
+    notify(`Pulso alto (${Math.round(hr)}): la recuperación, más suave · ${fmt.speed(v)} km/h`, { icon: 'heart', duration: 5000 });
+  }
+
   function hrCoachTick(s) {
     const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
@@ -3198,6 +3235,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
     if (off || !engine || countingDown || s.inTestStage) return;
+    try { recoveryCheck(st, s, now); } catch (err) { reportOnce(err); }
     const live = liveHr();
     const seg = s.segment;
     if (!seg) return;
