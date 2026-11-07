@@ -22,6 +22,8 @@ import { attachPlayer, isNative, post as nativePost } from '../integrations/nati
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
+import { calibrateClass, nextSpeed, liveSpeed, pulseTrend, dynModelFrom } from '../training/hr-control.js';
+import { createTracker, hrAfter } from '../training/hr-dynamics.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../player/scene-pick.js';
@@ -440,6 +442,25 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
   }
 
+  /* ── A tu pulso (js/training/hr-control.js): con el modelo de tus clases con pulso (cuánto te sube cada km/h, cuánto
+     tarda en subir y bajar y cuánto te carga lo que llevas), los tramos largos de trabajo de una clase nueva se ajustan
+     para caer en su zona; en directo, el mismo modelo decide la velocidad de cada tramo antes de que llegue. ── */
+  let dynModel = null;
+  let dynChanges = [];
+  if (!workout.isTest) {
+    try {
+      dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
+    } catch { dynModel = null; }
+  }
+  if (dynModel && !snap && !workout.race) {
+    try {
+      const res = calibrateClass(dynModel, dynModel.aTypical, workout.segments, (x) => segHrTarget(x), {
+        minSpeed: state.treadmill?.minSpeed ?? 1, maxSpeed: state.treadmill?.maxSpeed ?? 20,
+      });
+      if (res.changes.length) { workout = { ...workout, segments: res.segments }; dynChanges = res.changes; }
+    } catch { dynChanges = []; }
+  }
+
   /* ── Carrera en la cinta (workout.race, js/training/race.js): los km cuentan desde la SALIDA, no desde el
      calentamiento; avisos de salida, mitad, último km y meta con el tiempo de carrera. ── */
   const race = workout.race && Number(workout.race.km) > 0 ? workout.race : null;
@@ -654,6 +675,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
               <div class="pl-ready__eyebrow">${esc(CAT_NAMES[cat] || 'Entrenamiento')} · ${minutes} min</div>
               <h1 class="pl-ready__title">${esc(workout.title || 'Entrenamiento')}</h1>
               ${workout.subtitle ? `<p class="pl-ready__sub">${esc(workout.subtitle)}</p>` : ''}
+              ${dynNoteHtml()}
             </header>
             <div class="pl-ready__chart" style="--i:1">
               ${profileChart(segs, { height: 150, showLevels: true, levels: st.levels })}
@@ -2814,6 +2836,23 @@ export function mount(el, { params = {}, query = {} } = {}) {
     return readinessTarget(t, cache.dayLevel);
   }
 
+  /** Preparación: qué tramos se han ajustado a tu pulso («Trotar 9,2 (+0,3) · Trotar 8,2 (−0,6)»), hasta 4. */
+  function dynNoteHtml() {
+    if (!dynChanges.length) return '';
+    const byZone = new Map();
+    for (const ch of dynChanges) {
+      const z = workout.segments[ch.i]?.zone;
+      const k = `${z}|${ch.to}`;
+      if (z && !byZone.has(k) && byZone.size < 4) byZone.set(k, ch);
+    }
+    const parts = [...byZone.entries()].map(([k, ch]) => {
+      const z = k.split('|')[0];
+      const d = Math.round((ch.to - ch.from) * 10) / 10;
+      return `${esc(ZONES[z]?.name || z)} ${esc(fmt.speed(ch.to))} (${d > 0 ? '+' : '−'}${esc(fmt.speed(Math.abs(d)))})`;
+    });
+    return `<p class="pl-ready__hr">${icon('heart', 14)}<span>Ajustada a tu pulso: ${parts.join(' · ')}</span></p>`;
+  }
+
   /** Pulso en directo del reloj. Con ?debug=hr en la URL se simula (oscila alrededor de la zona del tramo) para probar
    *  la pantalla y el modo pulso en el navegador. */
   function liveHr() {
@@ -2882,9 +2921,24 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const pos = (v) => `${Math.max(0, Math.min(100, ((v - lo) / Math.max(1, hrMax - lo)) * 100)).toFixed(1)}%`;
     const bpm = live ? Math.round(Number(live.bpm)) : 0;
     let st = 'wait';
-    if (bpm && target) st = bpm > target.max ? 'high' : bpm < target.min ? 'low' : 'in';
-    else if (bpm) st = 'in';
-    const key = `${bpm}|${target?.min}|${target?.max}|${st}`;
+    let pred = null;
+    if (bpm && target) {
+      st = bpm > target.max ? 'high' : bpm < target.min ? 'low' : 'in';
+      // con el modelo: por debajo pero llegando a la zona antes de acabar el tramo → «Subiendo», no «Bajo» (el pulso
+      // tarda ~1,5 min en llegar); por encima pero ya bajando a la zona → «Bajando»
+      const tr = hrCoachTick.st?.tracker;
+      const es = engine?.getState?.();
+      if (dynModel && tr && es?.segment && st !== 'in') {
+        try {
+          const t = pulseTrend(dynModel, tr.a, {
+            hrNow: bpm, remaining: es.segRemaining, speed: es.currentSpeed || es.segment.speed,
+            incline: Number(es.segment.incline) || 0, load: hrCoachTick.st.load || 0, target,
+          });
+          if (t.st === 'rising' || t.st === 'falling') { st = t.st; pred = t.predicted; }
+        } catch { /* sin predicción */ }
+      }
+    } else if (bpm) st = 'in';
+    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}`;
     if (cache.pulseKey === key) return;
     cache.pulseKey = key;
     box.dataset.st = st;
@@ -2899,7 +2953,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     } else setText('pulseObj', '');
     if (bpm) box.style.setProperty('--m', pos(bpm));
     const d = target && bpm ? (st === 'high' ? bpm - target.max : st === 'low' ? target.min - bpm : 0) : 0;
-    setText('pulseSt', st === 'wait' ? 'Esperando al reloj' : st === 'high' ? `Alto · +${d}` : st === 'low' ? `Bajo · −${d}` : 'En zona');
+    setText('pulseSt', st === 'wait' ? 'Esperando al reloj' : st === 'rising' ? `Subiendo · ~${pred}` : st === 'falling' ? `Bajando · ~${pred}`
+      : st === 'high' ? `Alto · +${d}` : st === 'low' ? `Bajo · −${d}` : 'En zona');
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
@@ -3226,6 +3281,80 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(`Pulso alto (${Math.round(hr)}): la recuperación, más suave · ${fmt.speed(v)} km/h`, { icon: 'heart', duration: 5000 });
   }
 
+  /**
+   * Modo pulso con el modelo de tu pulso (hr-control.js). Cada segundo: lleva la cuenta de tu pulso de hoy (tracker),
+   * y decide con predicción, no a toro pasado:
+   * · antes de cada tramo (unos segundos antes del pre-aviso), su velocidad con el pulso con el que vas a llegar
+   *   (recuperaciones más suaves si no te dejarían bajar; tramos largos a su zona);
+   * · durante un tramo de trabajo, si con esta velocidad vas a acabar fuera de la zona, la que te deja dentro
+   *   (cada ≥ 45 s, ±0,5 como mucho, 10 por clase; los arreones cortos nunca suben).
+   */
+  function dynTick(st, s, now) {
+    const seg = s.segment;
+    if (!seg || s.status !== 'running') { st.dynPos = s.totalElapsed; return; }
+    const live = liveHr();
+    if (!st.tracker) { st.tracker = createTracker(dynModel); st.load = 0; st.dynPos = s.totalElapsed; st.dynN = 0; st.dynLast = -Infinity; }
+    const dt = Math.max(0, (s.totalElapsed || 0) - (st.dynPos ?? s.totalElapsed));
+    st.dynPos = s.totalElapsed;
+    st.load += (Math.max(0, (s.currentSpeed || 0) - 8.5) * dt) / 60;
+    const fresh = live && Number(live.bpm) >= 40 && now - (Number(live.at) || 0) <= 15000 && live.at !== st.dynAt;
+    if (fresh) st.dynAt = live.at;
+    const incl = Number(seg.incline) || 0;
+    st.tracker.step(s.totalElapsed, s.currentSpeed || seg.speed, incl, st.load, fresh ? Number(live.bpm) : null);
+    const tr = st.tracker;
+    if (tr.hr == null) return;
+    const tm = getState().treadmill || {};
+    const lims = { minSpeed: tm.minSpeed ?? 1, maxSpeed: tm.maxSpeed ?? 20 };
+    const lead = clamp(Number(tm.announceLead) || 10, 3, 30);
+    // 1 · el tramo que viene
+    const nx = s.nextSegment;
+    if (nx && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
+      st.recSeg = s.segIndex;
+      let target = null;
+      try { target = segHrTarget(nx); } catch { target = null; }
+      const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, s.currentSpeed || seg.speed, incl, st.load);
+      const v = nextSpeed(dynModel, tr.a, { cur: seg, next: nx, hrEnd, load: st.load, target, ...lims });
+      if (v != null && engine.setSegmentSpeed?.(s.segIndex + 1, v)) {
+        diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a) });
+        renderNext(engine.getState());
+        renderProfile();
+        if (coach) {
+          const s2 = engine.getState();
+          coachCall('destroy');
+          coach = makeCoach();
+          coachCall('seek', s2.totalElapsed);
+          lastCoachPos = s2.totalElapsed;
+        }
+        notify(v < nx.speed
+          ? `Llegas a ${Math.round(hrEnd)} ppm: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`
+          : `Vas sobrado: el siguiente tramo, a ${fmt.speed(v)} km/h para ir en tu zona`, { icon: 'heart', duration: 5000 });
+      }
+      return;
+    }
+    // 2 · el tramo de ahora
+    if ((st.dynN || 0) >= 10 || now - st.dynLast < 45000 || s.segElapsed < 30 || s.segRemaining < lead + 8) return;
+    if (!HR_COACH_ZONES.has(seg.zone) || seg.sec < 120) return;
+    let target = null;
+    try { target = segHrTarget(seg); } catch { target = null; }
+    const r = liveSpeed(dynModel, tr.a, {
+      seg, hrNow: tr.hr, remaining: s.segRemaining, speed: s.currentSpeed || seg.speed, load: st.load, target, ...lims,
+    });
+    if (!r) return;
+    st.dynLast = now;
+    const cur = s.currentSpeed || seg.speed;
+    const dir = r.speed < cur ? -1 : 1;
+    const tenths = Math.round(Math.abs(r.speed - cur) * 10);
+    let applied = 0;
+    for (let i = 0; i < tenths; i++) if (doAdjust(dir, 'hrAdjust', { dir, alarm: false })) applied++;
+    if (!applied) return;
+    st.dynN = (st.dynN || 0) + 1;
+    hrCoachAdj[seg.zone] = Math.round(((hrCoachAdj[seg.zone] || 0) + dir * applied / 10) * 10) / 10;
+    diagMark('pulso.ajuste', { dir, kmh: applied / 10, ppm: Math.round(tr.hr), prev: r.predicted, a: Math.round(tr.a) });
+    notify(dir < 0
+      ? `Vas a acabar a ${r.predicted} ppm, por encima de tu zona: bajamos ${fmt.speed(applied / 10)} km/h`
+      : `Vas a acabar a ${r.predicted} ppm, por debajo de tu zona: subimos ${fmt.speed(applied / 10)} km/h`, { icon: 'heart', duration: 4500 });
+  }
+
   function hrCoachTick(s) {
     const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
@@ -3235,7 +3364,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
     if (off || !engine || countingDown || s.inTestStage) return;
-    try { recoveryCheck(st, s, now); } catch (err) { reportOnce(err); }
+    if (dynModel) { try { dynTick(st, s, now); } catch (err) { reportOnce(err); } } else {
+      try { recoveryCheck(st, s, now); } catch (err) { reportOnce(err); }
+    }
     const live = liveHr();
     const seg = s.segment;
     if (!seg) return;
@@ -3254,7 +3385,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       coachCall('say', 'hrOn', {});
       diagMark('pulso.guia');
     }
-    if (!r) {
+    // con el modelo de tu pulso decide dynTick; el coach de siempre solo queda para el «vas en tu zona»
+    if (!r || dynModel) {
       const k = st.coach.okCheck?.(now);
       if (k) { coachCall('say', 'hrOk', {}); diagMark('pulso.enzona', { ppm: k.avg }); }
       return;

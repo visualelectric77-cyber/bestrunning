@@ -903,6 +903,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .hud-pulse[data-st="in"] .hud-pulse__st { color: var(--tz, #30d158); }
 .hud-pulse[data-st="high"] .hud-pulse__st { color: #ff9f0a; }
 .hud-pulse[data-st="low"] .hud-pulse__st { color: #64d2ff; }
+.hud-pulse[data-st="rising"] .hud-pulse__st,
+.hud-pulse[data-st="falling"] .hud-pulse__st { color: #fff; }
 .hud-pulse[data-st="wait"] .hud-pulse__num,
 .hud-pulse[data-st="wait"] .hud-pulse__heart { color: var(--ink2); animation: none; }
 .hud-pulse[data-st="wait"] .hud-pulse__mark { display: none; }
@@ -1973,3 +1975,7 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-iz__z { display: inline-flex; gap: 6px; }
 .sm-iz__z b { font-weight: 600; color: var(--text); }
 .sm-iz__note { margin: 12px 0 0; font: 400 14px/1.4 var(--font); color: var(--text-2); }
+/* Preparación: la clase ya viene ajustada a tu pulso */
+.pl-ready__hr { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; font: 500 14px/1.35 var(--font); color: var(--text-2); }
+.pl-ready__hr .icon { flex: none; margin-top: 2px; color: #ff375f; }
+
