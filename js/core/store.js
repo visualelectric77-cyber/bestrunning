@@ -19,7 +19,7 @@ const VISUAL_QUALITIES = ['auto', 'high', 'eco', 'off'];
 const VISUAL_THEMES = [AUTO_THEME, ...SCENE_IDS];
 const DEFAULT_VISUAL_THEME = 'auto';
 const OLD_DEFAULT_THEME = 'aurora';
-const THEME_REV = 3; // 3: «Automático» para todos una vez (también quien tenía un mundo elegido a mano)
+const THEME_REV = 4; // 3 y 4: «Automático» para todos una vez (también quien tenía un mundo elegido a mano); 4 = Modo visión principal
 
 const hasLS = (() => {
   try {
@@ -143,8 +143,9 @@ export function migrateState(st, savedVersion = STATE_VERSION) {
   vz.theme = VISUAL_THEMES.includes(vz.theme) ? vz.theme : dv.theme;
   // Escenario automático. rev 2: quien seguía con el antiguo por defecto pasaba a 'auto'. rev 3 (una sola vez): todos
   // pasan a 'auto', también un mundo elegido a mano antes (p. ej. 'estadio'); después se respeta cualquier elección nueva.
+  // rev 4 (web 1.21, otra vez una sola vez): todos a 'auto' para estrenar Modo visión como escenario principal.
   if (vz.themeRev !== THEME_REV) {
-    if (vz.theme === OLD_DEFAULT_THEME || (Number(vz.themeRev) || 0) < 3) vz.theme = DEFAULT_VISUAL_THEME;
+    if (vz.theme === OLD_DEFAULT_THEME || (Number(vz.themeRev) || 0) < 4) vz.theme = DEFAULT_VISUAL_THEME;
     vz.themeRev = THEME_REV;
   }
   for (const k of ['tvMode', 'strideBob', 'ghost', 'captions']) vz[k] = typeof vz[k] === 'boolean' ? vz[k] : dv[k];

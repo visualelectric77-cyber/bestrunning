@@ -12,6 +12,7 @@
 
 /** @type {ThemeEntry[]} */
 export const THEMES = [
+  { id: 'vision', name: 'Modo visión', description: 'Tu clase como una escalera de luz: cada tramo es un escalón a su velocidad, con su meta al final.', loader: () => import('./vision.js') },
   { id: 'costa', name: 'Costa', description: 'Paseo marítimo al amanecer: el mar a tu lado, losas mojadas y farolas aún encendidas.', loader: () => import('./costa.js') },
   { id: 'neon', name: 'Neón', description: 'Avenida mojada entre rascacielos, rótulos de neón y la ciudad reflejada en el asfalto.', loader: () => import('./neon.js') },
   { id: 'desierto', name: 'Desierto', description: 'Una carretera recta bajo la Vía Láctea, con los captafaros del color de tu tramo.', loader: () => import('./desierto.js') },
@@ -31,7 +32,7 @@ export const THEMES = [
 ];
 
 /** Escenario por defecto (el jurado lo cambia aquí). */
-export const DEFAULT_THEME = 'aurora';
+export const DEFAULT_THEME = 'vision';
 
 /** Entrada del registro por id (o null). */
 export function themeById(id) {

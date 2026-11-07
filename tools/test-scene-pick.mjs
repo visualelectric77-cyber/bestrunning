@@ -17,21 +17,13 @@ function section(name, fn) {
   try { fn(); } catch (err) { failures++; process.stderr.write(`  ✗ excepción: ${err?.stack || err}\n`); }
 }
 
-section('mapa categoría → escenario', () => {
+section('escenario principal: Modo visión', () => {
   const t = (category, extra = {}) => autoTheme({ category, ...extra }).id;
-  ok(t('hills') === 'cordillera', 'cuestas → Cordillera (montaña)');
-  ok(t('intervals') === 'tunel', 'series → Túnel');
-  ok(t('fartlek') === 'neon', 'fartlek → Neón');
-  ok(t('tempo') === 'desierto', 'ritmo sostenido → Desierto');
+  for (const c of ['hills', 'intervals', 'fartlek', 'tempo', 'endurance', 'recovery', 'rara']) ok(t(c) === 'vision', `${c} → Modo visión`);
   for (const c of ['test', 'challenge']) ok(t(c) === 'estadio', `${c} → Estadio (pista)`);
-  ok(t('endurance') === 'costa', 'resistencia → Costa');
-  ok(t('recovery') === 'bosque', 'recuperación → Bosque');
   ok(t('endurance', { isTest: true }) === 'estadio', 'isTest manda (test en pista)');
-  ok(autoTheme({ category: 'rara' }, 'cordillera').id === 'cordillera', 'categoría desconocida → escenario del usuario');
-  ok(autoTheme({ category: 'rara' }, 'auto').id === 'aurora', 'sin escenario del usuario → Aurora');
-  ok(autoTheme(null).id === 'aurora' && autoTheme(undefined, 'legacy').id === 'aurora', 'entradas vacías o ids no ofrecidos → Aurora');
-  ok(autoTheme({ templateId: 'hill-repeats' }).id === 'cordillera', 'sin categoría: la plantilla decide (hill)');
-  ok(autoTheme({ category: 'hills' }).reason === 'cuestas en la montaña', 'el porqué se puede leer');
+  ok(autoTheme(null).id === 'vision' && autoTheme(undefined).id === 'vision', 'entradas vacías → Modo visión');
+  ok(autoTheme({ category: 'hills' }).reason === 'tu clase tramo a tramo', 'el porqué se puede leer');
 });
 
 section('todas las plantillas del catálogo tienen un mundo propio', () => {
@@ -61,15 +53,16 @@ section('mundos especiales: carrera, Halloween y Navidad', () => {
 section('resolveTheme: preferencia, automático y elección solo para esta clase', () => {
   const hills = { category: 'hills' };
   const r1 = resolveTheme(AUTO_THEME, hills);
-  ok(r1.id === 'cordillera' && r1.auto === true && r1.reason, 'auto + cuestas → Cordillera (automático, con porqué)');
+  ok(r1.id === 'vision' && r1.auto === true && r1.reason, 'auto + cuestas → Modo visión (automático, con porqué)');
   const r2 = resolveTheme('estadio', hills);
   ok(r2.id === 'estadio' && r2.auto === false, 'escenario fijo del usuario → se respeta');
   const r3 = resolveTheme('estadio', hills, AUTO_THEME);
-  ok(r3.id === 'cordillera' && r3.auto, 'Automático elegido en Preparación gana a la preferencia');
+  ok(r3.id === 'vision' && r3.auto, 'Automático elegido en Preparación gana a la preferencia');
   const r4 = resolveTheme(AUTO_THEME, hills, 'blank');
   ok(r4.id === 'blank' && !r4.auto, 'un mundo elegido en Preparación gana al automático');
-  ok(resolveTheme('basura', { category: 'recovery' }).id === 'bosque', 'preferencia corrupta → automático');
-  ok(resolveTheme(undefined, { category: 'intervals' }, 'legacy').id === 'tunel', 'elección no ofrecida → se ignora');
+  ok(resolveTheme('basura', { category: 'recovery' }).id === 'vision', 'preferencia corrupta → automático');
+  ok(resolveTheme(undefined, { category: 'intervals' }, 'legacy').id === 'vision', 'elección no ofrecida → se ignora');
+  ok(resolveTheme(AUTO_THEME, { category: 'test', isTest: true }).id === 'estadio', 'el test de VAM sigue en el Estadio');
 });
 
 section('store: escenario automático por defecto y migración', () => {
@@ -83,12 +76,15 @@ section('store: escenario automático por defecto y migración', () => {
   const rev2 = store.defaultState();
   rev2.visuals = { ...rev2.visuals, theme: 'estadio', themeRev: 2 };
   ok(store.migrateState(rev2, 2).visuals.theme === 'auto', 'rev 3: Estadio con la marca antigua (rev 2) → Automático');
+  const rev3 = store.defaultState();
+  rev3.visuals = { ...rev3.visuals, theme: 'estadio', themeRev: 3 };
+  ok(store.migrateState(rev3, 2).visuals.theme === 'auto', 'rev 4: un mundo elegido con la marca rev 3 pasa una vez a Automático (Modo visión)');
   const after = store.defaultState();
-  after.visuals = { ...after.visuals, theme: 'estadio', themeRev: 3 };
-  ok(store.migrateState(after, 2).visuals.theme === 'estadio', 'Estadio elegido tras la migración (marca rev 3) se conserva');
+  after.visuals = { ...after.visuals, theme: 'estadio', themeRev: 4 };
+  ok(store.migrateState(after, 2).visuals.theme === 'estadio', 'Estadio elegido tras la migración (marca rev 4) se conserva');
   const aur = store.defaultState();
-  aur.visuals = { ...aur.visuals, theme: 'aurora', themeRev: 3 };
-  ok(store.migrateState(aur, 2).visuals.theme === 'aurora', 'Aurora elegida tras la migración (marca rev 3) se conserva');
+  aur.visuals = { ...aur.visuals, theme: 'aurora', themeRev: 4 };
+  ok(store.migrateState(aur, 2).visuals.theme === 'aurora', 'Aurora elegida tras la migración (marca rev 4) se conserva');
   const bad = store.defaultState();
   bad.visuals = { theme: 'legacy' };
   ok(store.migrateState(bad, 2).visuals.theme === 'auto', 'escenario no ofrecido → Automático');

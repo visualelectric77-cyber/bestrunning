@@ -1,31 +1,27 @@
 // BestRunning · escenario automático según la clase (función pura, sin DOM: la usan Preparación, Ajustes y los tests).
-// Cada tipo de entreno tiene su mundo: cuestas en la Cordillera, series en el Túnel, cambios de ritmo en la avenida de
-// Neón, ritmo sostenido en la carretera del Desierto, tests y retos en el Estadio, rodajes largos en la Costa y la
-// recuperación en el Bosque. Aurora es el respaldo. Los ids son los de js/player/scene3d/themes/index.js.
+// Desde la web 1.21: Modo visión es el escenario principal de todas las clases; tests y retos, en el Estadio; carrera y
+// eventos, en su mundo especial. Los ids son los de js/player/scene3d/themes/index.js.
 
 /** Valor guardado en visuals.theme cuando el escenario lo elige la clase. */
 export const AUTO_THEME = 'auto';
 /** Escenarios que se ofrecen (mismo orden que Ajustes → Pantalla de entreno). */
-export const SCENE_IDS = ['costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'ciudad-berlin', 'ciudad-berlin-10k', 'ciudad-madrid', 'blank'];
+export const SCENE_IDS = ['vision', 'costa', 'neon', 'desierto', 'tunel', 'bosque', 'aurora', 'cordillera', 'estadio', 'ciudad-berlin', 'ciudad-berlin-10k', 'ciudad-madrid', 'blank'];
 /** Respaldo cuando ni la clase ni el usuario deciden. */
-export const BASE_THEME = 'aurora';
+export const BASE_THEME = 'vision';
 
 export const SCENE_NAMES = {
+  vision: 'Modo visión',
   costa: 'Costa', neon: 'Neón', desierto: 'Desierto', tunel: 'Túnel', bosque: 'Bosque',
   aurora: 'Aurora', cordillera: 'Cordillera', estadio: 'Estadio', blank: 'Grafito',
   'ciudad-berlin': 'Berlín · final del maratón', 'ciudad-berlin-10k': 'Berlín · últimos 10 km', 'ciudad-madrid': 'Madrid · final del maratón',
 };
 
-// categoría → [escenario, por qué] (el porqué se lee «Automático · Estadio — series en pista»)
+// Escenario principal: Modo visión (la clase entera como una escalera de luz) para todas las clases; los tests y retos
+// siguen en el Estadio (sus escalones de test tienen su propia lectura). Los demás mundos se eligen a mano.
+const PRINCIPAL = ['vision', 'tu clase tramo a tramo'];
 const BY_CATEGORY = {
-  hills: ['cordillera', 'cuestas en la montaña'],
-  intervals: ['tunel', 'series en el túnel de luz'],
-  fartlek: ['neon', 'cambios de ritmo por la ciudad'],
-  tempo: ['desierto', 'ritmo sostenido bajo las estrellas'],
   test: ['estadio', 'test en pista'],
   challenge: ['estadio', 'reto en pista'],
-  endurance: ['costa', 'rodaje largo junto al mar'],
-  recovery: ['bosque', 'recuperación entre los árboles'],
 };
 
 const isScene = (id) => typeof id === 'string' && SCENE_IDS.includes(id);
@@ -49,26 +45,15 @@ export function specialTheme(workout) {
 }
 
 /**
- * Escenario que corresponde a una clase.
- * @param {{ category?: string, isTest?: boolean, templateId?: string } | null} workout
- * @param {string} [fallback] escenario del usuario si la clase no tiene uno propio
+ * Escenario que corresponde a una clase: Modo visión, salvo tests y retos (Estadio).
+ * @param {{ category?: string, isTest?: boolean } | null} workout
  * @returns {{ id: string, reason: string, matched: boolean }}
  */
-export function autoTheme(workout, fallback = BASE_THEME) {
-  const fb = isScene(fallback) ? fallback : BASE_THEME;
+export function autoTheme(workout) {
   const w = workout && typeof workout === 'object' ? workout : null;
   let cat = typeof w?.category === 'string' ? w.category.toLowerCase() : '';
   if (w?.isTest) cat = 'test';
-  // Clases sueltas sin categoría: la plantilla lo dice a veces (sprint-…, hill-…, long-…)
-  if (!BY_CATEGORY[cat] && typeof w?.templateId === 'string') {
-    const t = w.templateId.toLowerCase();
-    if (/hill|cuesta/.test(t)) cat = 'hills';
-    else if (/sprint|interval|vo2/.test(t)) cat = 'intervals';
-    else if (/recover|easy/.test(t)) cat = 'recovery';
-    else if (/long|endur/.test(t)) cat = 'endurance';
-  }
-  const hit = BY_CATEGORY[cat];
-  if (!hit) return { id: fb, reason: 'tu escenario de siempre', matched: false };
+  const hit = BY_CATEGORY[cat] || PRINCIPAL;
   return { id: hit[0], reason: hit[1], matched: true };
 }
 
@@ -86,6 +71,6 @@ export function resolveTheme(pref, workout, override = null) {
   if (sp && override === AUTO_THEME) return { id: sp.id, auto: true, reason: sp.reason };
   const choice = override === AUTO_THEME || isScene(override) ? override : (pref === AUTO_THEME || isScene(pref) ? pref : AUTO_THEME);
   if (choice !== AUTO_THEME) return { id: choice, auto: false, reason: '' };
-  const a = autoTheme(workout, isScene(pref) ? pref : BASE_THEME);
+  const a = autoTheme(workout);
   return { id: a.id, auto: true, reason: a.reason };
 }

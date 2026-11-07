@@ -2941,6 +2941,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}`;
     if (cache.pulseKey === key) return;
     cache.pulseKey = key;
+    // el escenario (Modo visión) late con tu pulso y se tiñe de la zona si vas en ella
+    try { scene?.event?.('hr', { bpm, min: target?.min || 0, max: target?.max || 0 }); } catch { /* sin escena */ }
     box.dataset.st = st;
     setText('pulseNum', bpm ? String(bpm) : '–');
     box.style.setProperty('--beat', bpm ? `${(60 / bpm).toFixed(3)}s` : '1s');
