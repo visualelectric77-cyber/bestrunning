@@ -17,6 +17,7 @@ import {
   SEASON_WEEKS, MESO_WEEKS, isTestWeekIndex, phaseOfMeso, themeOfMeso, eventOn, templateMeta,
 } from './season.js';
 import { goalOf, goalSig, goalWeekInfo, goalLongMinutes, goalIntro, goalDistance, GOAL_STAGES } from './goal.js';
+import { weekShape, freeWeekRoles, freeTestDay } from './week-shape.js';
 
 export const CYCLE_WEEKS = ['Arranque', 'Progresión', 'Pico', 'Descarga'];
 const WEEK_LF = [0.97, 1.0, 1.04, 0.8];
@@ -58,17 +59,7 @@ export function setPlannerToday(key) {
 }
 const nowKey = () => CLOCK || todayKey();
 
-const posInt = (v, d) => (Number(v) > 0 ? Math.round(Number(v)) : d);
-
-function sched(state) {
-  const s = state?.schedule || {};
-  return {
-    weekdayMinutes: posInt(s.weekdayMinutes, 20),
-    thursdayMinutes: posInt(s.thursdayMinutes, 50),
-    weekendDay: Number(s.weekendDay) === 7 ? 7 : 6,
-    weekendMinutes: posInt(s.weekendMinutes, 50),
-  };
-}
+const sched = (state) => weekShape(state?.schedule);
 
 const hasIncline = (state) => !!state?.treadmill?.hasIncline;
 const startMonday = (state) => mondayOf(isKey(state?.plan?.startDate) ? state.plan.startDate : todayKey());
@@ -272,34 +263,46 @@ const isHard = (r) => r === 'H' || r === 'T';
 
 function rolesFor(info, sch, adapt, prevWeek, monday) {
   const gw = info.goal || null;
+  const isLong = (d) => sch.longs.includes(d);
   const pat = { ...PATTERNS[info.weekInCycle] };
   // Con objetivo, el jueves es siempre la sesión de ritmo de carrera y el finde la tirada larga (sin intercambios)
   if (!gw && info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
   if (!gw && info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
   // Semana pico antes de afinar: el finde es el ensayo de carrera (duro) y el jueves, ritmo controlado
   if (gw && gw.isLastBuild && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
-  const roles = {};
-  for (let w = 1; w <= 7; w++) {
-    if (w === 4) roles[w] = pat[4];
-    else if (w === sch.weekendDay) roles[w] = pat.we;
-    else if (w <= 5) roles[w] = pat[w];
-    else roles[w] = null;
-  }
+  let roles = {};
+  if (sch.classic) {
+    for (let w = 1; w <= 7; w++) {
+      if (w === 4) roles[w] = pat[4];
+      else if (w === sch.longRun) roles[w] = pat.we;
+      else if (w <= 5) roles[w] = pat[w];
+      else roles[w] = null;
+    }
+  } else roles = freeWeekRoles(sch, info.weekInCycle);
   const demoteAll = (info.phase.key === 'transicion' && !gw) || adapt.mode === 'return';
   for (let w = 1; w <= 7; w++) {
     if (roles[w] !== 'H') continue;
     if (demoteAll) roles[w] = 'M';
-    else if (adapt.mode === 'tired' && w !== 4 && w !== sch.weekendDay) roles[w] = 'M';
+    else if (adapt.mode === 'tired' && !isLong(w)) roles[w] = 'M';
   }
-  if (adapt.mode === 'tired' && roles[4] === 'H' && roles[sch.weekendDay] === 'H') roles[sch.weekendDay] = 'M';
-  // Semana de test: el test VAM es la sesión clave del jueves (piernas frescas: miércoles y viernes suaves)
+  if (adapt.mode === 'tired' && sch.longs.length === 2 && sch.longs.every((d) => roles[d] === 'H')) roles[sch.longRun] = 'M';
+  // Semana de test: el test VAM es la sesión clave (piernas frescas: el día anterior y el siguiente, suaves)
   let testDay = null;
   if (info.isTestWeek) {
-    testDay = 4;
-    roles[4] = 'T';
-    roles[3] = 'E';
-    roles[5] = 'E';
-    if (info.isDeload) for (const w of [1, 2]) roles[w] = 'E';
+    testDay = sch.classic ? 4 : freeTestDay(sch);
+    if (testDay) {
+      roles[testDay] = 'T';
+      for (const w of [testDay - 1, testDay + 1]) if (roles[w]) roles[w] = 'E';
+      if (info.isDeload) for (let w = 1; w < testDay; w++) if (roles[w]) roles[w] = 'E';
+      // Semana libre: la sesión anterior al test nunca es dura, aunque haya un día de descanso por medio
+      if (!sch.classic) {
+        for (let w = testDay - 1; w >= 1; w--) {
+          if (!roles[w]) continue;
+          if (roles[w] === 'H') roles[w] = 'M';
+          break;
+        }
+      }
+    }
   }
   // Semana de carrera y de recuperación: todo suave, descanso la víspera y el día siguiente a la carrera; en la de
   // carrera, un único recordatorio de ritmo 3-5 días antes (el día de la carrera lo marca computeWeek)
@@ -319,7 +322,7 @@ function rolesFor(info, sch, adapt, prevWeek, monday) {
   for (let w = 1; w <= 7; w++) {
     const before = w === 1 ? prevLast : roles[w - 1];
     if (!isHard(roles[w]) || !isHard(before)) continue;
-    const short = (d) => d !== 4 && d !== sch.weekendDay;
+    const short = (d) => !isLong(d);
     if (roles[w] !== 'T' && short(w)) roles[w] = 'M';
     else if (w > 1 && roles[w - 1] !== 'T' && short(w - 1)) roles[w - 1] = 'M';
     else if (roles[w] !== 'T') roles[w] = 'M';
@@ -328,13 +331,13 @@ function rolesFor(info, sch, adapt, prevWeek, monday) {
 }
 
 function minutesFor(w, info, sch) {
-  const long = w === 4 || w === sch.weekendDay;
-  let base = w === 4 ? sch.thursdayMinutes : w === sch.weekendDay ? sch.weekendMinutes : sch.weekdayMinutes;
+  const long = sch.longs.includes(w);
+  let base = sch.days[w];
   const gw = info.goal;
   if (gw) {
     // Construcción: la tirada del finde crece hacia la distancia · Afinar: largos al 80 % (1.ª de dos) o 60 % ·
     // Carrera: largos a la mitad y cortos como siempre · Recuperación: como una descarga
-    if (gw.stage === 'build' && w === sch.weekendDay) base = goalLongMinutes(gw, base);
+    if (gw.stage === 'build' && w === sch.longRun) base = goalLongMinutes(gw, base);
     if (gw.stage === 'taper') {
       if (!long) return base;
       const f = gw.taperWeeks === 2 && gw.taperIndex === 0 ? 0.8 : 0.6;
@@ -391,13 +394,13 @@ function computeWeek(state, W, cache, adapt) {
       days[w] = { date, slot: 'rest', kind: 'rest', role: null, minutes: 0, templateId: null, family: null, surprise: false, event: null };
       continue;
     }
-    const minutes = role === 'T' ? Math.min(sch.weekdayMinutes, 30) : minutesFor(w, info, sch);
-    const long = role !== 'T' && (w === 4 || w === sch.weekendDay);
+    const minutes = role === 'T' ? (sch.classic ? Math.min(sch.shortMinutes, 30) : clamp(sch.days[w], 20, 30)) : minutesFor(w, info, sch);
+    const long = role !== 'T' && sch.longs.includes(w);
     days[w] = { date, w, role, minutes, long, kind: role === 'T' ? 'test' : long ? 'long' : 'short', surprise: false, event: null };
     train.push(days[w]);
   }
   const surpriseDay = gw && gw.stage !== 'build' ? null
-    : [3, 5, 2, 1].map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
+    : (sch.classic ? [3, 5, 2, 1] : [3, 5, 2, 1, 6, 7, 4]).map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
   let eventDay = null;
   for (let w = 1; w <= 7 && !eventDay; w++) {
     const ev = eventOn(addDays(monday, w - 1));
@@ -458,10 +461,11 @@ function computeWeek(state, W, cache, adapt) {
     const kTarget = target / Math.max(1, train.reduce((a, d) => a + LPM[d.role] * d.minutes, 0));
     // Objetivo: ritmo de carrera en las sesiones de calidad, tirada larga de fondo y ensayo de carrera en la semana pico
     const gd = gw && gw.stage !== 'recovery' ? goalDistance(gw.distance) : null;
-    const simDay = gd && gw.isLastBuild && !info.isDeload ? sch.weekendDay : null;
+    const simDay = gd && gw.isLastBuild && !info.isDeload ? sch.longRun : null;
     const recovering = gw && gw.stage === 'recovery';
 
-    // Candidatos por día
+    // Candidatos por día (con siete días de entreno, menos por día: la búsqueda crece muy deprisa)
+    const kCands = train.length >= 7 ? 2 : K_CANDS;
     const pools = [];
     const cands = train.map((d, di) => {
       const seed = hashStr(d.date);
@@ -499,12 +503,12 @@ function computeWeek(state, W, cache, adapt) {
           if (theme.key === 'mixto' && famFresh) s += 1.5;
         }
         if (phase.families.includes(m.family)) s += 1;
-        if (d.w === 4 && KEY_THU.includes(m.family)) s += 2;
-        if (d.w === sch.weekendDay && KEY_WE.includes(m.family)) s += 1;
-        if (d.w === sch.weekendDay && phase.key === 'picos' && d.role === 'H' && m.family === 'reto') s += 3;
+        if (d.w === sch.keyDay && KEY_THU.includes(m.family)) s += 2;
+        if (d.w === sch.longRun && KEY_WE.includes(m.family)) s += 1;
+        if (d.w === sch.longRun && phase.key === 'picos' && d.role === 'H' && m.family === 'reto') s += 3;
         if (gd) {
-          if (d.role !== 'E' && (d.w === 4 || gw.stage !== 'build') && gd.thu.includes(m.family)) s += gw.stage === 'build' ? 3 : 5;
-          if (d.long && d.w === sch.weekendDay && gw.stage === 'build' && gd.long.includes(m.family)) s += 2.5;
+          if (d.role !== 'E' && (d.w === sch.keyDay || sch.keyDay == null || gw.stage !== 'build') && gd.thu.includes(m.family)) s += gw.stage === 'build' ? 3 : 5;
+          if (d.long && d.w === sch.longRun && gw.stage === 'build' && gd.long.includes(m.family)) s += 2.5;
           if (d.w === simDay && gd.sim.includes(t.id)) s += 9;
         }
         if (recovering && m.intensity === 'easy') s += 2;
@@ -524,7 +528,7 @@ function computeWeek(state, W, cache, adapt) {
       const perFam = new Map();
       const add = (x) => out.push({ id: x.t.id, family: x.m.family, score: x.s, win: x.winOk, ...estimate(x.t.id, d.minutes, seed, lf, incline) });
       for (const x of scored) {
-        if (out.length >= K_CANDS) break;
+        if (out.length >= kCands) break;
         const n = perFam.get(x.m.family) || 0;
         if (n >= 2) continue;
         perFam.set(x.m.family, n + 1);
@@ -572,7 +576,21 @@ function computeWeek(state, W, cache, adapt) {
       }
     };
     rec(0, 0, 0, 0, 0);
-    if (!best) best = { picks: cands.map((c) => c[0]), load: cands.reduce((a, c) => a + c[0].load, 0) };
+    if (!best) {
+      // Sin combinación sin repetir entre los candidatos: día a día, la mejor que aún no se haya usado esta semana
+      const used = new Set();
+      const picks0 = cands.map((c, i) => {
+        let p = c.find((x) => !used.has(x.id));
+        if (!p) {
+          const x = pools[i].find((y) => !used.has(y.t.id));
+          if (x) p = { id: x.t.id, family: x.m.family, score: x.s, win: x.winOk, ...estimate(x.t.id, train[i].minutes, hashStr(train[i].date), lf, incline) };
+        }
+        p = p || c[0];
+        used.add(p.id);
+        return p;
+      });
+      best = { picks: picks0, load: picks0.reduce((a, c) => a + c.load, 0) };
+    }
 
     // Reparación: si el catálogo no da para cumplir el tope de carga, cambia la sesión que más baja por menos puntos
     const picks = best.picks.slice();
@@ -641,7 +659,7 @@ const MEMO = new Map();
 function settingsKey(state) {
   const s = sched(state);
   const g = goalSig(state?.plan?.goal);
-  return [startMonday(state), s.weekdayMinutes, s.thursdayMinutes, s.weekendDay, s.weekendMinutes, hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '');
+  return [startMonday(state), Object.values(s.days).join(','), hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '');
 }
 
 function weekPicks(state, W) {
@@ -729,12 +747,12 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
       if (t) { templateId = t.id; slot = 'custom'; }
       if (def.kind === 'rest' && !t) {
         // "Quitar descanso" sin clase concreta: una sesión suave
-        minutes = sch.weekdayMinutes;
+        minutes = sch.shortMinutes;
         templateId = fallbackPick(state, dateKey, minutes, { intensity: 'easy' });
         slot = 'easy';
       }
       if (Number(ov.minutes) > 0) minutes = Math.round(Number(ov.minutes));
-      else if (def.kind === 'rest') minutes = fitMinutes(getTemplate(templateId), sch.weekdayMinutes);
+      else if (def.kind === 'rest') minutes = fitMinutes(getTemplate(templateId), sch.shortMinutes);
       if (Number.isFinite(Number(ov.seed)) && ov.seed !== null && ov.seed !== '') seed = Math.floor(Math.abs(Number(ov.seed))) % 4294967296;
       const recalc = Number(ov.minutes) > 0 || def.kind === 'rest' || def.kind === 'test';
       kind = templateId === TEST_ID ? 'test' : recalc ? (minutes >= 40 ? 'long' : 'short') : def.kind;
@@ -857,7 +875,7 @@ export function alternativesFor(state, dateKey, n = 6) {
   const r = resolveDay(state, dateKey);
   const sch = sched(state);
   const incline = hasIncline(state);
-  const minutes = r.kind === 'rest' || !r.minutes ? sch.weekdayMinutes : r.minutes;
+  const minutes = r.kind === 'rest' || !r.minutes ? sch.shortMinutes : r.minutes;
   // Las clases de evento (Navidad, Verano, Aniversario) solo se ofrecen en sus fechas
   const ev = eventOn(dateKey)?.key || null;
   const inSeason = (t) => !t.event || t.event === ev;
@@ -990,13 +1008,15 @@ export function nextTestDate(state, fromKey = todayKey()) {
     if (resolveDay(state, d).templateId !== TEST_ID) continue;
     if (!isDone(sessionFor(state?.history, d))) return d;
   }
-  // Más allá del horizonte (o con overrides): el jueves de la siguiente semana de test sin hacer
+  // Más allá del horizonte (o con overrides): el día de test de la siguiente semana de test sin hacer
+  const sch = sched(state);
+  const testOffset = (sch.classic ? 4 : freeTestDay(sch) || 4) - 1;
   const info = cycleInfo(state, from);
   for (let w = Math.max(0, info.weeksSinceStart); w < Math.max(0, info.weeksSinceStart) + 260; w++) {
     if (!isTestWeekIndex(w)) continue;
     const gwk = goalOf(state) ? goalWeek(state, addDays(startMonday(state), w * 7)) : null;
     if (gwk && gwk.stage !== 'build') continue; // al afinar, en la semana de carrera y al recuperar no hay test
-    const d = addDays(startMonday(state), w * 7 + 3);
+    const d = addDays(startMonday(state), w * 7 + testOffset);
     if (d >= from && !isDone(sessionFor(state?.history, d))) return d;
   }
   return addDays(from, 42);

@@ -1,5 +1,5 @@
 // BestRunning · «Hoy»: saludo, tira semanal, clase del día, velocidades, semana, ciclo y consejo del coach.
-import { getState, subscribe } from '../core/store.js';
+import { getState, setState, subscribe } from '../core/store.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
@@ -7,6 +7,7 @@ import {
   photo, categoryPhotoName,
 } from '../ui/components.js';
 import { planWeek, planDay, cycleInfo, nextTestDate, CYCLE_WEEKS } from '../training/planner.js';
+import { weekShape } from '../training/week-shape.js';
 import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js';
 import { buildWorkout } from '../training/generator.js';
 import * as progression from '../training/progression.js';
@@ -434,9 +435,23 @@ function cycleCard(state, today) {
   </button>`;
 }
 
+/* Quien se dio de alta cuando la bienvenida traía datos de ejemplo y no los cambió: una sola vez, a revisarlos. */
+function sampleDataCard(state) {
+  const p = state.profile || {};
+  if (state.ui?.sampleOk || !(p.age === 46 && p.weightKg === 78 && p.hrMax === 176)) return '';
+  return `<section class="card td-sample">
+    <b>Pon tus datos en el plan</b>
+    <p>Tu edad, tu peso, tus velocidades y tus días venían de ejemplo. Con los tuyos, las zonas de pulso y las clases serán de verdad para ti.</p>
+    <div class="td-sample__row">
+      <button type="button" class="btn btn--primary" data-href="#/settings"><span>Revisarlos</span></button>
+      <button type="button" class="btn btn--ghost" data-sample-ok><span>Ya son los míos</span></button>
+    </div>
+  </section>`;
+}
+
 function coachCard(state) {
   let text = typeof progression.coachInsight === 'function' ? safe(() => progression.coachInsight(state), '') : '';
-  if (!text) text = 'La constancia gana a la intensidad. Cumple tus sesiones cortas y el jueves dale un poco más de cuerda.';
+  if (!text) text = 'La constancia gana a la intensidad. Cumple tus sesiones de la semana, aunque algún día sean cortas.';
   return `<section class="td-section td-coachsec">
     ${sectionHeader('Consejo del coach')}
     <div class="card td-coach"><p class="td-coach__text">${esc(text)}</p></div>
@@ -519,7 +534,7 @@ function sessionsBlock(state, day, dateKey, today) {
 
 function openTrainAnyway(dateKey) {
   const state = getState();
-  const minutes = state.schedule?.weekdayMinutes || 20;
+  const minutes = weekShape(state.schedule).shortMinutes;
   const hasIncline = !!state.treadmill?.hasIncline;
   const seed = hashStr(`easy-${dateKey}`);
   const opts = { minutes, levels: state.levels, seed, loadFactor: 0.9, hasIncline, treadmill: state.treadmill, weightKg: state.profile?.weightKg };
@@ -600,6 +615,7 @@ export function mount(el) {
         <span class="td-date">${esc(capitalize(fmt.dateLong(today)))}</span>
         ${streak > 0 ? `<span class="td-streak">${icon('flame', 13)}<b class="num">${streak}</b> ${streak === 1 ? 'semana' : 'semanas'}</span>` : ''}
       </div>`,
+      sampleDataCard(state),
       list ? `<section class="td-week">${seasonBar(si)}${weekStrip(list, today, selected, state)}</section>` : seasonBar(si),
       eventBanner(si, today),
       selected === today ? readinessBlock(today) : '',
@@ -619,6 +635,11 @@ export function mount(el) {
   }
 
   const onClick = (e) => {
+    if (e.target.closest('[data-sample-ok]')) {
+      setState((d) => { d.ui = { ...(d.ui || {}), sampleOk: true }; });
+      render();
+      return;
+    }
     const dayBtn = e.target.closest('[data-day]');
     if (dayBtn) {
       const key = dayBtn.dataset.day;

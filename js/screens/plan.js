@@ -1,5 +1,6 @@
 // BestRunning · «Mi plan»: semana del ciclo, reordenar arrastrando (mantener pulsado) y acciones por día.
 import { getState, setState, subscribe } from '../core/store.js';
+import { weekShape } from '../training/week-shape.js';
 import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import {
@@ -146,7 +147,7 @@ function safePlanDay(state, key) {
 
 /** Alternativas de reserva si el planificador no devuelve ninguna (p. ej. en un día de descanso). */
 function fallbackAlternatives(state, dateKey, day, n = 6) {
-  const minutes = day?.minutes || state.schedule?.weekdayMinutes || 20;
+  const minutes = day?.minutes || weekShape(state.schedule).shortMinutes;
   const hasIncline = !!state.treadmill?.hasIncline;
   const list = safe(() => templatesFor({ category: 'all', minutes, hasIncline }), []).filter(
     (t) => t.category !== 'test' && t.id !== day?.templateId
@@ -503,7 +504,8 @@ function goalPlanText(state, g, today) {
   parts.push('la semana de carrera');
   const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} y ${parts[parts.length - 1]}` : parts[0];
   const start = b.start > mondayOf(today) ? ` Hasta el ${fmt.dateShort(b.start)} sigues con tu temporada.` : '';
-  const long = d.longMax && (Number(state.schedule?.weekendMinutes) || 50) < d.longMax && b.build >= 2 ? ` La tirada del finde sube hasta ${d.longMax} min.` : '';
+  const lm = weekShape(state.schedule).longMinutes;
+  const long = d.longMax && lm && lm < d.longMax && b.build >= 2 ? ` Tu tirada larga sube hasta ${d.longMax} min.` : '';
   return `${left}: ${list}.${start}${long}`;
 }
 

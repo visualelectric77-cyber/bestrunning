@@ -4,9 +4,11 @@ import { navigate } from '../core/router.js';
 import { haptic } from '../core/haptics.js';
 import { icon, listIcon, stepper, segmented, toggle, toast, bgVideo, holdBgVideo } from '../ui/components.js';
 import { planWeek } from '../training/planner.js';
+import { scheduleDays } from '../training/week-shape.js';
+import { weekEditorHtml, weekEditorInner, weekEditorTap, weekEditorDayOf } from '../ui/week-editor.js';
 import { CATEGORIES } from '../training/templates.js';
 import {
-  ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, vamFromLevels, hrMaxFromAge, hrZones,
+  ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, hrMaxFromAge, hrZones,
 } from '../training/levels.js';
 import * as speech from '../audio/speech.js';
 import * as audioEngine from '../audio/audio-engine.js';
@@ -23,6 +25,14 @@ const LEVEL_HINTS = {
   fast: 'Respiración intensa',
   sprint: 'A tope, de 30 a 60 s',
 };
+// Punto de partida de quien no conoce sus velocidades. Se ajusta abajo y el test VAM las afina.
+const LEVEL_PRESETS = [
+  { id: 'start', vam: 9.5, title: 'Estoy empezando', sub: 'Aún no aguanto 30 min corriendo' },
+  { id: 'some', vam: 11, title: 'Corro de vez en cuando', sub: '5 km en unos 30 min' },
+  { id: 'regular', vam: 12.5, title: 'Corro cada semana', sub: '5 km en unos 27 min' },
+  { id: 'fit', vam: 15, title: 'Estoy muy en forma', sub: '5 km en unos 22 min' },
+];
+const FRESH_WEEK = { 1: 30, 2: 0, 3: 30, 4: 0, 5: 30, 6: 0, 7: 0 };
 const LEVEL_RANGES = { jog: [5, 12], run: [6, 15], fast: [7, 17], sprint: [8, 20] };
 const CHAT_DESC = {
   minimal: 'Solo avisos de cambio y el final. Ideal si vas con tu música a tope.',
@@ -42,7 +52,6 @@ function safe(fn, fallback) {
 }
 
 const reducedMotion = () => safe(() => matchMedia('(prefers-reduced-motion: reduce)').matches, false);
-const withValue = (opts, v) => [...new Set([...opts, v])].filter((x) => x != null).sort((a, b) => a - b);
 const firstName = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 
 function voiceQuality(v) {
@@ -76,18 +85,18 @@ export function mount(el) {
   el.classList.add('screen--fullscreen', 'ob-screen');
   const s0 = getState();
   const p0 = s0.profile || {};
-  const age0 = p0.age || 46;
+  const age0 = p0.age || null;
   const draft = {
     profile: {
       name: p0.name || '',
       age: age0,
-      weightKg: p0.weightKg || 78,
-      sex: p0.sex === 'f' ? 'f' : 'm',
-      hrMax: p0.hrMax || hrMaxFromAge(age0),
+      weightKg: p0.weightKg || null,
+      sex: p0.sex === 'f' || p0.sex === 'm' ? p0.sex : null,
+      hrMax: p0.hrMax || (age0 ? hrMaxFromAge(age0) : null),
       hrRest: p0.hrRest ?? null,
     },
     levels: { ...DEFAULT_LEVELS, ...(s0.levels || {}) },
-    schedule: { weekdayMinutes: 20, thursdayMinutes: 50, weekendDay: 6, weekendMinutes: 50, reminderTime: '07:00', ...(s0.schedule || {}) },
+    schedule: { reminderTime: s0.schedule?.reminderTime || '07:00', days: s0.schedule?.days ? scheduleDays(s0.schedule) : { ...FRESH_WEEK } },
     treadmill: { hasIncline: false, maxIncline: 12, minSpeed: 1, maxSpeed: 18, announceLead: 10, ...(s0.treadmill || {}) },
     audio: {
       voiceEnabled: true, voiceURI: null, rate: 1, pitch: 1, volume: 1, beeps: true, chattiness: 'normal', duckMusic: true, packId: PACK_ID,
@@ -95,7 +104,8 @@ export function mount(el) {
     },
     integrations: { watchReminder: true, healthShortcut: '', ...(s0.integrations || {}) },
   };
-  let hrAuto = !p0.hrMax || p0.hrMax === hrMaxFromAge(age0);
+  let hrAuto = !p0.hrMax || !age0 || p0.hrMax === hrMaxFromAge(age0);
+  let levelPick = null;       // la velocidad se elige siempre: ya no se parte de unas de serie
   let step = 0;
   let busy = false;
   let nativeBusy = false;     // app nativa: importando o recuperando una copia
@@ -201,10 +211,12 @@ export function mount(el) {
   }
 
   function hrMaxSlot() {
+    if (!draft.profile.hrMax) return '<span class="ob-num__unit">Pon tu edad</span>';
     return stepper({ id: 'ob-hrmax', value: draft.profile.hrMax, step: 1, min: 120, max: 220, unit: 'ppm', decimals: 0 });
   }
 
   function zonesHtml() {
+    if (!draft.profile.hrMax) return '<p class="ob-note">Pon tu edad y aquí verás tus zonas.</p>';
     const zs = safe(() => hrZones(draft.profile.hrMax, draft.profile.hrRest), []);
     return zs
       .map((z) => `<div class="ob-hrz__z" style="--c:${z.color}"><span class="ob-hrz__bar"></span><b class="num">Z${z.zone}</b><span class="num">${z.min}–${z.max}</span></div>`)
@@ -232,9 +244,12 @@ export function mount(el) {
             maxlength="24" placeholder="Tu nombre" value="${esc(p.name)}">
         </label>
         <div class="list ob-list">
-          <div class="list__row"><span class="list__title">Edad</span><span class="spacer"></span>${stepper({ id: 'ob-age', value: p.age, step: 1, min: 14, max: 90, unit: 'años', decimals: 0 })}</div>
-          <div class="list__row"><span class="list__title">Peso</span><span class="spacer"></span>${stepper({ id: 'ob-weight', value: p.weightKg, step: 1, min: 35, max: 180, unit: 'kg', decimals: 0 })}</div>
-          <div class="list__row"><span class="list__title">Sexo</span><span class="spacer"></span>${segmented({ name: 'ob-sex', options: [{ value: 'm', label: 'Hombre' }, { value: 'f', label: 'Mujer' }], value: p.sex })}</div>
+          <div class="list__row"><span class="list__title">Edad</span><span class="spacer"></span>
+            <input id="ob-age" class="field ob-num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="—" aria-label="Edad" value="${p.age ?? ''}"><span class="ob-num__unit">años</span></div>
+          <div class="list__row"><span class="list__title">Peso</span><span class="spacer"></span>
+            <input id="ob-weight" class="field ob-num" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" placeholder="—" aria-label="Peso" value="${p.weightKg ?? ''}"><span class="ob-num__unit">kg</span></div>
+          <div class="list__row"><span class="list__title">Sexo</span><span class="spacer"></span>
+            <div class="ob-sex" role="radiogroup" aria-label="Sexo">${[['m', 'Hombre'], ['f', 'Mujer']].map(([v, l]) => `<button type="button" role="radio" class="ob-sex__opt${p.sex === v ? ' is-on' : ''}" aria-checked="${p.sex === v}" aria-label="${l}" data-ob-sex="${v}">${l}</button>`).join('')}</div></div>
           <div class="list__row ob-hrrow">
             <span class="list__title">FC máxima<span class="list__sub" data-hr-hint>${hrAuto ? 'Calculada por tu edad' : 'Ajustada por ti'}</span></span>
             <span class="spacer"></span><span data-slot="hrmax">${hrMaxSlot()}</span>
@@ -266,6 +281,7 @@ export function mount(el) {
   function speedsHtml() {
     const lv = draft.levels;
     const maxT = draft.treadmill.maxSpeed || 18;
+    const presets = `<div class="ob-levels" role="radiogroup" aria-label="Cómo corres hoy">${LEVEL_PRESETS.map((x) => `<button type="button" role="radio" class="ob-level${levelPick === x.id ? ' is-on' : ''}" aria-checked="${levelPick === x.id}" aria-label="${esc(`${x.title}: ${x.sub}`)}" data-ob-level="${x.id}"><b>${esc(x.title)}</b><small>${esc(x.sub)}</small></button>`).join('')}</div>`;
     const rows = LEVEL_KEYS.map((k) => {
       const [lo, hi] = LEVEL_RANGES[k];
       return `<div class="ob-speed" style="--zc:var(--z-${k})">
@@ -282,12 +298,13 @@ export function mount(el) {
       <div class="ob-intro">
         <p class="eyebrow">Paso 3 de 5</p>
         <h1 class="ob-h1" tabindex="-1">Tus velocidades</h1>
-        <p class="ob-lead">Tus cuatro marchas en la cinta. El coach te las cantará en cada cambio.</p>
-        <div class="ob-ladder" aria-hidden="true">${ladderHtml()}</div>
+        <p class="ob-lead">¿Cómo corres hoy? Te propongo tus cuatro marchas y, si ya las conoces, las ajustas.</p>
+        ${levelPick ? `<div class="ob-ladder" aria-hidden="true">${ladderHtml()}</div>` : ''}
       </div>
       <div class="ob-body">
-        <div class="ob-speeds">${rows}</div>
-        <div class="ob-callout">${icon('arrow-up', 18)}<span><b>Las iremos subiendo contigo.</b> Cuando una sesión te resulte cómoda, subimos 0,1 km/h. VAM estimada: <b class="num" data-vam>${fmt.speed(vamFromLevels(lv))}</b> km/h.</span></div>
+        ${presets}
+        ${levelPick ? `<div class="ob-speeds">${rows}</div>
+        <div class="ob-callout">${icon('arrow-up', 18)}<span><b>Las iremos subiendo contigo.</b> Si dudas, elige lo más parecido: el test VAM las afina. VAM estimada: <b class="num" data-vam>${fmt.speed(vamFromLevels(lv))}</b> km/h.</span></div>` : ''}
       </div>
     </div>`;
   }
@@ -332,31 +349,18 @@ export function mount(el) {
 
   function weekHtml() {
     const sc = draft.schedule;
-    const minsOpt = (opts, v) => withValue(opts, v).map((m) => ({ value: m, label: `${m}′` }));
     return `<div class="ob-step">
       <div class="ob-intro">
         <p class="eyebrow">Paso 4 de 5</p>
         <h1 class="ob-h1" tabindex="-1">Tu semana</h1>
-        <p class="ob-lead">Te preparo ciclos de 4 semanas que suben la carga poco a poco, con un test cada 6 semanas para medir tu progreso.</p>
+        <p class="ob-lead">Elige tus días y tu tiempo. Con eso te preparo ciclos de 4 semanas que suben la carga poco a poco, con un test cada 6 semanas.</p>
         <div class="card ob-preview">
           <span class="eyebrow">Así queda tu semana</span>
           <div data-weekprev>${weekPreviewHtml()}</div>
         </div>
       </div>
       <div class="ob-body">
-        <div class="ob-group">
-          <div class="ob-group__head"><b>Lunes, martes, miércoles y viernes</b></div>
-          ${segmented({ name: 'ob-wd', options: minsOpt([20, 25, 30], sc.weekdayMinutes), value: sc.weekdayMinutes })}
-        </div>
-        <div class="ob-group">
-          <div class="ob-group__head"><b>Jueves</b><span>Sesión larga</span></div>
-          ${segmented({ name: 'ob-thu', options: minsOpt([45, 50, 55, 60], sc.thursdayMinutes), value: sc.thursdayMinutes })}
-        </div>
-        <div class="ob-group">
-          <div class="ob-group__head"><b>Fin de semana</b><span>Un día largo, el otro descansas</span></div>
-          ${segmented({ name: 'ob-wkday', options: [{ value: 6, label: 'Sábado' }, { value: 7, label: 'Domingo' }], value: sc.weekendDay === 7 ? 7 : 6 })}
-          ${segmented({ name: 'ob-wkmin', options: minsOpt([45, 50, 55, 60], sc.weekendMinutes), value: sc.weekendMinutes })}
-        </div>
+        <div class="ob-group">${weekEditorHtml(sc.days)}</div>
         <div class="list ob-list">
           <div class="list__row">
             ${listIcon('mountain')}
@@ -439,14 +443,7 @@ export function mount(el) {
   /* ── Accesibilidad: nombres para los controles genéricos (steppers y segmentados) ── */
 
   const A11Y = {
-    'ob-age': 'Edad',
-    'ob-weight': 'Peso',
     'ob-hrmax': 'Frecuencia cardiaca máxima',
-    'ob-sex': 'Sexo',
-    'ob-wd': 'Minutos de lunes, martes, miércoles y viernes',
-    'ob-thu': 'Minutos del jueves',
-    'ob-wkday': 'Día largo del fin de semana',
-    'ob-wkmin': 'Minutos del día largo',
     'ob-chat': 'Nivel de charla del coach',
   };
   for (const k of LEVEL_KEYS) A11Y[`ob-lv-${k}`] = `Velocidad de ${String(ZONES[k]?.name || k).toLowerCase()}`;
@@ -660,6 +657,21 @@ export function mount(el) {
 
   function next() {
     if (busy || finishing) return;
+    if (STEPS[step] === 'about') {
+      const p = draft.profile;
+      const miss = !p.age ? ['ob-age', 'Dime tu edad para calcular tus zonas'] : !p.weightKg ? ['ob-weight', 'Dime tu peso para calcular las calorías'] : !p.sex ? [null, 'Elige hombre o mujer'] : null;
+      if (miss) {
+        haptic('error');
+        toast(miss[1], { icon: 'info' });
+        if (miss[0]) stage.querySelector(`#${miss[0]}`)?.focus();
+        return;
+      }
+    }
+    if (STEPS[step] === 'speeds' && !levelPick) {
+      haptic('error');
+      toast('Elige cómo corres hoy', { icon: 'info' });
+      return;
+    }
     if (STEPS[step] === 'speeds') {
       const fixed = enforceLevelOrder({ ...draft.levels });
       const changed = LEVEL_KEYS.some((k) => fixed[k] !== draft.levels[k]);
@@ -715,6 +727,43 @@ export function mount(el) {
     const rb = e.target.closest('[data-ob-restore]');
     if (rb) return restoreNative(rb);
     if (e.target.closest('.ob-next')) return next();
+    const sexBtn = e.target.closest('[data-ob-sex]');
+    if (sexBtn) {
+      draft.profile.sex = sexBtn.dataset.obSex;
+      haptic('selection');
+      stage.querySelectorAll('[data-ob-sex]').forEach((b) => {
+        const on = b === sexBtn;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+      return undefined;
+    }
+    const levelBtn = e.target.closest('[data-ob-level]');
+    if (levelBtn) {
+      const preset = LEVEL_PRESETS.find((x) => x.id === levelBtn.dataset.obLevel);
+      if (!preset) return undefined;
+      levelPick = preset.id;
+      draft.levels = enforceLevelOrder(levelsFromVam(preset.vam));
+      haptic('selection');
+      const panel = stage.querySelector('.ob-panel');
+      if (panel) {
+        panel.innerHTML = speedsHtml();
+        labelControls(panel);
+      }
+      return undefined;
+    }
+    const wkeBtn = e.target.closest('[data-wke-day],[data-wke-same],[data-wke-all]');
+    if (wkeBtn) {
+      const days = weekEditorTap(wkeBtn, draft.schedule.days);
+      if (days) {
+        draft.schedule.days = days;
+        haptic('selection');
+        const host = stage.querySelector('[data-wke]');
+        if (host) host.innerHTML = weekEditorInner(days);
+        refreshPreview();
+      }
+      return undefined;
+    }
     if (e.target.closest('.ob-back')) {
       haptic('light');
       return goTo(step - 1);
@@ -737,14 +786,10 @@ export function mount(el) {
     if (d && d.id) {
       const val = Number(d.value);
       if (!Number.isFinite(val)) return;
-      if (d.id === 'ob-age') {
-        draft.profile.age = Math.round(val);
-        if (hrAuto) {
-          draft.profile.hrMax = hrMaxFromAge(draft.profile.age);
-          refreshHrMax();
-        }
-      } else if (d.id === 'ob-weight') {
-        draft.profile.weightKg = val;
+      const wkDay = weekEditorDayOf(d.id);
+      if (wkDay) {
+        draft.schedule.days = { ...draft.schedule.days, [wkDay]: Math.round(val) };
+        refreshPreview();
       } else if (d.id === 'ob-hrmax') {
         draft.profile.hrMax = Math.round(val);
         hrAuto = draft.profile.hrMax === hrMaxFromAge(draft.profile.age);
@@ -761,25 +806,6 @@ export function mount(el) {
     if (d && d.name) {
       const v = d.value;
       switch (d.name) {
-        case 'ob-sex':
-          draft.profile.sex = v === 'f' ? 'f' : 'm';
-          break;
-        case 'ob-wd':
-          draft.schedule.weekdayMinutes = Number(v);
-          refreshPreview();
-          break;
-        case 'ob-thu':
-          draft.schedule.thursdayMinutes = Number(v);
-          refreshPreview();
-          break;
-        case 'ob-wkday':
-          draft.schedule.weekendDay = Number(v) === 7 ? 7 : 6;
-          refreshPreview();
-          break;
-        case 'ob-wkmin':
-          draft.schedule.weekendMinutes = Number(v);
-          refreshPreview();
-          break;
         case 'ob-chat': {
           draft.audio.chattiness = CHAT_DESC[v] ? v : 'normal';
           const desc = stage.querySelector('[data-chat-desc]');
@@ -812,6 +838,18 @@ export function mount(el) {
     const t = e.target;
     if (t.id === 'ob-name') {
       draft.profile.name = t.value.slice(0, 24);
+    } else if (t.id === 'ob-age') {
+      t.value = t.value.replace(/\D/g, '').slice(0, 2);
+      const n = Number(t.value);
+      draft.profile.age = n >= 14 && n <= 90 ? n : null;
+      if (hrAuto) {
+        draft.profile.hrMax = draft.profile.age ? hrMaxFromAge(draft.profile.age) : null;
+        refreshHrMax();
+      }
+    } else if (t.id === 'ob-weight') {
+      t.value = t.value.replace(/\D/g, '').slice(0, 3);
+      const n = Number(t.value);
+      draft.profile.weightKg = n >= 35 && n <= 180 ? n : null;
     } else if (t.id === 'ob-hrrest') {
       t.value = t.value.replace(/\D/g, '').slice(0, 3);
       const n = Number(t.value);

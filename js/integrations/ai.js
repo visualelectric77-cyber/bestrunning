@@ -138,7 +138,7 @@ export function numbersAreGrounded(text, allowed) {
    iPhone → página  notify.status {authorized, enabled} */
 
 const NOTIFY_KEY = 'ritmup.notify';
-export const NOTIFY_DEFAULTS = { enabled: false, weekdayTime: '05:45', weekendTime: '09:00', preRun: true, preRunTime: '06:20', thursdayPreRunTime: '05:55' };
+export const NOTIFY_DEFAULTS = { enabled: false, weekdayTime: '08:00', weekendTime: '09:00', preRun: true, preRunTime: '07:00', thursdayPreRunTime: null };
 
 /** ¿El iPhone sabe programar avisos? */
 export function notifyAvailable() {

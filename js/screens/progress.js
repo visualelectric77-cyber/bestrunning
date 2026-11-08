@@ -821,7 +821,7 @@ function openVo2Sheet() {
       <div class="pg-vsheet__tips">
         <div class="eyebrow">Cómo subirlo</div>
         <div class="pg-tip">${icon('bolt', 16)}<span>Intervalos de 2–4 minutos a ritmo «rápido»: el estímulo más directo.</span></div>
-        <div class="pg-tip">${icon('route', 16)}<span>Sesiones largas y suaves (Z2) los jueves y el finde: construyen la base.</span></div>
+        <div class="pg-tip">${icon('route', 16)}<span>Las sesiones largas y suaves (Z2) son las que construyen la base.</span></div>
         <div class="pg-tip">${icon('gauge', 16)}<span>Haz el Test VAM cuando te toque en el plan (cada 6 semanas) para medir tu mejora real.</span></div>
         <div class="pg-tip">${icon('moon', 16)}<span>Duerme bien y respeta el descanso: ahí es donde tu cuerpo se adapta.</span></div>
       </div>

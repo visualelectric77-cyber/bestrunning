@@ -1145,3 +1145,38 @@
 .hl-stages--dense .hl-stages__stack { gap: 1px; }
 .hl-stages--dense .hl-stages__stack span { border-radius: 2px; }
 .pg-section > .pg-health__foot { margin-top: var(--s-4); }
+
+/* Tu semana: qué días y cuánto (bienvenida y Perfil › Mi semana) */
+.wke { display: grid; gap: 12px; }
+.wke__head { display: flex; align-items: baseline; justify-content: space-between; font-size: var(--fs-sub); }
+.wke__head b { font-weight: 600; }
+.wke__head--time { margin-top: 4px; }
+.wke__link { min-height: 32px; padding: 4px 0 4px 12px; border: 0; background: none; color: var(--accent); font: inherit; font-size: var(--fs-footnote); font-weight: 600; }
+.wke__chips { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.wke__chip { aspect-ratio: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-family: var(--font-display); font-size: 16px; font-weight: 600; transition: background .15s, color .15s; -webkit-tap-highlight-color: transparent; }
+.wke__chip.is-on { background: var(--text); color: var(--bg); }
+.wke__same { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--fs-footnote); color: var(--text-2); }
+.wke__same-row { display: flex; gap: 6px; }
+.wke__same-btn { min-width: 48px; min-height: 36px; padding: 0 10px; border: 0; border-radius: 18px; background: var(--surface-2); color: var(--text); font-family: var(--font-display); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
+.wke__same-btn.is-on { background: var(--text); color: var(--bg); }
+.wke__list { margin: 0; background: transparent; }
+.wke__row { padding-left: 0; padding-right: 0; }
+.wke__note { margin: 0; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); }
+.st-wke { padding: var(--s-4); border-radius: var(--r-card); background: var(--surface-1); margin-bottom: var(--s-4); }
+
+/* Bienvenida: sexo y nivel sin nada marcado de serie */
+.ob-sex { display: flex; gap: 6px; }
+.ob-sex__opt { min-height: 36px; padding: 0 14px; border: 0; border-radius: 18px; background: var(--surface-2); color: var(--text); font: inherit; font-size: var(--fs-sub); font-weight: 500; -webkit-tap-highlight-color: transparent; }
+.ob-sex__opt.is-on { background: var(--text); color: var(--bg); }
+.ob-levels { display: grid; gap: 8px; margin-bottom: 12px; }
+.ob-level { display: grid; gap: 2px; padding: 14px var(--s-4); border: 0; border-radius: var(--r-card); background: var(--surface-1); color: var(--text); text-align: left; font: inherit; -webkit-tap-highlight-color: transparent; }
+.ob-level b { font-weight: 600; font-size: var(--fs-sub); }
+.ob-level small { color: var(--text-2); font-size: var(--fs-footnote); }
+.ob-level.is-on { background: var(--text); color: var(--bg); }
+.ob-level.is-on small { color: inherit; opacity: .7; }
+
+/* Hoy: datos de ejemplo por revisar */
+.td-sample { display: grid; gap: 8px; padding: var(--s-4); }
+.td-sample b { font-weight: 600; }
+.td-sample p { margin: 0; color: var(--text-2); font-size: var(--fs-sub); }
+.td-sample__row { display: flex; gap: 8px; margin-top: 4px; }

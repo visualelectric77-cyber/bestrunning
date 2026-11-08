@@ -8,6 +8,8 @@ import {
 } from '../training/levels.js';
 import { CATEGORIES } from '../training/templates.js';
 import { planWeek, cycleInfo, CYCLE_WEEKS } from '../training/planner.js';
+import { scheduleDays, weekShape } from '../training/week-shape.js';
+import { weekEditorHtml, weekEditorInner, weekEditorTap, weekEditorDayOf } from '../ui/week-editor.js';
 import { APP_VERSION } from '../version.js';
 import { wordmarkSvg } from '../ui/wordmark.js';
 // Registro ligero de escenarios (solo metadatos; NO importar scene3d.js aquí: arrastra three.js)
@@ -261,7 +263,10 @@ function rowSummary(key, s) {
     // De trotar a sprint (las cuatro cifras no caben en un iPhone SE; el detalle está dentro)
     case 'speeds': return `${fmt.speed(lv[LEVEL_KEYS[0]])} – ${fmt.speed(lv[LEVEL_KEYS[LEVEL_KEYS.length - 1]])} km/h`;
     // Días y tiempo total (como «Tu semana tipo»): «L–V 20′ · J 50′» parecía decir que el jueves también era de 20′
-    case 'week': return `6 días · ${fmt.durationLong(((sc.weekdayMinutes ?? 20) * 4 + (sc.thursdayMinutes ?? 50) + (sc.weekendMinutes ?? 50)) * 60)}`;
+    case 'week': {
+      const ws = weekShape(sc);
+      return `${ws.trainDays.length} ${ws.trainDays.length === 1 ? 'día' : 'días'} · ${fmt.durationLong(ws.totalMinutes * 60)}`;
+    }
     case 'treadmill': return `${tm.hasIncline ? 'Inclinación · ' : ''}${fmt.speed(tm.maxSpeed ?? 18)} km/h`;
     case 'display': {
       const v = visualsOf(s);
@@ -494,28 +499,17 @@ function openVamSheet(ctx) {
 
 /* ───────────── MI SEMANA ───────────── */
 
-const minuteOptions = (base, cur) => [...new Set([...base, Number(cur)].filter((v) => Number.isFinite(v) && v > 0))]
-  .sort((a, b) => a - b)
-  .map((v) => ({ value: String(v), label: `${v} min` }));
-
 function weekPreviewHtml(s) {
-  const sc = s.schedule || {};
-  const cats = ['intervals', 'tempo', 'recovery', 'endurance', 'fartlek'];
+  const sc = scheduleDays(s.schedule);
+  const cats = ['intervals', 'tempo', 'recovery', 'endurance', 'fartlek', 'challenge', 'challenge'];
   // Colores reales del plan de esta semana (los mismos que la vista previa del onboarding y «Mi plan»);
   // la lista fija solo queda de reserva si el planificador fallara
   const real = safe(() => planWeek({ ...s, plan: { ...(s.plan || {}), overrides: {} }, history: [] }, mondayOf(todayKey())), null);
   const realCat = (w) => (Array.isArray(real) && real.length === 7 && real[w - 1]?.kind !== 'rest' ? real[w - 1]?.workout?.category : null) || null;
   let total = 0;
   const days = [1, 2, 3, 4, 5, 6, 7].map((w) => {
-    let min = 0;
-    let cat = null;
-    if (w <= 5) {
-      min = w === 4 ? sc.thursdayMinutes ?? 50 : sc.weekdayMinutes ?? 20;
-      cat = realCat(w) || cats[w - 1];
-    } else if (w === (sc.weekendDay === 7 ? 7 : 6)) {
-      min = sc.weekendMinutes ?? 50;
-      cat = realCat(w) || 'challenge';
-    }
+    const min = sc[w] || 0;
+    const cat = min ? realCat(w) || cats[w - 1] : null;
     total += min;
     return `<div class="st-wk__day${min ? '' : ' is-rest'}" style="--h:${clamp(min / 60, 0.08, 1)}" title="${cat ? esc(CATEGORIES?.[cat]?.name || '') : 'Descanso'}">
       <span class="st-wk__bar"></span><b class="num">${min || '·'}</b><span>${fmt.weekdayShort(w)}</span>
@@ -556,19 +550,14 @@ function notifyHtml() {
       ${time('st-ntf-wd', 'De lunes a viernes', '', c.weekdayTime)}
       ${time('st-ntf-we', 'Fin de semana', '', c.weekendTime)}
       ${toggleRow('st-ntf-pre', 'Antes de correr', '«En 5 min corres» con tu clase', c.preRun)}
-      ${time('st-ntf-pre-t', 'Lunes a miércoles y viernes', 'Al salir de pesas', c.preRunTime)}
-      ${time('st-ntf-thu', 'Jueves', 'Tu sesión larga', c.thursdayPreRunTime)}
+      ${time('st-ntf-pre-t', c.thursdayPreRunTime ? 'El resto de días' : 'A qué hora', '', c.preRunTime)}
+      ${c.thursdayPreRunTime ? time('st-ntf-thu', 'Jueves', '', c.thursdayPreRunTime) : ''}
     `, 'Tu iPhone mira de madrugada lo que midió el reloj mientras dormías (pulso en reposo, VFC, temperatura y respiración). Todo se calcula en el iPhone.');
 }
 
 function weekHtml(s) {
   const sc = s.schedule || {};
-  return `${group('Duración de tus sesiones', `
-      ${segRow('Lunes, martes, miércoles y viernes', 'Sesiones cortas y variadas', 'st-wd-min', minuteOptions([15, 20, 25, 30], sc.weekdayMinutes ?? 20), sc.weekdayMinutes ?? 20)}
-      ${segRow('Jueves', 'Tu sesión larga entre semana', 'st-thu-min', minuteOptions([45, 50, 55, 60], sc.thursdayMinutes ?? 50), sc.thursdayMinutes ?? 50)}
-      ${segRow('Día largo del finde', 'El otro día es descanso', 'st-we-day', [{ value: '6', label: 'Sábado' }, { value: '7', label: 'Domingo' }], sc.weekendDay === 7 ? 7 : 6)}
-      ${segRow('Duración del finde', '', 'st-we-min', minuteOptions([45, 50, 55, 60], sc.weekendMinutes ?? 50), sc.weekendMinutes ?? 50)}
-    `)}
+  return `<section class="st-group st-wke">${weekEditorHtml(scheduleDays(sc))}</section>
     <section class="card st-wkcard" data-weekprev>${weekPreviewHtml(s)}</section>
     ${notifyAvailable() ? notifyHtml() : ''}
     ${group('Recordatorio', `
@@ -2720,13 +2709,15 @@ const PAGES = {
   week: {
     render: weekHtml,
     handle(id, v, ctx) {
-      const n = Number(v);
-      const map = { 'st-wd-min': 'weekdayMinutes', 'st-thu-min': 'thursdayMinutes', 'st-we-min': 'weekendMinutes', 'st-we-day': 'weekendDay' };
-      if (map[id] && Number.isFinite(n)) {
+      const dayOf = weekEditorDayOf(id);
+      if (dayOf && Number(v) > 0) {
         haptic('selection');
-        ctx.save((d) => { d.schedule[map[id]] = id === 'st-we-day' ? (n === 7 ? 7 : 6) : n; });
+        const days = { ...scheduleDays(getState().schedule), [dayOf]: Math.round(Number(v)) };
+        ctx.save((d) => { d.schedule.days = days; });
         const host = ctx.body.querySelector('[data-weekprev]');
         if (host) host.innerHTML = weekPreviewHtml(getState());
+        const wke = ctx.body.querySelector('[data-wke]');
+        if (wke) wke.querySelectorAll('.wke__same-btn').forEach((b) => b.classList.toggle('is-on', Object.values(days).filter(Boolean).every((m) => m === Number(b.dataset.wkeSame))));
       } else if (id === 'st-reminder' && /^\d{2}:\d{2}/.test(String(v))) {
         ctx.save((d) => { d.schedule.reminderTime = String(v).slice(0, 5); });
       } else if (id === 'st-ntf-on' || id === 'st-ntf-pre') {
@@ -2738,6 +2729,17 @@ const PAGES = {
       }
     },
     async action(name, el, ctx) {
+      if (name === 'wke') {
+        const days = weekEditorTap(el, scheduleDays(getState().schedule));
+        if (!days) return;
+        haptic('selection');
+        ctx.save((d) => { d.schedule.days = days; });
+        const wke = ctx.body.querySelector('[data-wke]');
+        if (wke) wke.innerHTML = weekEditorInner(days);
+        const host = ctx.body.querySelector('[data-weekprev]');
+        if (host) host.innerHTML = weekPreviewHtml(getState());
+        return;
+      }
       if (name !== 'reset-cycle') return;
       const ok = await confirmDialog({
         title: '¿Reiniciar el ciclo?',
