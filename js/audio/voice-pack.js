@@ -60,6 +60,14 @@ const GROUPS = {
   hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
   hrok: ['Pulso perfecto. Mantén este ritmo.', 'Vas en tu zona. Muy bien.'],
   hron: ['Hoy te guío por tu pulso.'],
+  // Test VAM asistido (js/training/vam-assist.js): cómo vas; las velocidades del test nunca cambian
+  vamsafe: ['Si notas dolor en el pecho o mareo, para enseguida.'],
+  vamhigh: ['Hoy tu pulso va alto. La prueba puede salir peor de lo normal.'],
+  vammargin: ['Vas con margen. Sigue.'],
+  vamnear: ['Estás cerca de tu máximo. Aguanta lo que puedas.'],
+  vamplateau: ['Tu pulso ya no sube. Estás en tu límite.'],
+  vamover: ['Has pasado tu máximo. Si no te encuentras bien, para ya.'],
+  vamodd: ['Tu pulso ha caído de golpe. Si te notas mal, para ya.'],
   // Inclinación (cintas con cuesta): portadoras seguidas del porcentaje («Uno por ciento.» … «Doce por ciento.»)
   inclup: ['¡Atención! Sube la inclinación al…', 'Viene cuesta. Inclinación al…'],
   incldown: ['Atento, baja la inclinación al…'],

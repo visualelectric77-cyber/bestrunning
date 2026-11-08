@@ -1414,6 +1414,12 @@ export function createCoach(workout, settings = {}) {
         if (!ids.length) return Promise.resolve();
         return go(packItem(kind, [ids[Math.floor(Math.random() * ids.length)]], 1));
       }
+      case 'vamAssist': {
+        // Test VAM asistido: una frase grabada, una vez; las de seguridad pasan por delante de los ánimos
+        const id = `vam${String(v.cue || '')}_1`;
+        if (!avail.has(id)) return Promise.resolve();
+        return go(packItem(kind, [id], v.cue === 'over' || v.cue === 'odd' || v.cue === 'safe' ? 3 : 2));
+      }
       case 'adjust': {
         // "Once coma seis." confirma el ajuste
         const s = speedOf(v.speed);

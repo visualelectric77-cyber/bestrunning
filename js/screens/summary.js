@@ -12,6 +12,7 @@ import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, t
 import { haptic } from '../core/haptics.js';
 import { workoutFromId } from '../training/generator.js';
 import { applyFeedback, evaluateTest, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
+import { vamValidity } from '../training/vam-assist.js';
 import { evaluateAchievements } from '../training/achievements.js';
 import { traceCursorSec, skippedRanges } from '../training/stats.js';
 import { sessionMusicHtml, hydrateSessionMusic } from '../integrations/session-music.js';
@@ -330,6 +331,22 @@ export function mount(el, { params = {} } = {}) {
     const vo2 = res?.vo2max ?? estimateVo2max(vam);
     const lv = res?.levels || null;
     const delta = res?.deltaVam;
+    const prof = st?.profile || {};
+    const curMax = prof.hrMax || hrMaxFromAge(prof.age || 46);
+    let check = null;
+    try { check = vamValidity(s, { hrMax: curMax, prevDelta: evaluateTest(s, st)?.deltaVam || 0 }); } catch { check = null; }
+    const doubtful = check?.verdict === 'doubtful';
+    const pending = !s.feeling;
+    const applyOn = !!(draft?.vamApply || s.vamAssist?.applyAnyway);
+    const checkHtml = !check || check.verdict === 'unknown' ? (check?.reasons?.[0] ? `<p class="muted sm-note">${esc(check.reasons[0])}</p>` : '') : `
+        <div class="sm-test__check ${doubtful ? 'is-doubt' : 'is-ok'}">
+          <b>${icon(doubtful ? 'info' : 'check', 15)}${doubtful ? 'Test dudoso' : 'Test válido'}</b>
+          ${check.peak ? `<span class="num">Pulso máximo ${check.peak} ppm · ${Math.round(check.peakPct * 100)} % de tu FC máx.${check.plateau ? ' · llegó a estabilizarse' : ''}</span>` : ''}
+          ${check.reasons.map((r) => `<p>${esc(r)}</p>`).join('')}
+          ${doubtful && pending ? `<button type="button" class="btn btn--ghost sm-test__btn" data-act="vam-apply" aria-pressed="${applyOn}">${applyOn ? 'Se actualizarán mis velocidades' : 'Actualizar mis velocidades igualmente'}</button>` : ''}
+          ${check.suggestHrMax && !draft?.vamMaxSaved ? `<button type="button" class="btn btn--ghost sm-test__btn" data-act="vam-hrmax" data-v="${check.suggestHrMax}">Usar ${check.suggestHrMax} como mi FC máxima</button>` : ''}
+        </div>`;
+    const showLevels = lv && pending && (!doubtful || applyOn);
     return `
       <section class="card sm-card sm-test" style="--i:2">
         <div class="sm-card__head"><span class="sm-card__title">Resultado del test</span></div>
@@ -338,7 +355,8 @@ export function mount(el, { params = {} } = {}) {
           <div class="sm-test__big sm-test__big--alt"><span class="num">${fmt.dec1(vo2)}</span><small>ml/kg/min</small><em>VO₂máx est.</em></div>
         </div>
         ${Number.isFinite(delta) && delta !== 0 ? `<p class="sm-test__delta ${delta > 0 ? 'is-up' : 'is-down'}">${icon(delta > 0 ? 'arrow-up' : 'arrow-down', 14)}${delta > 0 ? '+' : '−'}${fmt.speed(Math.abs(delta))} km/h respecto al anterior</p>` : ''}
-        ${lv && !s.feeling ? `
+        ${checkHtml}
+        ${showLevels ? `
           <div class="sm-test__levels">
             ${LEVEL_KEYS.map((k) => `<div class="sm-test__lv" style="--zc:${zoneColor(k)}"><span>${esc(ZONES[k].short)}</span><b class="num">${fmt.speed(lv[k])}</b></div>`).join('')}
           </div>
@@ -756,6 +774,17 @@ export function mount(el, { params = {} } = {}) {
       else if (act === 'hr-paste') { haptic('light'); openHrSheet(); }
       else if (act === 'hr-remove') onHrRemove();
       else if (act === 'cancel-edit') { editing = false; draft = null; render(); }
+      else if (act === 'vam-apply') { if (draft) { draft.vamApply = !draft.vamApply; haptic('light'); render(); } }
+      else if (act === 'vam-hrmax') {
+        const v = Number(b.dataset.v);
+        if (v >= 120 && v <= 230) {
+          setState((d) => { if (d.profile) d.profile.hrMax = v; });
+          if (draft) draft.vamMaxSaved = true;
+          diagMark('fcmax.test', { a: v });
+          toast(`Tu FC máxima es ahora ${v} ppm: hemos ajustado tus zonas de pulso`, { icon: 'heart', duration: 5200 });
+          render();
+        }
+      }
     });
     root.querySelectorAll('[data-hr]').forEach((inp) => {
       inp.addEventListener('input', () => {
@@ -871,6 +900,7 @@ export function mount(el, { params = {} } = {}) {
     const { hrAvg, hrMax } = readHr();
     const notes = (draft.notes || '').trim();
     const updated = { ...ses, feeling: draft.feeling, rpe, hrAvg, hrMax, notes };
+    if (ses.isTest && ses.vamAssist && draft.vamApply) updated.vamAssist = { ...ses.vamAssist, applyAnyway: true };
 
     let fb = null;
     try { fb = applyFeedback(st, updated, { feeling: draft.feeling, rpe }); } catch { fb = null; }

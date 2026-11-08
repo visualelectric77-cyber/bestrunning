@@ -23,6 +23,7 @@ import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } f
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
 import { calibrateClass, nextSpeed, liveSpeed, pulseTrend, dynModelFrom } from '../training/hr-control.js';
+import { createVamAssist, vamPreCheck, VAM_TEXT } from '../training/vam-assist.js';
 import { createTracker, hrAfter } from '../training/hr-dynamics.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
@@ -283,6 +284,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let refs = {};
   // Lo que ha movido el modo pulso en esta clase, por zona (se guarda como hrCoachAdj: no cuenta como ajuste tuyo)
   const hrCoachAdj = {};
+  let vamView = null;         // test VAM: { st, pct } para el bloque de pulso
+  let vamDayHigh = false;
   const cache = {};
   let muted = false;
   let locked = false;
@@ -451,6 +454,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try {
       dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
     } catch { dynModel = null; }
+  }
+  // Test VAM: el modelo solo sirve para detectar en el calentamiento si hoy tu pulso va alto; nunca toca una velocidad
+  let vamModel = null;
+  if (workout.isTest) {
+    try {
+      vamModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
+    } catch { vamModel = null; }
   }
   if (dynModel && !snap && !workout.race) {
     try {
@@ -657,6 +667,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
         : { ic: 'speaker', html: `Sube el volumen y <b>quita el modo silencio</b>: con tu música, la voz del coach lo respeta` },
       workout.isTest
         ? { ic: 'target', html: 'Aguanta cada escalón y pulsa <b>No puedo más</b> cuando llegues al límite' } : null,
+      workout.isTest
+        ? { ic: 'heart', html: 'Para si notas <b>dolor en el pecho, mareo o palpitaciones</b>, marque lo que marque el pulso' } : null,
+      workout.isTest && vamPreCheck(st.history, todayKey()).hardYesterday
+        ? { ic: 'info', html: 'Ayer entrenaste fuerte: <b>hoy el test puede salir peor</b>. Mejor si llegas descansado' } : null,
     ].filter(Boolean);
 
     el.innerHTML = `
@@ -2938,7 +2952,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         } catch { /* sin predicción */ }
       }
     } else if (bpm) st = 'in';
-    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}`;
+    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}|${vamView?.st || ''}|${vamView ? Math.round((vamView.pct || 0) * 100) : ''}`;
     if (cache.pulseKey === key) return;
     cache.pulseKey = key;
     // el escenario (Modo visión) late con tu pulso y se tiñe de la zona si vas en ella
@@ -2957,6 +2971,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const d = target && bpm ? (st === 'high' ? bpm - target.max : st === 'low' ? target.min - bpm : 0) : 0;
     setText('pulseSt', st === 'wait' ? 'Esperando al reloj' : st === 'rising' ? `Subiendo · ~${pred}` : st === 'falling' ? `Bajando · ~${pred}`
       : st === 'high' ? `Alto · +${d}` : st === 'low' ? `Bajo · −${d}` : 'En zona');
+    // Test VAM: durante los escalones no hay zona objetivo; se ve cuánto te queda hasta tu máximo
+    if (vamView) {
+      box.dataset.st = vamView.st === 'margin' ? 'in' : vamView.st === 'wait' ? 'wait' : 'high';
+      setText('pulseObj', vamView.pct ? `${Math.round(vamView.pct * 100)} % de tu FC máx.` : '');
+      setText('pulseSt', VAM_TEXT[vamView.st] || '');
+    }
   }
 
   /** «Siguiente» del lower third (también tras un ajuste de velocidad, que puede cambiar el tramo siguiente). */
@@ -3359,6 +3379,46 @@ export function mount(el, { params = {}, query = {} } = {}) {
       : `Vas a acabar a ${r.predicted} ppm, por debajo de tu zona: subimos ${fmt.speed(applied / 10)} km/h`, { icon: 'heart', duration: 4500 });
   }
 
+  /** Test VAM: aviso de seguridad al empezar, día alto al acabar el calentamiento y cómo vas en cada escalón. */
+  function vamTick(st, s, now) {
+    if (s.status !== 'running') return;
+    const live = liveHr();
+    const fresh = live && Number(live.bpm) >= 40 && now - (Number(live.at) || 0) <= 15000 && live.at !== st.vamAt;
+    if (fresh) st.vamAt = live.at;
+    const bpm = fresh ? Number(live.bpm) : null;
+    const seg = s.segment;
+    if (!st.vamAssist) {
+      const p = getState().profile || {};
+      st.vamAssist = createVamAssist({ hrMax: p.hrMax || hrMaxFromAge(p.age || 46) });
+    }
+    if (!st.vamSafe && s.totalElapsed >= 40) { st.vamSafe = true; coachCall('say', 'vamAssist', { cue: 'safe' }); }
+    if (!s.inTestStage) {
+      if (vamView) { vamView = null; cache.pulseKey = ''; }
+      if (vamModel && seg) {
+        if (!st.vamTr) { st.vamTr = createTracker(vamModel); st.vamLoad = 0; st.vamPos = s.totalElapsed; }
+        const dt = Math.max(0, s.totalElapsed - st.vamPos);
+        st.vamPos = s.totalElapsed;
+        st.vamLoad += (Math.max(0, (s.currentSpeed || 0) - 8.5) * dt) / 60;
+        st.vamTr.step(s.totalElapsed, s.currentSpeed || seg.speed, Number(seg.incline) || 0, st.vamLoad, bpm);
+        if (!st.vamHighSaid && st.vamTr.highDay && Number(s.nextSegment?.stage) === 1 && s.segRemaining <= 25) {
+          st.vamHighSaid = true;
+          vamDayHigh = true;
+          diagMark('vam.diaalto', { ppm: Math.round(st.vamTr.bias) });
+          coachCall('say', 'vamAssist', { cue: 'high' });
+          notify('Hoy tu pulso va alto: el test puede salir peor. Puedes dejarlo para otro día', { icon: 'heart', duration: 8000 });
+        }
+      }
+      return;
+    }
+    const r = st.vamAssist.step(s.totalElapsed, bpm, Number(seg?.stage) || 0);
+    vamView = { st: r.st, pct: r.pct };
+    if (r.cue) {
+      diagMark('vam.aviso', { cue: r.cue, pct: Math.round((r.pct || 0) * 100) });
+      coachCall('say', 'vamAssist', { cue: r.cue });
+      if (r.cue === 'over' || r.cue === 'odd') timerHaptic('warning');
+    }
+  }
+
   function hrCoachTick(s) {
     const st = hrCoachTick.st || (hrCoachTick.st = { coach: createHrCoach(), last: 0, model: undefined, buf: [], highSince: 0, warned: false });
     const now = Date.now();
@@ -3367,6 +3427,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { fatigueCheck(st, s, now); } catch { /* nada */ }
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
+    // Test VAM: asistencia por pulso, pero ninguna velocidad cambia (ni en el calentamiento)
+    if (workout.isTest) { if (engine && !countingDown) { try { vamTick(st, s, now); } catch (err) { reportOnce(err); } } return; }
     if (off || !engine || countingDown || s.inTestStage) return;
     if (dynModel) { try { dynTick(st, s, now); } catch (err) { reportOnce(err); } } else {
       try { recoveryCheck(st, s, now); } catch (err) { reportOnce(err); }
@@ -3923,6 +3985,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
     session.music = { tracks: playedTracks(s.totalElapsed) };
     const coachAdj = Object.fromEntries(Object.entries(hrCoachAdj).filter(([, v]) => v));
     if (Object.keys(coachAdj).length) session.hrCoachAdj = coachAdj;
+    if (workout.isTest) {
+      let stageStart = 0;
+      for (const g of workout.segments) { if (Number(g.stage) > 0) break; stageStart += Number(g.sec) || 0; }
+      session.vamAssist = { stageStart, dayHigh: vamDayHigh };
+    }
     // Carrera en la cinta: tu tiempo oficial (de la salida a la meta) para el resumen y tu historial
     if (raceResult) session.race = { ...raceResult };
     // Fin anticipado, tiempo saltado, rangos saltados y línea de tiempo (progresión, perfil «Real» y pulso del Watch)

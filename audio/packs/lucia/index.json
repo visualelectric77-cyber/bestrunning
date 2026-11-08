@@ -286,6 +286,13 @@
   "pct_9",
   "pct_10",
   "pct_11",
-  "pct_12"
+  "pct_12",
+  "vamsafe_1",
+  "vamhigh_1",
+  "vammargin_1",
+  "vamnear_1",
+  "vamplateau_1",
+  "vamover_1",
+  "vamodd_1"
  ]
 }

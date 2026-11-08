@@ -1606,6 +1606,14 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-adj b { color: var(--text); font-weight: 600; }
 
 /* Test */
+.sm-test__check { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 12px; background: var(--fill-2, rgba(255,255,255,0.06)); }
+.sm-test__check b { display: inline-flex; align-items: center; gap: 6px; font: 700 var(--fs-sub)/1.2 var(--font); }
+.sm-test__check.is-ok b { color: var(--ok); }
+.sm-test__check.is-doubt b { color: #ff9f0a; }
+.sm-test__check span { font: 500 var(--fs-footnote, 13px)/1.3 var(--font); color: var(--text-2); }
+.sm-test__check p { margin: 0; font: 500 var(--fs-footnote, 13px)/1.35 var(--font); color: var(--text-2); }
+.sm-test__btn { align-self: flex-start; margin-top: 4px; min-height: 44px; }
+.sm-test__btn[aria-pressed="true"] { color: var(--ok); }
 .sm-test__row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sm-test__row > .sm-test__big + .sm-test__big { padding-left: var(--s-4); border-left: var(--hairline) solid var(--sep); }
 .sm-test__big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }

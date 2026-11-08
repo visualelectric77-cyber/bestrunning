@@ -3,6 +3,7 @@
 // Con pulso del Apple Watch (SPEC §12): a la misma velocidad, ≥ 4 ppm menos que la media de las 3 sesiones
 // anteriores comparables cuenta como «muy fácil» para ese nivel; > 92 % de la FC máx. sostenido en tramos de
 // correr bloquea las subidas de esa sesión.
+import { vamValidity } from './vam-assist.js';
 import { clamp, todayKey, addDays, daysBetween, weekdayOf, hashStr, makeRng, fmt, parseKey, DAY_MS } from '../core/utils.js';
 import {
   ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category,
@@ -172,6 +173,12 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
     const res = evaluateTest(session, st);
     if (!(res.vam > 0) || !res.levels) {
       return { levels: levels0, changes: [], progression: p, message: 'No hemos podido calcular tu VAM en este test. Repítelo cuando estés descansado.' };
+    }
+    // Resultado dudoso según tu pulso: tus velocidades no cambian salvo que digas lo contrario en el resumen
+    const hrMaxNow = num(st.profile?.hrMax) || hrMaxFromAge(num(st.profile?.age) || 46);
+    const check = vamValidity(session, { hrMax: hrMaxNow, prevDelta: res.deltaVam || 0 });
+    if (check.verdict === 'doubtful' && !session.vamAssist?.applyAnyway) {
+      return { levels: levels0, changes: [], progression: p, message: `Tu VAM ha salido ${fmt.speed(res.vam)} km/h, pero el test es dudoso: tus velocidades no cambian.` };
     }
     const changes = LEVEL_KEYS.filter((k) => res.levels[k] !== levels0[k])
       .map((k) => ({ level: k, from: levels0[k], to: res.levels[k], reason: 'test' }));
