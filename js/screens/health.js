@@ -81,7 +81,7 @@ function fitnessWaiting(f) {
 
 function watchStats({ v, rc }) {
   const out = [];
-  if (v) out.push(stat('VO₂ máx', fmt.dec1(v.last), '', v.change != null ? `${v.change > 0 ? '+' : v.change < 0 ? '−' : '±'}${fmt.dec1(Math.abs(v.change))} en ${v.weeks} sem.` : 'del Apple Watch', v.change > 0 ? 'is-ok' : ''));
+  if (v) out.push(stat('VO₂ máx · Watch', fmt.dec1(v.last), '', v.change != null ? `${v.change > 0 ? '+' : v.change < 0 ? '−' : '±'}${fmt.dec1(Math.abs(v.change))} en ${v.weeks} sem.` : 'del Apple Watch', v.change > 0 ? 'is-ok' : ''));
   if (rc) out.push(stat('Recuperación 1 min', `−${fmt.int(rc.now)}`, 'ppm', rc.before != null ? `antes −${fmt.int(rc.before)}` : 'al acabar', rc.before != null && rc.now > rc.before ? 'is-ok' : ''));
   return out.length ? `<div class="hl-stats hl-stats--${out.length}">${out.join('')}</div>` : '';
 }

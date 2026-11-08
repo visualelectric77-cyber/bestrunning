@@ -452,7 +452,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let dynChanges = [];
   if (!workout.isTest) {
     try {
-      dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
+      dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments, { profile: state.profile });
     } catch { dynModel = null; }
   }
   // Test VAM: el modelo solo sirve para detectar en el calentamiento si hoy tu pulso va alto; nunca toca una velocidad
@@ -462,7 +462,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       vamModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
     } catch { vamModel = null; }
   }
-  if (dynModel && !snap && !workout.race) {
+  if (dynModel && !dynModel.starter && !snap && !workout.race) {
     try {
       const res = calibrateClass(dynModel, dynModel.aTypical, workout.segments, (x) => segHrTarget(x), {
         minSpeed: state.treadmill?.minSpeed ?? 1, maxSpeed: state.treadmill?.maxSpeed ?? 20,
@@ -3336,7 +3336,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       try { target = segHrTarget(nx); } catch { target = null; }
       const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, s.currentSpeed || seg.speed, incl, st.load);
       const v = nextSpeed(dynModel, tr.forecastA, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay: tr.highDay, ...lims });
-      if (v != null && engine.setSegmentSpeed?.(s.segIndex + 1, v)) {
+      // Con el modelo inicial (tu primera clase con pulso) solo se baja: aún no sabemos lo bastante para pedirte más
+      if (v != null && !(dynModel.starter && v > nx.speed) && engine.setSegmentSpeed?.(s.segIndex + 1, v)) {
         diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a), alto: tr.highDay ? 1 : 0 });
         renderNext(engine.getState());
         renderProfile();
@@ -3363,7 +3364,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const r = liveSpeed(dynModel, tr.forecastA, {
       seg, hrNow: tr.hr, remaining: s.segRemaining, speed: s.currentSpeed || seg.speed, load: st.load, target, ...lims,
     });
-    if (!r) return;
+    if (!r || (dynModel.starter && r.speed > (s.currentSpeed || seg.speed))) return;
     st.dynLast = now;
     const cur = s.currentSpeed || seg.speed;
     const dir = r.speed < cur ? -1 : 1;

@@ -6,7 +6,7 @@
 // 3. En la pantalla: si vas por debajo pero vas a llegar a la zona antes de acabar el tramo, «Subiendo», no «Bajo».
 // Siempre con límites: antes de la clase −0,6 / +0,3 km/h sobre lo planeado, en directo hasta −0,8; los arreones
 // cortos (rápido o sprint de < 3 min) se definen por velocidad y nunca se suben por pulso.
-import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, HR_DT } from './hr-dynamics.js';
+import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, starterModel, HR_DT } from './hr-dynamics.js';
 
 const WORK = new Set(['jog', 'run', 'fast']);
 const RANK = { walk: 0, warmup: 1, cooldown: 1, jog: 2, run: 3, fast: 4, sprint: 5 };
@@ -140,15 +140,21 @@ export function pulseTrend(model, a, { hrNow, remaining, speed, incline = 0, loa
 /**
  * Modelo de tu pulso a partir del historial (las 20 últimas clases con pulso de los últimos 60 días; sin tests).
  * segmentsFor(session) → tramos de esa clase (para la inclinación) o null. Se guarda en caché mientras no haya clases
- * nuevas. → modelo o null (hacen falta 2 clases con pulso).
+ * nuevas. → modelo o null (hacen falta 2 clases con pulso; con `profile`, basta 1: modelo inicial, ver starterModel).
  */
 const CACHE_KEY = 'ritmup.hrdyn.v1';
-export function dynModelFrom(history, segmentsFor, { now = Date.now(), storage = globalThis.localStorage } = {}) {
+export function dynModelFrom(history, segmentsFor, { now = Date.now(), storage = globalThis.localStorage, profile = null } = {}) {
   const since = now - 60 * 86400000;
   const list = (Array.isArray(history) ? history : [])
     .filter((h) => h && !h.isTest && Array.isArray(h.hrSeries) && h.hrSeries.length >= 30 && !(Number(h.skippedSec) > 600)
       && !(Date.parse(h.startedAt || '') < since))
     .slice(-20);
+  if (list.length === 1 && profile) {
+    let segs = null;
+    try { segs = segmentsFor ? segmentsFor(list[0]) : null; } catch { segs = null; }
+    const inp = classInputs(list[0], segs);
+    return inp ? starterModel(inp, profile) : null;
+  }
   if (list.length < 2) return null;
   const key = `${list.length}|${list[list.length - 1].id}|${list[0].id}`;
   try {
@@ -164,7 +170,7 @@ export function dynModelFrom(history, segmentsFor, { now = Date.now(), storage =
   }
   const model = fitHrDynamics(cls);
   if (!model) return null;
-  const slim = { b: model.b, c: model.c, d: model.d, tauUp: model.tauUp, tauDown: model.tauDown, aTypical: model.aTypical, rmse: model.rmse, classes: model.classes };
+  const slim = { b: model.b, c: model.c, d: model.d, tauUp: model.tauUp, tauDown: model.tauDown, aTypical: model.aTypical, aSpread: model.aSpread, rmse: model.rmse, classes: model.classes };
   try { storage?.setItem(CACHE_KEY, JSON.stringify({ key, model: slim })); } catch { /* lleno */ }
   return slim;
 }

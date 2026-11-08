@@ -154,5 +154,25 @@ const tgt = (s) => ({ jog: z2, run: z3, fast: z4 }[s.zone] || { min: 120, max: 1
   ok(nextSpeed(m9, a, { cur: run, next: { ...hill, incline: 0 }, hrEnd: 120, load: 0, target: z4, highDay: true }) === null, 'un arreón llano se define por velocidad: no baja por día alto');
 }
 
+// 10 · Para cualquier usuario: dispersión propia y modelo inicial tras la primera clase
+{
+  const spread = fitHrDynamics(cls);
+  ok(spread.aSpread >= 0, `dispersión de tu día a día (${spread.aSpread.toFixed(1)})`);
+  const steady = { ...TRUE, aTypical: 45, aSpread: 2 };
+  const wild = { ...TRUE, aTypical: 45, aSpread: 6 };
+  const feed = (mod, ex) => { const tr = createTracker(mod); let hr = 110; for (let t = 0; t <= 420; t += 5) { const x = equilibrium(mod, 45 + ex, 9, 0, 0); hr += (x - hr) * (1 - Math.exp(-5 / mod.tauUp)); tr.step(t, 9, 0, 0, hr); } return tr; };
+  ok(feed(steady, 8).highDay, 'quien varía poco: +8 ya es día alto');
+  ok(!feed(wild, 8).highDay, 'quien varía mucho: +8 entra en lo suyo');
+  ok(feed(wild, 12).highDay, 'quien varía mucho: +12 sí es día alto');
+  const one = fakes.slice(0, 1).map((f, i) => ({ ...f.sess, startedAt: new Date(Date.now() - 86400000).toISOString() }));
+  const st = dynModelFrom(one, () => fakes[0].segs, { storage: null, profile: { hrMax: 176, hrRest: 65 } });
+  ok(st?.starter && near(st.aTypical, 44, 7) && st.b > 8, `primera clase: modelo inicial (a ${st?.aTypical?.toFixed(1)})`);
+  ok(dynModelFrom(one, () => fakes[0].segs, { storage: null }) === null, 'sin perfil, como antes');
+  const trS = createTracker({ ...st });
+  let h = 110;
+  for (let t = 0; t <= 420; t += 5) { h += (175 - h) * 0.05; trS.step(t, 9, 0, 0, h); }
+  ok(!trS.highDay && trS.forecastA === trS.a, 'el modelo inicial no decide días altos');
+}
+
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ modelo de tu pulso: ${n} comprobaciones`);
 process.exit(bad ? 1 : 0);

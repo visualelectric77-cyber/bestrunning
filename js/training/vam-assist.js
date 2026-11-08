@@ -131,3 +131,8 @@ export function vamValidity(session, { hrMax, prevDelta = 0 } = {}) {
   const m = Math.round(peak);
   return { verdict, reasons, peak: m, peakPct, plateau, stages, suggestHrMax: verdict === 'valid' && plateau && m <= max - 3 ? m : null };
 }
+
+/** ¿Este resultado debe quedarse sin aplicar? Dudoso y sin que hayas pedido actualizar tus velocidades igualmente. */
+export function vamHoldsLevels(check, session) {
+  return check?.verdict === 'doubtful' && !session?.vamAssist?.applyAnyway;
+}

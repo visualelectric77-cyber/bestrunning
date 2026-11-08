@@ -185,7 +185,36 @@ export function fitHrDynamics(classes, { taus = TAUS } = {}) {
   const aTypical = recent[Math.floor(recent.length / 2)];
   const aMap = {};
   cls.forEach((c, i) => { aMap[c.id] = best.a[i]; });
-  return { ...best.m, a: aMap, aTypical, rmse: best.rmse, n: best.n, classes: cls.length };
+  // cuánto varía tu pulso de un día a otro (mediana de las desviaciones, robusta a los días raros): marca qué es «día alto»
+  let aSpread = 0;
+  if (best.a.length >= 5) {
+    const sorted = [...best.a].sort((x, y) => x - y);
+    const med = sorted[sorted.length >> 1];
+    const dev = sorted.map((x) => Math.abs(x - med)).sort((x, y) => x - y);
+    aSpread = dev[dev.length >> 1] * 1.4826;
+  }
+  return { ...best.m, a: aMap, aTypical, aSpread, rmse: best.rmse, n: best.n, classes: cls.length };
+}
+
+/**
+ * Modelo inicial tras tu PRIMERA clase con pulso: la respuesta típica (escalada a tu reserva de pulso) y tu a medido en
+ * la segunda mitad de esa clase. Probado con clases reales: predice el pulso a 60 s casi igual que el modelo completo
+ * (2,8 ppm de error frente a 2,8; sin modelo, 5,4) y da igual si la pendiente típica se desvía entre 8 y 12.
+ * `starter`: sirve para seguir tu pulso y bajar si hace falta; no ajusta la clase de antemano ni detecta días altos.
+ */
+export function starterModel(inp, profile = {}) {
+  const hrMax = Number(profile?.hrMax) > 0 ? Number(profile.hrMax) : 220 - (Number(profile?.age) || 46);
+  const rest = Number(profile?.hrRest) > 0 ? Number(profile.hrRest) : 65;
+  const b = 9.9 * Math.max(0.6, Math.min(1.4, (hrMax - rest) / 111));
+  const m = { b, c: 0.45 * b, d: 0.37, tauUp: 90, tauDown: 110 };
+  let sum = 0;
+  let n = 0;
+  for (let i = Math.floor(inp.t.length / 2); i < inp.t.length; i++) {
+    if (inp.hr[i] == null) continue;
+    sum += inp.hr[i] - m.b * inp.v[i] - m.c * inp.g[i] - m.d * inp.load[i];
+    n++;
+  }
+  return n >= 12 ? { ...m, aTypical: sum / n, aSpread: 0, starter: true, classes: 1 } : null;
 }
 
 /**
@@ -197,8 +226,8 @@ export function fitHrDynamics(classes, { taus = TAUS } = {}) {
  * (1 y 8 nov: +7 al principio, +15 al final; en las otras 15 clases el seguidor no pasó de +4 a los 5 min) casi se
  * duplica. `forecastA` es el a con el que conviene decidir los tramos que vienen; en un día normal es igual que `a`.
  */
-const HIGH_ON = 6;
-const HIGH_OFF = 3;
+const HIGH_ON = 6;          // ppm; quien varía mucho de un día a otro necesita más para que sea «alto» (1,5 × su dispersión)
+const HIGH_ON_MAX = 10;
 const HIGH_FROM = 180;      // s desde la primera lectura
 const FORECAST_K = 1.8;
 const FORECAST_MAX = 15;
@@ -211,6 +240,7 @@ export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, ga
   let firstT = null;
   let high = false;
   let seen = 0;
+  const highOn = Math.min(HIGH_ON_MAX, Math.max(HIGH_ON, 1.5 * (Number(model?.aSpread) || 0)));
   return {
     get a() { return a0 + bias; },
     get hr() { return obs; },
@@ -232,9 +262,9 @@ export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, ga
         const w = seen < fastReadings ? fastGain : gain;
         bias += w * ((hr - core) - bias);
         seen++;
-        if (t - firstT >= HIGH_FROM) {
-          if (!high && bias >= HIGH_ON) high = true;
-          else if (high && bias < HIGH_OFF) high = false;
+        if (!model?.starter && t - firstT >= HIGH_FROM) {
+          if (!high && bias >= highOn) high = true;
+          else if (high && bias < highOn / 2) high = false;
         }
       }
     },

@@ -13,6 +13,7 @@ import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integ
 import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integrations/session-music.js';
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics, fetchHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
+import { vo2Trend } from '../training/health-analysis.js';
 import { weekReportInput } from '../training/week-report.js';
 import { healthTab } from './health.js';
 
@@ -470,7 +471,12 @@ function vo2Data(s) {
   const sex = s.profile?.sex === 'f' ? 'f' : 'm';
   const cat = safe(() => vo2Category(vo2, age, sex), null) || { tier: 2, label: 'Bueno', thresholds: [34, 39, 44, 49] };
   const t = cat.thresholds;
-  return { vam, vo2, age, sex, cat, t, min: t[0] - 8, max: t[3] + 8, color: VO2_COLORS[cat.tier] || 'var(--accent)', fitAge: fitnessAge(vo2, sex) };
+  // De dónde sale cada cifra: la nuestra (test VAM si tus velocidades siguen siendo las del test; si no, tus velocidades)
+  // y, si la hay, la que estima el Apple Watch (otro cálculo, sobre todo al aire libre: no tienen por qué coincidir)
+  const testVam = Number(s.progression?.lastTest?.vam) || 0;
+  const fromTest = testVam > 0 && Math.abs(testVam - vam) <= 0.2;
+  const watch = safe(() => vo2Trend(cachedHealthMetrics(), todayKey())?.last, null);
+  return { vam, vo2, age, sex, cat, t, min: t[0] - 8, max: t[3] + 8, color: VO2_COLORS[cat.tier] || 'var(--accent)', fitAge: fitnessAge(vo2, sex), fromTest, watch };
 }
 
 function vo2Scale(d) {
@@ -497,6 +503,10 @@ function vo2Card(s) {
     <div class="pg-vo2__gauge">${gauge({ value: d.vo2, min: d.min, max: d.max, label: 'ml/kg/min', color: d.color })}</div>
     <div class="pg-vo2__cat"><span class="zdot" style="--zc:${d.color}" aria-hidden="true"></span><b class="pg-pill">${esc(d.cat.label)}</b><span class="muted">para ${d.sex === 'f' ? 'mujeres' : 'hombres'} ${esc(ageBand(d.age))}</span></div>
     ${vo2Scale(d)}
+    <div class="pg-vo2__src">
+      <div><span>${d.fromTest ? 'Según tu test VAM' : 'Según tus velocidades'}</span><b class="num">${fmt.dec1(d.vo2)}</b></div>
+      ${d.watch ? `<div><span>Apple Watch</span><b class="num">${fmt.dec1(d.watch)}</b></div>` : ''}
+    </div>
     <div class="stat-grid stat-grid--2 pg-vo2__facts">
       ${statHtml('VAM actual', `<span class="num">${fmt.speed(d.vam)}</span>`, 'km/h', `<span class="pg-vo2__note">${testKey ? `Último test: ${esc(shortDate(testKey))}` : 'Estimada por tus velocidades'}</span>`)}
       ${statHtml('Edad de forma', `<span class="num">${d.fitAge <= 25 ? '≤' : '≈'}${'\u2009'}${d.fitAge}</span>`, 'años', `<span class="pg-vo2__note">${esc(fitTxt)}</span>`)}
@@ -802,7 +812,8 @@ function openVo2Sheet() {
         <b class="num">${fmt.dec1(d.vo2)}</b><span>ml/kg/min</span><em><i class="zdot" style="--zc:${d.color}" aria-hidden="true"></i>${esc(d.cat.label)}</em>
       </div>
       <p>El <b>VO₂máx</b> es el máximo oxígeno que tu cuerpo puede usar por minuto y por kilo. Es el mejor indicador de tu forma cardiovascular y uno de los que más se relacionan con la salud a largo plazo.</p>
-      <p><b>Cómo lo calculamos:</b> a partir de tu VAM (velocidad aeróbica máxima, ${fmt.speed(d.vam)} km/h) con la fórmula de Léger: VO₂máx ≈ 3,5 × VAM. Es una estimación orientativa; un test de laboratorio sería más preciso.</p>
+      <p><b>Cómo lo calculamos:</b> a partir de tu VAM (velocidad aeróbica máxima, ${fmt.speed(d.vam)} km/h) con la fórmula de Léger: VO₂máx ≈ 3,5 × VAM. Es una estimación orientativa; un test de laboratorio sería más preciso.${d.fromTest ? '' : getState().progression?.lastTest ? ' Ahora sale de tus velocidades actuales, que ya no son las de tu último test.' : ' Hasta que hagas un test VAM, sale de tus velocidades.'}</p>
+      ${d.watch ? `<p><b>Apple Watch: ${fmt.dec1(d.watch)}.</b> Es otra estimación, la de Apple, que se calcula sobre todo al caminar o correr al aire libre. Por eso las dos cifras no tienen por qué coincidir.</p>` : ''}
       <div class="eyebrow">Referencia ${esc(d.sex === 'f' ? 'para mujeres' : 'para hombres')} ${esc(ageBand(d.age))}</div>
       <div class="list pg-vtable">${rows}</div>
       <p><b>Edad de forma ${d.fitAge <= 25 ? '≤' : '≈'} ${d.fitAge} años:</b> la edad a la que tu VO₂máx sería lo típico. Si es menor que tu edad real, tu motor va por delante del calendario.</p>

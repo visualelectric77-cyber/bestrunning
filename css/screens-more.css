@@ -119,6 +119,11 @@
   position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%; transform: translate(-50%, -50%);
   background: #fff; box-shadow: 0 0 0 3px var(--surface-1);
 }
+.pg-vo2__src { display: flex; flex-direction: column; margin-top: var(--s-4); }
+.pg-vo2__src > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); padding: var(--s-2) 0; }
+.pg-vo2__src > div + div { border-top: var(--hairline) solid var(--sep); }
+.pg-vo2__src span { font-size: var(--fs-sub); color: var(--text-2); }
+.pg-vo2__src b { font-size: 17px; font-weight: 600; }
 .pg-vo2__facts { margin: var(--s-5) 0 var(--s-4); padding-top: var(--s-4); border-top: var(--hairline) solid var(--sep); }
 .pg-vo2__facts .stat__value { font-size: 24px; }
 .pg-vo2__note { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-2); }

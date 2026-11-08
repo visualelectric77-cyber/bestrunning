@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // RITMUP · pruebas del test VAM asistido (js/training/vam-assist.js). node tools/test-vam-assist.mjs
-import { createVamAssist, vamPreCheck, vamValidity, VAM_TEXT } from '../js/training/vam-assist.js';
+import { createVamAssist, vamPreCheck, vamValidity, vamHoldsLevels, VAM_TEXT } from '../js/training/vam-assist.js';
 import { applyFeedback } from '../js/training/progression.js';
 import { defaultState } from '../js/core/store.js';
 
@@ -111,6 +111,8 @@ ok(vamValidity({ ...session(170), hrSeries: [] }, { hrMax: 176 }).verdict === 'u
   const { vamAssist: _omit, ...old } = s;
   ok(applyFeedback(st, old, { feeling: 'hard', rpe: 8 }).progression.lastTest?.vam > 0, 'test sin asistencia: como siempre');
 }
+
+ok(vamHoldsLevels({ verdict: 'doubtful' }, {}) && !vamHoldsLevels({ verdict: 'doubtful' }, { vamAssist: { applyAnyway: true } }) && !vamHoldsLevels({ verdict: 'valid' }, {}) && !vamHoldsLevels({ verdict: 'unknown' }, {}), 'solo un dudoso sin permiso se queda sin aplicar');
 
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ test VAM asistido: ${n} comprobaciones`);
 process.exit(bad ? 1 : 0);

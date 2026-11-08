@@ -956,6 +956,32 @@ export function clearDayOverride(draft, dateKey) {
   delete ovs[dateKey];
 }
 
+const EASY_RUNS = ['recovery-jog', 'aerobic-base', 'breath-jog', 'easy-strides'];
+
+/**
+ * La próxima clase por hacer, si es exigente y está cerca (1–3 días y sin descanso antes): una alternativa suave de la
+ * misma duración. Tests, carreras y eventos no se tocan. → null | { date, minutes, from, fromTitle, to, toTitle }
+ */
+export function easierNext(state, fromKey) {
+  if (!isKey(fromKey)) return null;
+  for (let i = 1; i <= 3; i++) {
+    const date = addDays(fromKey, i);
+    if (isDone(sessionFor(state?.history, date))) continue;  // ya la adelantaste
+    const r = resolveDay(state, date);
+    if (r.kind === 'rest' || !r.templateId) return null;     // ya tienes un descanso por delante
+    if (r.templateId === TEST_ID || r.race || r.event) return null;
+    const cur = getTemplate(r.templateId);
+    if (templateMeta(cur).intensity === 'easy') return null;
+    // antes un trote suave conocido que una clase rara (caminar en cuesta) al cambiar una de ritmo
+    const soft = EASY_RUNS.filter((id) => id !== r.templateId && getTemplate(id) && allows(getTemplate(id), r.minutes));
+    const to = soft.length ? soft[hashStr(`easy|${date}`) % soft.length] : fallbackPick(state, date, r.minutes, { intensity: 'easy', exclude: r.templateId });
+    const alt = getTemplate(to);
+    if (!alt || templateMeta(alt).intensity !== 'easy') return null;
+    return { date, minutes: r.minutes, from: r.templateId, fromTitle: cur.title, to, toTitle: alt.title };
+  }
+  return null;
+}
+
 /** Próximo día con test VAM (desde `fromKey` incluido) que aún no se ha hecho. */
 export function nextTestDate(state, fromKey = todayKey()) {
   const from = isKey(fromKey) ? fromKey : todayKey();

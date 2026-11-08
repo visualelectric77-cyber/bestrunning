@@ -1,7 +1,7 @@
 // BestRunning · resumen de la sesión (#/summary/:id): celebración, cifras, sensación, FC, notas y progresión.
 // Pulso del Apple Watch (SPEC §12): importación vía Atajo + portapapeles, línea de pulso sobre el perfil,
 // zonas de FC y pulso por velocidad; las casillas de media/máxima siguen como alternativa manual.
-import { fmt, esc, clamp, round1, todayKey, capitalize } from '../core/utils.js';
+import { fmt, esc, clamp, round1, todayKey, capitalize, addDays } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels, hrMaxFromAge } from '../training/levels.js';
 import { raisedHrMax } from '../training/race-predict.js';
 import { buildHrModel, sessionHrOffset } from '../training/hr-model.js';
@@ -12,7 +12,10 @@ import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, t
 import { haptic } from '../core/haptics.js';
 import { workoutFromId } from '../training/generator.js';
 import { applyFeedback, evaluateTest, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
-import { vamValidity } from '../training/vam-assist.js';
+import { vamValidity, vamHoldsLevels } from '../training/vam-assist.js';
+import { classDebrief, wantsEasierNext } from '../training/class-debrief.js';
+import { dynModelFrom } from '../training/hr-control.js';
+import { easierNext, setDayOverride } from '../training/planner.js';
 import { evaluateAchievements } from '../training/achievements.js';
 import { traceCursorSec, skippedRanges } from '../training/stats.js';
 import { sessionMusicHtml, hydrateSessionMusic } from '../integrations/session-music.js';
@@ -89,6 +92,7 @@ export function mount(el, { params = {} } = {}) {
   // «Tu coach»: declarado antes del primer render() (coachNoteHtml lo lee; más abajo daba ReferenceError y el
   // resumen salía «No hemos podido abrir esta pantalla» en el iPhone con Apple Intelligence)
   let aiAsked = false;
+  let debriefAsked = false;
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); if (!disposed) fn(); }, ms);
@@ -322,7 +326,7 @@ export function mount(el, { params = {} } = {}) {
 
   function testCard(s, st) {
     let res = null;
-    try { res = evaluateTest(s); } catch { res = null; }
+    try { res = evaluateTest(s, s.feeling ? null : st); } catch { res = null; }
     const vam = res?.vam ?? s.test?.vam ?? null;
     if (!vam) {
       return `<section class="card sm-card sm-test" style="--i:2"><div class="sm-card__title">Test VAM</div>
@@ -412,6 +416,19 @@ export function mount(el, { params = {} } = {}) {
   // Tras guardar, con Apple Intelligence: un titular, 2–3 frases y un consejo escritos a partir de los datos YA
   // calculados. Si el texto trae una cifra que no está en los datos, se descarta. Se guarda en la sesión (aiNote).
   function coachNoteHtml(s) {
+    if (s.feeling && !s.isTest && (!s.debrief || s.debrief.hrN !== (Array.isArray(s.hrSeries) ? s.hrSeries.length : 0))) {
+      if (!debriefAsked) { debriefAsked = true; later(() => makeDebrief(s), 300); }
+    }
+    const db = s.debrief;
+    if (db && (db.kind !== 'nohr' || !aiAvailable())) {
+      return `<section class="card sm-card sm-coach" style="--i:4">
+        <div class="sm-card__head"><span class="sm-card__title">Tu clase</span></div>
+        <p class="sm-coach__head">${esc(db.headline)}</p>
+        <p class="sm-coach__body">${esc(db.body)}</p>
+        ${db.tip ? `<p class="sm-coach__tip">${icon('info', 15)}<span>${esc(db.tip)}</span></p>` : ''}
+        ${planSuggestHtml(db)}
+      </section>`;
+    }
     const n = s.aiNote;
     if (n && n.body) {
       return `<section class="card sm-card sm-coach" style="--i:4">
@@ -427,6 +444,58 @@ export function mount(el, { params = {} } = {}) {
         <div class="sm-card__head"><span class="sm-card__title">Tu coach</span><span class="sm-opt">IA en tu iPhone</span></div>
         <p class="sm-coach__wait"><span class="sm-coach__bar" aria-hidden="true"><i></i></span>Leyendo tu sesión…</p>
       </section>`;
+  }
+
+  /** «Tu clase» (class-debrief.js): se calcula una vez y se guarda; se rehace si llega el pulso después. */
+  function makeDebrief(s0) {
+    debriefAsked = false;
+    const s = findSession() || s0;
+    if (disposed || !s || s.isTest) return;
+    const st = getState();
+    const segmentsOf = (h) => workoutFromId(h.workoutId, { ...st, levels: h.levelsAtStart || st.levels })?.segments;
+    let model = null;
+    try { model = dynModelFrom((st.history || []).filter((h) => h.id !== s.id), segmentsOf, { profile: st.profile }); } catch { model = null; }
+    let db = null;
+    try { db = classDebrief(s, { segments: workout?.segments || null, model, profile: st.profile }); } catch { db = null; }
+    if (!db) return;
+    let suggest = s.debrief?.suggest || null;
+    if (!suggest && wantsEasierNext(db, s) && !s.debrief?.planChoice) {
+      try { suggest = easierNext(st, s.dayKey); } catch { suggest = null; }
+    }
+    const next = { ...db, suggest, planChoice: s.debrief?.planChoice || null };
+    setState((d) => { const h = (d.history || []).find((x) => x.id === s.id); if (h) h.debrief = next; });
+    session = findSession();
+    render();
+  }
+
+  function planSuggestHtml(db) {
+    const g = db.suggest;
+    if (!g) return '';
+    const day = g.date === addDays(todayKey(), 1) ? 'mañana' : `el ${fmt.dateShort(g.date)}`;
+    if (db.planChoice === 'easy') return `<p class="sm-coach__tip">${icon('check', 15)}<span>Hecho: ${esc(day)} harás ${esc(g.toTitle)}.</span></p>`;
+    if (db.planChoice === 'keep' || g.date < todayKey()) return '';
+    return `<div class="sm-coach__plan">
+        <p>${esc(day.charAt(0).toUpperCase() + day.slice(1))} te toca <b>${esc(g.fromTitle)}</b>. ¿La cambiamos por algo suave, <b>${esc(g.toTitle)}</b>?</p>
+        <div class="sm-coach__btns">
+          <button type="button" class="btn btn--secondary" data-act="plan-easy">Cambiarla</button>
+          <button type="button" class="btn btn--ghost" data-act="plan-keep">Dejarla</button>
+        </div>
+      </div>`;
+  }
+
+  function choosePlan(choice) {
+    const s = findSession();
+    const g = s?.debrief?.suggest;
+    if (!g) return;
+    setState((d) => {
+      if (choice === 'easy') setDayOverride(d, g.date, { templateId: g.to, minutes: g.minutes });
+      const h = (d.history || []).find((x) => x.id === s.id);
+      if (h?.debrief) h.debrief.planChoice = choice;
+    });
+    diagMark('plan.reacciona', { eleccion: choice });
+    haptic('light');
+    session = findSession();
+    render();
   }
 
   async function askCoach(s0) {
@@ -774,6 +843,8 @@ export function mount(el, { params = {} } = {}) {
       else if (act === 'hr-paste') { haptic('light'); openHrSheet(); }
       else if (act === 'hr-remove') onHrRemove();
       else if (act === 'cancel-edit') { editing = false; draft = null; render(); }
+      else if (act === 'plan-easy') choosePlan('easy');
+      else if (act === 'plan-keep') choosePlan('keep');
       else if (act === 'vam-apply') { if (draft) { draft.vamApply = !draft.vamApply; haptic('light'); render(); } }
       else if (act === 'vam-hrmax') {
         const v = Number(b.dataset.v);
@@ -914,8 +985,15 @@ export function mount(el, { params = {} } = {}) {
       // En un test mandan los escalones, no la sensación
       levels = { ...st.levels };
       changes = [];
-      try { testRes = evaluateTest(updated); } catch { testRes = null; }
+      try { testRes = evaluateTest(updated, st); } catch { testRes = null; }
       let applyTest = !!(testRes?.levels && testRes.vam > 0);
+      // Dudoso según tu pulso: tus velocidades no cambian salvo que hayas pedido actualizarlas
+      let held = false;
+      try {
+        const p = st.profile || {};
+        held = vamHoldsLevels(vamValidity(updated, { hrMax: p.hrMax || hrMaxFromAge(p.age || 46), prevDelta: testRes?.deltaVam || 0 }), updated);
+      } catch { held = false; }
+      if (held) applyTest = false;
       // Un test cortado sin querer no debe hundir las velocidades: si baja más de un 5 %, preguntamos
       if (applyTest && testRes.vam < vamFromLevels(st.levels) * 0.95) {
         try {
@@ -939,6 +1017,8 @@ export function mount(el, { params = {} } = {}) {
           bestVam: Math.max(Number(progression.bestVam) || 0, testRes.vam),
         };
         message = `Tu VAM es ${fmt.speed(testRes.vam)} km/h. Hemos recalculado tus cuatro velocidades.`;
+      } else if (held && testRes?.vam > 0) {
+        message = `Tu VAM ha salido ${fmt.speed(testRes.vam)} km/h, pero el test es dudoso: tus velocidades no cambian.`;
       } else if (testRes?.vam > 0) {
         progression = { ...progression, lastTest: { date: ses.dayKey || todayKey(), vam: testRes.vam } };
         message = `Registramos tu VAM de ${fmt.speed(testRes.vam)} km/h y mantenemos tus velocidades.`;
