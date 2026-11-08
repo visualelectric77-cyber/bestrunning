@@ -1,9 +1,9 @@
 // RITMUP · escenario MODO VISIÓN. Tu clase entera dibujada como una escalera de luz: cada tramo es un escalón macizo
 // del color de su zona, tan alto como su esfuerzo (velocidad + inclinación) y tan largo como los metros que corres en
-// él; con cuesta, el escalón sube. Entre tramos, una rampa suave (nunca una pared) y al final de cada uno su meta: dos
-// postes y un travesaño del color de la zona, y LA línea del final, de borde a borde, encima del escalón. La velocidad
-// de cada tramo va pintada en el suelo (la tuya se apaga al pisarla). Bajo tus pies la cinta corre a tu velocidad
-// real y un anillo late con tu pulso (del color de la zona si vas en ella).
+// él; con cuesta, el escalón sube. Entre tramos, una rampa suave (nunca una pared) y al final de cada uno LA línea del
+// final, de borde a borde, encima del escalón; solo la última lleva arco y cartel de META. La velocidad de cada tramo
+// va pintada en el suelo (la tuya se apaga al pisarla). Bajo tus pies la cinta corre a tu velocidad real y un anillo
+// late con tu pulso (del color de la zona si vas en ella). Lo ya corrido se funde con el suelo justo detrás de ti.
 // Cámara propia (sin el director del núcleo): escorzo al entrar en un tramo (se ve el perfil de los escalones), primera
 // persona en mitad de los tramos largos y aérea centrada el resto, alejándose en los últimos 30 s de la clase. Final:
 // la cámara sube y enseña la escalera entera encendiéndose de principio a meta. Sin destellos (§15.2): los cambios son
@@ -25,6 +25,8 @@ const EFF_INCL = 0.45;    // 1 % de cuesta ≈ 0,45 km/h de esfuerzo (c ≈ 0,45
 const SLOTS = 4;          // cifras del suelo a la vista: tu tramo y los 3 siguientes
 const BELT_FADE = 18;     // los listones de la cinta se apagan a esta distancia (sin centelleo)
 const SLAT_M = 1;         // un listón por metro de cinta recorrido
+const CUT_START = 0.4;    // detrás de ti, a esta distancia (u) la escalera empieza a fundirse con el suelo…
+const CUT_END = 3.4;      // …y aquí ya no existe
 
 const VERT = /* glsl */ `
 attribute vec3 aCol;
@@ -32,37 +34,46 @@ attribute float aSeg;
 varying vec3 vCol;
 varying float vSeg;
 varying float vDist;
+varying float vZ;
 void main() {
   vec4 w = modelMatrix * vec4(position, 1.0);
-  vCol = aCol; vSeg = aSeg; vDist = length(w.xyz - cameraPosition);
+  vCol = aCol; vSeg = aSeg; vDist = length(w.xyz - cameraPosition); vZ = w.z;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
 
 // escalones, rampas y filos: lo corrido se apaga, tu tramo a toda luz, lo que viene algo más bajo
 const BODY_FRAG = /* glsl */ `
-uniform float uCur, uFront, uFogD;
-uniform vec3 uFogCol;
+uniform float uCur, uIn, uFront, uFogD, uCutZ;
+uniform vec3 uFogCol, uGroundCol;
 varying vec3 vCol;
 varying float vSeg;
 varying float vDist;
+varying float vZ;
 FOG_CHUNK
 void main() {
-  float k = vSeg < uCur - 0.5 ? 0.16 : (vSeg > uCur + 0.5 ? 0.55 : 1.0);
+  // lo que ya has corrido se funde con el suelo justo detrás de ti: al cambiar de tramo no te queda el bloque anterior debajo
+  float behind = vZ - uCutZ;
+  if (behind > ${CUT_END.toFixed(1)}) discard;
+  // el relevo de tramo es gradual (uIn 0→1): sin él, el bloque nuevo se encendía de golpe y era un destello
+  float k = vSeg < uCur - 1.5 ? 0.16 : (vSeg < uCur - 0.5 ? mix(1.0, 0.16, uIn) : (vSeg < uCur + 0.5 ? mix(0.55, 1.0, uIn) : 0.55));
   if (uFront > -0.5) k = vSeg < uFront ? 1.0 : 0.16;
   vec3 c = mix(vCol * k, uFogCol, fogAmount(vDist, uFogD));
+  c = mix(c, uGroundCol, smoothstep(${CUT_START.toFixed(1)}, ${CUT_END.toFixed(1)}, behind));
   gl_FragColor = vec4(c, 1.0);
 }`;
 
 // metas (aditivas, color HDR: el bloom las enciende sin quemarlas)
 const GATE_FRAG = /* glsl */ `
-uniform float uCur, uCurK, uPrevK, uFront, uFogD;
+uniform float uCur, uCurK, uPrevK, uFront, uFogD, uCutZ;
 varying vec3 vCol;
 varying float vSeg;
 varying float vDist;
+varying float vZ;
 FOG_CHUNK
 void main() {
   float k = vSeg < uCur - 1.5 ? 0.04 : (vSeg < uCur - 0.5 ? uPrevK : (vSeg < uCur + 0.5 ? uCurK : 0.32));
   if (uFront > -0.5) k = vSeg < uFront ? 0.9 : 0.06;
+  k *= 1.0 - smoothstep(${CUT_START.toFixed(1)}, ${CUT_END.toFixed(1)}, vZ - uCutZ);
   gl_FragColor = vec4(vCol * k * (1.0 - fogAmount(vDist, uFogD)), 1.0);
 }`;
 
@@ -99,7 +110,7 @@ void main() {
   float dph = s / (uSlat * 2.4) + uBelt / 2.4;
   float dash = (1.0 - smoothstep(0.34, 0.34 + fwidth(dph) * 1.5 + 1e-4, fract(dph))) * near;
   float strip = 1.0 - smoothstep(${(W * 0.21).toFixed(2)}, ${(W * 0.21).toFixed(2)} + fwx * 1.5, ax);
-  vec3 c = clamp(uCol * (slat * 0.22 * uCue + railX * dash * 0.7 + strip * 0.09) * uOn, 0.0, 2.0);
+  vec3 c = clamp(uCol * (slat * 0.22 * uCue + railX * dash * 0.7 + strip * 0.09) * uOn * smoothstep(0.0, 1.6, s), 0.0, 2.0);
   if (c.r != c.r || c.g != c.g || c.b != c.b) c = vec3(0.0);
   gl_FragColor = vec4(c, 1.0);
 }`;
@@ -161,10 +172,10 @@ export async function createTheme(ctx) {
     uniforms, vertexShader: extra.vert || VERT, fragmentShader: frag.replace('FOG_CHUNK', FOG), ...extra.opts,
   });
 
-  const bodyU = { uCur: { value: 0 }, uFront: { value: -1 }, uFogD: { value: FOG_D }, uFogCol: { value: FOG_COL } };
+  const bodyU = { uCur: { value: 0 }, uIn: { value: 1 }, uFront: { value: -1 }, uFogD: { value: FOG_D }, uFogCol: { value: FOG_COL }, uCutZ: { value: 1e6 }, uGroundCol: { value: C('#05090f') } };
   const bodyMat = shader(BODY_FRAG, bodyU, { opts: { side: THREE.DoubleSide } });
   const rimMat = shader(BODY_FRAG, bodyU, { opts: { transparent: true, depthWrite: false } });
-  const gateU = { uCur: bodyU.uCur, uFront: bodyU.uFront, uCurK: { value: 1 }, uPrevK: { value: 0.1 }, uFogD: bodyU.uFogD };
+  const gateU = { uCur: bodyU.uCur, uFront: bodyU.uFront, uCurK: { value: 1 }, uPrevK: { value: 0.1 }, uFogD: bodyU.uFogD, uCutZ: bodyU.uCutZ };
   const gateMat = shader(GATE_FRAG, gateU, { opts: { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending } });
 
   // suelo y horizonte
@@ -205,13 +216,13 @@ export async function createTheme(ctx) {
   // tú: un chevrón de luz y el anillo de tu latido
   const chev = new THREE.Shape();
   chev.moveTo(0, 0.6); chev.lineTo(0.45, -0.3); chev.lineTo(0, -0.05); chev.lineTo(-0.45, -0.3); chev.lineTo(0, 0.6);
-  const youMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.6, 1.6), transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, fog: false });
+  const youMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.6, 1.6), transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false, depthTest: false, fog: false });   // nunca queda tapado por una rampa
   const you = new THREE.Mesh(new THREE.ShapeGeometry(chev), youMat);
   you.rotation.x = -Math.PI / 2;
   you.renderOrder = 30;
   root.add(you);
-  const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.62, 0.7, 64), ringMat);
+  const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, side: THREE.DoubleSide, fog: false });
+  const ring =new THREE.Mesh(new THREE.RingGeometry(0.62, 0.7, 64), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.renderOrder = 30;
   root.add(ring);
@@ -381,11 +392,14 @@ export async function createTheme(ctx) {
       const GH = topY - baseY;
       const ze = -s.z1;
       const glow = cc.copy(s.col).multiplyScalar(1.5);
-      box(-W / 2, baseY + GH / 2, ze, 0.14, GH, 0.14, glow, s.i);
-      box(W / 2, baseY + GH / 2, ze, 0.14, GH, 0.14, glow, s.i);
-      box(0, topY, ze, W + 0.14, 0.16, 0.16, glow, s.i);
-      const endC = ca.copy(s.col).lerp(WHITE, 0.2).multiplyScalar(1.4);
-      box(0, s.h1 + 0.03, ze + 0.22, W - 0.02, 0.05, 0.4, endC, s.i);
+      // solo la última lleva arco: una meta en cada tramo eran recuadros unos dentro de otros detrás de la velocidad
+      if (s.i === lastI) {
+        box(-W / 2, baseY + GH / 2, ze, 0.14, GH, 0.14, glow, s.i);
+        box(W / 2, baseY + GH / 2, ze, 0.14, GH, 0.14, glow, s.i);
+        box(0, topY, ze, W + 0.14, 0.16, 0.16, glow, s.i);
+      }
+      const endC = ca.copy(s.col).lerp(WHITE, 0.2).multiplyScalar(1.15);
+      box(0, s.h1 + 0.03, ze + 0.15, W - 0.02, 0.05, 0.26, endC, s.i);
       s.gateTop = topY;
     }
     const gateGeo = new THREE.BufferGeometry();
@@ -487,7 +501,9 @@ export async function createTheme(ctx) {
       const inBlock = t - s.t0;
       const classLeft = Math.max(0, tl.totalSec - t);
       const finale = f.finale > 0;
+      bodyU.uIn.value += (1 - bodyU.uIn.value) * Math.min(1, dt * 1.6);
       if (s.i !== curIdx) {
+        bodyU.uIn.value = curIdx < 0 || s.i !== curIdx + 1 ? 1 : 0;   // al arrancar o al saltar en el tiempo, sin relevo
         curIdx = s.i;
         bodyU.uCur.value = s.i;
         hzMat.color.copy(hzBase).lerp(s.col, 0.5);
@@ -502,10 +518,10 @@ export async function createTheme(ctx) {
       const em = smooth(endMix);
       const back = 8 + camSpan * 0.1 + 10 * em;
       const gYou = groundAt(d);
-      // por encima de lo que pisas, de lo que dejas detrás y del escalón que viene (siempre se ve por encima de él)
+      // por encima de lo que pisas y del escalón que viene (siempre se ve por encima de él); lo de atrás ya no existe
       const nxs = segs[s.i + 1];
       const upNext = nxs ? Math.max(0, nxs.h0 - gYou) * (1 - smooth(clamp01((remU - 4) / 30))) : 0;
-      const camY = Math.max(gYou, groundAt(Math.max(0, d - back)), groundAt(Math.max(0, d - back / 2))) + 5.2 + camSpan * 0.14 + 6 * em + upNext * 1.2;
+      const camY = Math.max(gYou, groundAt(Math.max(0, d - CUT_START))) + 5.2 + camSpan * 0.14 + 6 * em + upNext * 1.2;
       const still = f.reducedMotion;
       const wantPov = !still && !em && s.sec >= 180 && inBlock > 25 && leftT > 30;
       const wantSide = !still && inBlock <= 6 + (s.sec < 90 ? 14 : 0) && leftT > 20;
@@ -553,6 +569,10 @@ export async function createTheme(ctx) {
 
       // ── tu marcador y tu latido ──
       you.position.set(0, gYou + 0.05, -d);
+      // el marcador se inclina con la rampa: plano, su punta se metía dentro de la cuesta
+      const slopeA = Math.atan2(groundAt(d + 0.35) - groundAt(Math.max(0, d - 0.35)), 0.7);
+      you.rotation.x = -Math.PI / 2 + slopeA;
+      ring.rotation.x = -Math.PI / 2 + slopeA;
       youMat.opacity = 0.95 * (1 - m) * (finale ? 0 : 1);
       ring.position.set(0, gYou + 0.04, -d - 0.05);
       const inZone = hr && hr.bpm > 0 && hr.min > 0 ? hr.bpm >= hr.min && hr.bpm <= hr.max : true;
@@ -566,7 +586,7 @@ export async function createTheme(ctx) {
 
       // ── cinta ──
       if (f.running) beltPos += (s.v / 3.6) * dt / SLAT_M;
-      const bStart = Math.max(s.zA, d - 3);
+      const bStart = Math.max(s.zA, d - 1.6);
       const bLen = Math.max(0.01, s.zB - bStart);
       const ang = Math.atan2(s.h1 - s.h0, Math.max(1e-6, s.zB - s.zA));
       belt.visible = d < s.zB - 0.05 && !finale;
@@ -578,15 +598,27 @@ export async function createTheme(ctx) {
       beltU.uSlat.value = 0.42 + (0.13 - 0.42) * m;
       beltU.uCue.value = ctx.speedFeel ? ctx.speedFeel.cue : 1;
       beltU.uCol.value.copy(s.col).lerp(WHITE, 0.3);
-      beltU.uOn.value = 1;
+      beltU.uOn.value = bodyU.uIn.value;      // la cinta del tramo nuevo entra fundida, no de golpe
 
       // ── cifras del suelo: la tuya se apaga al llegar a ella; las dos siguientes claras; la tercera, apenas ──
+      const speedRect = rectOf('speed');
       for (let k = 0; k < SLOTS; k++) {
         const g = segs[s.i + k];
         const op = finale ? 0 : k === 0 ? 0.6 : k <= 2 ? 0.65 : 0.25;
         placeSlot(slots[k], g, op);
         if (k === 0 && g && !finale) slots[0].material.opacity = 0.6 * clamp01((slots[0].userData.zN - d - 2) / 4);
+        // una cifra que cae detrás de la velocidad o del pulso del marcador se apaga: dos números encima se leen mal
+        if (g && !finale && speedRect && slots[k].visible) {
+          anchor.copy(slots[k].position).project(camera);
+          const py = ((1 - anchor.y) / 2) * Math.max(1, ctx.hud.height || 1);
+          const out = Math.max(speedRect.y - py, py - (speedRect.y + speedRect.h));
+          slots[k].material.opacity *= clamp01((out - 6) / 34);
+          slots[k].visible = slots[k].material.opacity > 0.01;
+        }
       }
+
+      // en el final la escalera entera vuelve a aparecer, de tus pies hacia la salida
+      bodyU.uCutZ.value = -d + (finale ? (zEnd + 20) * smooth(clamp01(f.finale * 3)) : 0);
 
       // ── metas: la tuya se enciende al acercarte y desaparece al cruzarla con la cámara ──
       if (finale) {
@@ -597,7 +629,8 @@ export async function createTheme(ctx) {
         const near = 1 - Math.min(1, leftT / 60);
         gateU.uCurK.value = (0.8 + 0.2 * near) * clamp01((Math.abs(camZ + s.z1) - 0.4) / 2.2);
         const pg = segs[s.i - 1];
-        gateU.uPrevK.value = pg ? 0.1 * clamp01((Math.abs(camZ + pg.z1) - 0.4) / 2.2) : 0;
+        // la línea que acabas de cruzar baja poco a poco (al ritmo del relevo), no de golpe
+        gateU.uPrevK.value = pg ? (0.1 + 0.9 * (1 - bodyU.uIn.value)) * clamp01((Math.abs(camZ + pg.z1) - 0.4) / 2.2) : 0;
       }
       checkMat.opacity = s.i === lastI || finale ? 0.9 : 0.45;
     },
