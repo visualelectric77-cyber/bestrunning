@@ -190,6 +190,104 @@ function drawProfile(ctx, segments, x, y, w, h) {
   }
 }
 
+/**
+ * Lo que corriste de verdad: tramos [{ t0, t1, speed, zone }] desde speedTrace, sin lo saltado y con el color de la zona
+ * que tocaba en ese momento. segments: los tramos planeados (solo para la zona). Sin trazado → [].
+ */
+export function realProfile(session, segments = []) {
+  const tr = (Array.isArray(session?.speedTrace) ? session.speedTrace : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  if (tr.length < 2) return [];
+  const plan = [];
+  let at = 0;
+  for (const g of Array.isArray(segments) ? segments : []) {
+    if (!(g?.sec > 0)) continue;
+    plan.push({ t0: at, t1: at + g.sec, zone: g.zone });
+    at += g.sec;
+  }
+  const skips = (Array.isArray(session?.skips) ? session.skips : [])
+    .map((g) => (Array.isArray(g) ? [Number(g[0]), Number(g[1])] : [Number(g?.from), Number(g?.to)]))
+    .filter(([a, b]) => b - a >= 1);
+  const zoneAt = (t, v, ran) => {
+    for (const g of plan) if (t >= g.t0 && t < g.t1 && ZONES[g.zone]) return g.zone;
+    const z = v >= 12.5 ? 'sprint' : v >= 11 ? 'fast' : v >= 9.5 ? 'run' : v >= 7.5 ? 'jog' : 'warmup';
+    return z === 'warmup' && ran ? 'cooldown' : z;
+  };
+  // cortes: cambios de velocidad, cambios de tramo y bordes de lo saltado
+  const out = [];
+  let ran = false;
+  for (let i = 0; i < tr.length - 1; i++) {
+    const [a, v] = tr[i];
+    const b = tr[i + 1][0];
+    if (!(b > a)) continue;
+    const cuts = [a, b, ...plan.map((g) => g.t0).filter((t) => t > a && t < b), ...skips.flat().filter((t) => t > a && t < b)]
+      .sort((x, y) => x - y);
+    for (let k = 0; k < cuts.length - 1; k++) {
+      const t0 = cuts[k];
+      const t1 = cuts[k + 1];
+      const mid = (t0 + t1) / 2;
+      if (t1 - t0 < 0.5 || skips.some(([x, y]) => mid > x && mid < y)) continue;
+      const zone = zoneAt(mid, v, ran);
+      if (zone !== 'warmup') ran = true;
+      const prev = out[out.length - 1];
+      if (prev && prev.t1 === t0 && prev.speed === v && prev.zone === zone) prev.t1 = t1;
+      else out.push({ t0, t1, speed: v, zone });
+    }
+  }
+  return out;
+}
+
+/** Barras con la velocidad real (a su tiempo real) y, encima, la línea de tu pulso. */
+function drawRealChart(ctx, pieces, hrSeries, x, y, w, h) {
+  const span = pieces[pieces.length - 1].t1;
+  const speeds = pieces.map((p) => p.speed);
+  const max = Math.max(...speeds);
+  const min = Math.min(...speeds);
+  const lo = Math.max(0, min - (max - min) * 0.6 - 1);
+  const X = (t) => x + (t / span) * w;
+  pieces.forEach((p, i) => {
+    const next = pieces[i + 1];
+    const gap = next && next.zone === p.zone && next.t0 === p.t1 ? 1 : pieces.length > 60 ? 2 : 5;
+    const bx = X(p.t0);
+    const bw = Math.max(1, X(p.t1) - bx - gap);
+    const bh = Math.max(10, ((p.speed - lo) / Math.max(0.1, max - lo)) * h * 0.82);
+    roundRect(ctx, bx, y + h - bh, bw, bh, [Math.min(5, bw / 2), Math.min(5, bw / 2), 0, 0]);
+    ctx.fillStyle = ZONES[p.zone]?.color || '#8E8E93';
+    ctx.fill();
+  });
+  const raw = (Array.isArray(hrSeries) ? hrSeries : []).filter((p) => Array.isArray(p) && p[1] >= 40 && p[0] >= 0 && p[0] <= span + 5);
+  if (raw.length < 3) return null;
+  const pts = raw.map((p, i) => {
+    const near = [p, raw[i - 1], raw[i + 1]].filter((q) => q && Math.abs(q[0] - p[0]) <= 30);
+    return [p[0], near.reduce((a, q) => a + q[1], 0) / near.length];
+  });
+  const vals = pts.map((p) => p[1]);
+  let hrLo = Math.min(...vals) - 6;
+  let hrHi = Math.max(...vals) + 6;
+  if (hrHi - hrLo < 30) { const c = (hrHi + hrLo) / 2; hrLo = c - 15; hrHi = c + 15; }
+  const Y = (v) => y + h - ((v - hrLo) / (hrHi - hrLo)) * h;
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const path = () => {
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      if (i && p[0] - pts[i - 1][0] <= 45) ctx.lineTo(X(p[0]), Y(p[1]));
+      else ctx.moveTo(X(p[0]), Y(p[1]));
+    });
+  };
+  path();
+  ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+  ctx.lineWidth = 11;
+  ctx.stroke();
+  path();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.restore();
+  return Math.round(Math.max(...raw.map((p) => p[1])));
+}
+
 // Foto de campaña de cada categoría (misma elección que la tarjeta de Hoy); flip = la persona pasa a la derecha
 const PHOTO = {
   intervals: ['cat-intervals', false], fartlek: ['cat-intervals', false], challenge: ['cat-intervals', false],
@@ -333,11 +431,27 @@ export async function renderShareCard(session, { workout = null, name = '' } = {
   ctx.fillRect(PAD + colW + 2, yS - 30, 2, 116);
   ctx.fillRect(PAD + colW * 2 + 2, yS - 30, 2, 116);
 
-  // Perfil de intensidad (el único color: las zonas)
-  const yP = H - 228;
-  const hP = 104;
-  const segs = (workout?.segments?.length ? workout.segments : traceToSegments(s.speedTrace)) || [];
-  drawProfile(ctx, segs, PAD, yP, W - PAD * 2, hP);
+  // Gráfica: la velocidad que corriste y tu pulso reales (el plan solo si la sesión no guardó su trazado)
+  const pieces = realProfile(s, workout?.segments || []);
+  if (pieces.length) {
+    const yP = H - 264;
+    const hP = 140;
+    const peak = drawRealChart(ctx, pieces, s.hrSeries, PAD, yP, W - PAD * 2, hP);
+    if (peak) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = 'rgba(235,235,245,0.72)';
+      ctx.font = `500 26px ${SANS}`;
+      const label = `Pulso · máx. ${Math.max(peak, Math.round(Number(s.hrMax) || 0))}`;
+      ctx.fillText(label, W - PAD, yP - 14);
+      const lw = ctx.measureText(label).width;
+      ctx.fillStyle = '#ffffff';
+      roundRect(ctx, W - PAD - lw - 46, yP - 25, 34, 5, 2.5);
+      ctx.fill();
+    }
+  } else {
+    const segs = (workout?.segments?.length ? workout.segments : traceToSegments(s.speedTrace)) || [];
+    drawProfile(ctx, segs, PAD, H - 228, W - PAD * 2, 104);
+  }
 
   // Pie, en gris y sin emojis
   ctx.textAlign = 'left';

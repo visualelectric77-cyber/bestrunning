@@ -1022,7 +1022,7 @@ export function mount(el, { params = {} } = {}) {
   }
 
   /* ═════════════════ Compartir / Salud ═════════════════ */
-  function cardKeyFor(s) { return `${s?.id}|${s?.feeling || ''}`; }
+  function cardKeyFor(s) { return `${s?.id}|${s?.feeling || ''}|${Array.isArray(s?.hrSeries) ? s.hrSeries.length : 0}`; }
   function invalidateCard() { cardBlob = null; cardKey = ''; cardPromise = null; }
 
   function prepareCard() {
