@@ -192,20 +192,34 @@ export function fitHrDynamics(classes, { taus = TAUS } = {}) {
  * Seguimiento en directo. Simula la clase con tu a típico y compara con lo que marca el reloj: la diferencia media
  * (que va sobre todo del día: forma, sueño, calor) se convierte en tu a de hoy. El pulso de ahora es la lectura real
  * suavizada; desde él se predice.
+ *
+ * DÍA ALTO: si a los 3 min sigues ≥ 6 ppm por encima de lo típico, ese exceso no se queda ahí: en las clases reales
+ * (1 y 8 nov: +7 al principio, +15 al final; en las otras 15 clases el seguidor no pasó de +4 a los 5 min) casi se
+ * duplica. `forecastA` es el a con el que conviene decidir los tramos que vienen; en un día normal es igual que `a`.
  */
+const HIGH_ON = 6;
+const HIGH_OFF = 3;
+const HIGH_FROM = 180;      // s desde la primera lectura
+const FORECAST_K = 1.8;
+const FORECAST_MAX = 15;
+
 export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, gain = 0.04, fastReadings = 36 } = {}) {
   let core = null;    // pulso simulado con a0
   let obs = null;     // lectura suavizada
   let bias = 0;       // tu día frente a lo típico (ppm)
   let lastT = null;
+  let firstT = null;
+  let high = false;
   let seen = 0;
   return {
     get a() { return a0 + bias; },
     get hr() { return obs; },
     get bias() { return bias; },
+    get highDay() { return high; },
+    get forecastA() { return a0 + (high ? Math.max(bias, Math.min(FORECAST_MAX, bias * FORECAST_K)) : bias); },
     /** Avanza al instante t (s de clase) con la velocidad, inclinación y carga actuales; hr: lectura real o null. */
     step(t, v, g, load, hr) {
-      if (core == null) { if (hr == null) return; core = hr; obs = hr; lastT = t; return; }
+      if (core == null) { if (hr == null) return; core = hr; obs = hr; lastT = t; firstT = t; return; }
       const dt = Math.max(0, t - lastT);
       if (dt > 0) {
         const x = equilibrium(model, a0, v, g, load);
@@ -218,6 +232,10 @@ export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, ga
         const w = seen < fastReadings ? fastGain : gain;
         bias += w * ((hr - core) - bias);
         seen++;
+        if (t - firstT >= HIGH_FROM) {
+          if (!high && bias >= HIGH_ON) high = true;
+          else if (high && bias < HIGH_OFF) high = false;
+        }
       }
     },
   };

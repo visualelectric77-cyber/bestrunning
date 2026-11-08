@@ -11,6 +11,7 @@ import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics,
 const WORK = new Set(['jog', 'run', 'fast']);
 const RANK = { walk: 0, warmup: 1, cooldown: 1, jog: 2, run: 3, fast: 4, sprint: 5 };
 const LONG_SEC = 180;
+const HILL_GRADE = 3;        // % desde el que un tramo corto se define por la cuesta, no por la velocidad
 const PRE_MAX = 0.6;        // antes de la clase: bajar hasta −0,6…
 const PRE_MAX_UP = 0.3;     // …pero subir como mucho +0,3 (pasarse de optimista sale peor que quedarse corto)
 const LIVE_MAX_DOWN = 0.8;
@@ -77,9 +78,10 @@ export function calibrateClass(model, a, segments, targetOf, { hr0 = null, minSp
  * 2 · Antes de cada tramo (unos segundos antes del pre-aviso de la voz). hrEnd: pulso con el que vas a acabar el
  * actual; load: carga acumulada. Recuperaciones (tramo más suave que el actual): si no te deja bajar a su zona, más
  * suave (hasta −0,8). Tramos largos de trabajo: a su zona en ambos sentidos (±0,5). Arreones cortos: solo hacia abajo
- * si te vas a pasar mucho. → velocidad nueva o null.
+ * si te vas a pasar mucho. Día alto (highDay): las rampas cortas también bajan, en proporción a lo alto que va tu pulso:
+ * si no, todo el ajuste cae en las recuperaciones y acabas cambiando 2 km/h cada minuto. → velocidad nueva o null.
  */
-export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, minSpeed = 1, maxSpeed = 20 } = {}) {
+export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, highDay = false, minSpeed = 1, maxSpeed = 20 } = {}) {
   if (!model || !next || !target || !(next.speed > 0) || !(target.max > target.min)) return null;
   const sec = Math.min(Number(next.sec) || 0, 300);
   if (sec < 30) return null;
@@ -95,6 +97,10 @@ export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, minSpe
   } else if (!recovery && !shortHard && WORK.has(next.zone) && next.sec >= LONG_SEC && pEnd < target.min - 3) {
     const want = speedForHr(model, a, hrEnd, sec, (target.min + target.max) / 2, g, load);
     v = clamp(want, planned, planned + LIVE_MAX_UP);
+  }
+  if (highDay && shortHard && g >= HILL_GRADE) {
+    const vDay = planned - Math.min(LIVE_MAX_DOWN, Math.max(0, a - (model.aTypical ?? a)) / model.b);
+    v = v == null ? vDay : Math.min(v, vDay);
   }
   if (v == null) return null;
   v = r1(clamp(v, minSpeed, maxSpeed));

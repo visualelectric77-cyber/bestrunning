@@ -125,5 +125,34 @@ const tgt = (s) => ({ jog: z2, run: z3, fast: z4 }[s.zone] || { min: 120, max: 1
   ok(dynModelFrom(hist.slice(0, 1), null, { storage: null }) === null, 'una clase: sin modelo');
 }
 
+// 9 · Día alto: se detecta a los 3 min, anticipa que el exceso crece y baja también las rampas cortas
+{
+  const m9 = { ...TRUE, aTypical: 45 };
+  const feed = (excess, secs = 420) => {
+    const tr = createTracker(m9);
+    let hr = 110, load = 0;
+    for (let t = 0; t <= secs; t += 5) {
+      const v = 9, x = equilibrium(m9, 45 + excess, v, 0, load);
+      hr += (x - hr) * (1 - Math.exp(-5 / (x > hr ? m9.tauUp : m9.tauDown)));
+      tr.step(t, v, 0, load, hr);
+    }
+    return tr;
+  };
+  const normal = feed(3);
+  ok(!normal.highDay && normal.forecastA === normal.a, 'un día normal (+3) no es día alto: se decide con el a de siempre');
+  const early = feed(9, 120);
+  ok(!early.highDay, 'antes de los 3 min nunca es día alto');
+  const high = feed(9);
+  ok(high.highDay, 'a +9 sostenido, día alto');
+  ok(high.forecastA > high.a && high.forecastA <= 45 + 15 + 1e-9, `anticipa que crecerá, sin pasar de +15 (${high.forecastA.toFixed(1)})`);
+  const a = 45 + 12;
+  const hill = { zone: 'fast', speed: 9.5, sec: 60, incline: 5 };
+  const run = { zone: 'run', speed: 9.5 };
+  const hv = nextSpeed(m9, a, { cur: run, next: hill, hrEnd: 150, load: 0, target: z4, highDay: true });
+  ok(hv != null && hv < 9.5 && hv >= 8.7 - 1e-9, `día alto: la rampa corta baja, como mucho −0,8 (${hv})`);
+  ok(nextSpeed(m9, a, { cur: run, next: hill, hrEnd: 150, load: 0, target: z4 }) === null, 'sin día alto la rampa no se toca si no te pasas');
+  ok(nextSpeed(m9, a, { cur: run, next: { ...hill, incline: 0 }, hrEnd: 120, load: 0, target: z4, highDay: true }) === null, 'un arreón llano se define por velocidad: no baja por día alto');
+}
+
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ modelo de tu pulso: ${n} comprobaciones`);
 process.exit(bad ? 1 : 0);

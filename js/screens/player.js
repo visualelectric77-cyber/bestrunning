@@ -3315,9 +3315,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
       let target = null;
       try { target = segHrTarget(nx); } catch { target = null; }
       const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, s.currentSpeed || seg.speed, incl, st.load);
-      const v = nextSpeed(dynModel, tr.a, { cur: seg, next: nx, hrEnd, load: st.load, target, ...lims });
+      const v = nextSpeed(dynModel, tr.forecastA, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay: tr.highDay, ...lims });
       if (v != null && engine.setSegmentSpeed?.(s.segIndex + 1, v)) {
-        diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a) });
+        diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a), alto: tr.highDay ? 1 : 0 });
         renderNext(engine.getState());
         renderProfile();
         if (coach) {
@@ -3328,7 +3328,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
           lastCoachPos = s2.totalElapsed;
         }
         notify(v < nx.speed
-          ? `Llegas a ${Math.round(hrEnd)} ppm: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`
+          ? (tr.highDay && target && hrEnd <= target.max
+            ? `Hoy tu pulso va alto: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`
+            : `Llegas a ${Math.round(hrEnd)} ppm: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`)
           : `Vas sobrado: el siguiente tramo, a ${fmt.speed(v)} km/h para ir en tu zona`, { icon: 'heart', duration: 5000 });
       }
       return;
@@ -3338,7 +3340,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!HR_COACH_ZONES.has(seg.zone) || seg.sec < 120) return;
     let target = null;
     try { target = segHrTarget(seg); } catch { target = null; }
-    const r = liveSpeed(dynModel, tr.a, {
+    const r = liveSpeed(dynModel, tr.forecastA, {
       seg, hrNow: tr.hr, remaining: s.segRemaining, speed: s.currentSpeed || seg.speed, load: st.load, target, ...lims,
     });
     if (!r) return;
