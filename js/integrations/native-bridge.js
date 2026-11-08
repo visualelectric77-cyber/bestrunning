@@ -650,7 +650,8 @@ export function createNativeBridge(opts = {}) {
     const monday = mondayOf(t.date);
     let wKm = 0, wSec = 0;
     for (const h of Array.isArray(st.history) ? st.history : []) {
-      const k = String(h?.dayKey || '');
+      // misma regla que weekProgress: una clase adelantada cuenta en el día que cubría
+      const k = String(h?.planDate || h?.dayKey || '');
       if (k < monday || k > t.date) continue;
       wKm += num(h.distanceKm); wSec += num(h.elapsedSec);
     }

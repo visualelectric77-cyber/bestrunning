@@ -6,7 +6,7 @@ import { navigate, back } from '../core/router.js';
 import { icon, navBar, enableCollapsingHeader, chip, stat, profileChart, zoneBar, zoneRibbon, effortBars, photo, openSheet, toast, confirmDialog, actionSheet, celebrate } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import { FEELINGS, hrLevelTrends } from '../training/progression.js';
-import { traceCursorSec, skippedRanges } from '../training/stats.js';
+import { traceCursorSec, skippedRanges, kcalOf } from '../training/stats.js';
 import { evaluateAchievements } from '../training/achievements.js';
 import {
   startWatchHrImport, openWatchHrSheet, hasPendingWatchHr, hrFieldsFrom, hrFieldsCleared, hasHrSeries, hrZoneTimes,
@@ -580,7 +580,7 @@ function detailHtml(ses, s, segments) {
       ${stat({ label: 'Vel. media', value: fmt.speed(avg), unit: 'km/h' })}
       ${stat({ label: 'Ritmo', value: avg > 0 ? fmt.pace(avg) : '–:––', unit: '/km' })}
       ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h' })}
-      ${stat({ label: 'Energía', value: fmt.int(ses.kcal || 0), unit: 'kcal' })}
+      ${stat({ label: kcalOf(ses).label, value: fmt.int(kcalOf(ses).value) })}
       ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)) })}
     </div>
   </section>`);
@@ -711,7 +711,8 @@ function hrCtaHtml(s) {
 
 function hrAnalysisParts(ses, s) {
   const trends = safe(() => hrLevelTrends(s, ses), {});
-  const zt = safe(() => hrZoneTimes(ses.hrSeries, s.profile), ses.hrZones || null);
+  // las zonas de esa clase, tal como se guardaron: no cambian si luego cambia tu FC máxima o tu reposo
+  const zt = ses.hrZones || safe(() => hrZoneTimes(ses.hrSeries, s.profile), null);
   return [
     `<section class="card hs-card whr-card">
       <div class="hs-card__head"><div class="eyebrow">Zonas de pulso</div>

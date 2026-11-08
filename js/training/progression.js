@@ -4,6 +4,7 @@
 // anteriores comparables cuenta como «muy fácil» para ese nivel; > 92 % de la FC máx. sostenido en tramos de
 // correr bloquea las subidas de esa sesión.
 import { vamValidity, vamHoldsLevels } from './vam-assist.js';
+import { isHills } from './hr-model.js';
 import { clamp, todayKey, addDays, daysBetween, weekdayOf, hashStr, makeRng, fmt, parseKey, DAY_MS } from '../core/utils.js';
 import {
   ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category,
@@ -106,6 +107,7 @@ export function hrLevelTrends(state, session) {
   const t0 = sesTime(session);
   const prev = (Array.isArray(st.history) ? st.history : [])
     .filter((s) => s && typeof s === 'object' && s !== session && s.id !== session.id && !s.isTest && hasHrSeries(s)
+      && !isHills(session) && !isHills(s)
       && sesTime(s) < t0 && t0 - sesTime(s) <= HR_LOOKBACK_DAYS * DAY_MS && lenClass(s) === lenClass(session))
     .sort((a, b) => sesTime(b) - sesTime(a));
   const out = {};
@@ -148,6 +150,18 @@ function hrRules(st, session, used) {
 }
 
 /** Aplica la sensación de una sesión a las velocidades. */
+/** ¿Corriste ≥ 60 s a esa velocidad o más (con 0,7 km/h de margen)? Sin trazado guardado, se da por bueno. */
+function ranNearLevel(session, level) {
+  const tr = Array.isArray(session?.speedTrace) ? session.speedTrace : [];
+  if (tr.length < 2) return true;
+  let sec = 0;
+  for (let i = 0; i < tr.length - 1; i++) {
+    const dt = num(tr[i + 1]?.[0]) - num(tr[i]?.[0]);
+    if (dt > 0 && num(tr[i]?.[1]) >= level - 0.7) sec += dt;
+  }
+  return sec >= 60;
+}
+
 export function applyFeedback(state, session, { feeling, rpe } = {}) {
   const st = state || {};
   const levels0 = normLevels(st.levels);
@@ -196,7 +210,9 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
   }
 
   /* ── Sesión normal ── */
-  const used = LEVEL_KEYS.filter((k) => num(session.timeInZone?.[k]) >= 60);
+  // Un nivel cuenta si corriste de verdad cerca de su velocidad: el tramo planificado no basta si el modo pulso te bajó
+  // o si era una cuesta a menos velocidad
+  const used = LEVEL_KEYS.filter((k) => num(session.timeInZone?.[k]) >= 60 && ranNearLevel(session, levels0[k]));
   const top = used.length ? used[used.length - 1] : null;
   const pct = Number(session.completionPct);
   const incomplete = Number.isFinite(pct) && pct < 0.85;
@@ -562,7 +578,7 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
 function hrTrendInsight(st, history, today) {
   const t1 = parseKey(today).getTime() + DAY_MS;
   const hist = history
-    .filter((s) => !s.isTest && hasHrSeries(s) && t1 - sesTime(s) <= 42 * DAY_MS && sesTime(s) < t1)
+    .filter((s) => !s.isTest && !isHills(s) && hasHrSeries(s) && t1 - sesTime(s) <= 42 * DAY_MS && sesTime(s) < t1)
     .sort((a, b) => sesTime(a) - sesTime(b));
   if (hist.length < 3) return null;
   let best = null;

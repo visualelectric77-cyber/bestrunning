@@ -11,6 +11,9 @@ const MIN_SESSIONS = 2;
 const MIN_POINTS = 20;
 const WINDOW_DAYS = 56;
 
+/** Clase de cuestas: la pendiente sube el pulso sin cambiar la velocidad, así que no vale para comparar pulso y velocidad. */
+export const isHills = (s) => s?.category === 'hills' || /colina|cuesta|hill/i.test(String(s?.templateId || s?.workoutId || ''));
+
 /** Puntos [km/h, ppm] estables de una sesión. */
 export function steadyPoints(session) {
   const hr = (Array.isArray(session?.hrSeries) ? session.hrSeries : [])
@@ -39,7 +42,7 @@ export function buildHrModel(history, { now = Date.now(), exceptId = null } = {}
   let pts = [];
   let sessions = 0;
   for (const h of Array.isArray(history) ? history : []) {
-    if (!h || h.id === exceptId || h.isTest) continue;
+    if (!h || h.id === exceptId || h.isTest || isHills(h)) continue;
     const t = Date.parse(h.startedAt || '');
     if (Number.isFinite(t) && t < since) continue;
     const p = steadyPoints(h);
@@ -59,7 +62,7 @@ export function buildHrModel(history, { now = Date.now(), exceptId = null } = {}
 
 /** Diferencia media (ppm) entre el pulso de una sesión y lo normal a sus velocidades. null sin datos. */
 export function sessionHrOffset(session, model) {
-  if (!model) return null;
+  if (!model || isHills(session)) return null;
   const p = steadyPoints(session);
   if (p.length < 6) return null;
   const d = p.map(([v, bpm]) => bpm - model.at(v));

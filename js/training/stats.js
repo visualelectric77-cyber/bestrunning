@@ -109,6 +109,18 @@ export function records(history) {
   };
 }
 
+/** Día que cuenta para la semana: el que la clase cubría en el plan o, si no, el día en que se corrió. */
+export function weekKeyOf(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s?.planDate || '')) ? s.planDate : sessionDay(s);
+}
+
+/** Calorías que enseñar: las del Apple Watch si existen y son suyas; si no, la estimación de la app. */
+export function kcalOf(s) {
+  const w = Number(s?.health?.kcal);
+  const est = Number(s?.kcal) || 0;
+  return w > 0 && Math.round(w) !== Math.round(est) ? { value: Math.round(w), label: 'Kcal · Watch', watch: true } : { value: Math.round(est), label: 'Kcal est.', watch: false };
+}
+
 /** Progreso de una semana del plan. */
 export function weekProgress(state, mondayKey, now = new Date()) {
   const monday = mondayOf(mondayKey || todayKey(now));
@@ -116,9 +128,11 @@ export function weekProgress(state, mondayKey, now = new Date()) {
   const days = planWeek(state, monday, now);
   const train = days.filter((d) => d.kind !== 'rest' && d.workout);
   const dates = new Set(weekDates(monday));
-  const ses = list(state?.history).filter((s) => dates.has(sessionDay(s)));
+  // Una clase adelantada cuenta en la semana del día que cubría (sesiones, minutos y km con la misma regla)
+  const ses = list(state?.history).filter((s) => dates.has(weekKeyOf(s)));
   return {
-    doneSessions: days.filter((d) => d.status === 'done').length,
+    // Solo días con clase planificada: una sesión extra en un descanso suma minutos y km, no «7 de 6»
+    doneSessions: train.filter((d) => d.status === 'done').length,
     plannedSessions: train.length,
     // Solo los días que aún pueden hacerse (hoy o después y sin hacer): el domingo no «quedan 5»
     remainingSessions: train.filter((d) => d.date >= today && d.status !== 'done').length,

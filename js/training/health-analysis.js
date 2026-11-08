@@ -8,6 +8,7 @@
 //    Carga aguda (7 días) / crónica (media semanal de 28 días): < 0,8 descansado · 0,8–1,3 equilibrado · > 1,3 cargado.
 
 import { DEFAULT_LEVELS } from './levels.js';
+import { isHills } from './hr-model.js';
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const DAY = 86400000;
@@ -34,7 +35,6 @@ function hrBetween(series, a, b) {
   return n >= 3 ? { avg: sum / n, n } : null;
 }
 
-const isHills = (s) => s?.category === 'hills' || /colina|cuesta|hill/i.test(String(s?.templateId || s?.workoutId || ''));
 
 /**
  * Pulso de una clase a `ref` km/h. Cada tramo a velocidad constante (de speedTrace, sea cual sea: también los ajustados
@@ -172,7 +172,9 @@ export function loadBalance(history, { today, profile } = {}) {
   const loadOf = (s) => sessionLoad(s, profile);
   const sum = (from, to) => list.filter((s) => { const t = keyToMs(s.dayKey); return t > end - from * DAY && t <= end - to * DAY; }).reduce((a, s) => a + loadOf(s), 0);
   const acute = sum(7, 0);
-  const chronicWeek = sum(28, 0) / 4;
+  // media semanal de las últimas 4 semanas o de las que haya si llevas menos
+  const weeksKnown = Math.min(4, Math.max(1, Math.ceil((Math.round((end - oldest) / DAY) + 1) / 7)));
+  const chronicWeek = sum(28, 0) / weeksKnown;
   const ratio = chronicWeek > 0 ? Math.round((acute / chronicWeek) * 100) / 100 : 0;
   const status = ratio < 0.8 ? 'rested' : ratio > 1.3 ? 'loaded' : 'balanced';
   const weeks = [];
@@ -189,6 +191,7 @@ export function loadBalance(history, { today, profile } = {}) {
   return {
     ok: true, acute: Math.round(acute), chronicWeek: Math.round(chronicWeek), ratio, status, weeks,
     sessions7: last7.length, minutes7: Math.round(last7.reduce((a, s) => a + num(s.elapsedSec), 0) / 60), streak,
+    trainedToday: list.some((s) => keyToMs(s.dayKey) === end),
   };
 }
 
@@ -203,8 +206,8 @@ export function fitnessText(f) {
 
 export function loadText(l) {
   if (!l?.ok) return null;
-  if (l.status === 'loaded') return { title: 'Cargado', text: 'Esta semana llevas bastante más que tu media del último mes. Mete un día de descanso o una clase suave.' };
-  if (l.status === 'rested') return { title: 'Descansado', text: 'Esta semana llevas menos que tu media: hay margen para una clase más larga o más intensa.' };
+  if (l.status === 'loaded') return { title: 'Cargado', text: 'En los últimos 7 días llevas bastante más que tu media del último mes. Mete un día de descanso o una clase suave.' };
+  if (l.status === 'rested') return { title: 'Descansado', text: 'En los últimos 7 días llevas menos que tu media: hay margen para una clase más larga o más intensa.' };
   return { title: 'Equilibrado', text: 'Entrenas lo que tu cuerpo recupera. Buen punto para seguir subiendo poco a poco.' };
 }
 

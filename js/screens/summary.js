@@ -17,7 +17,7 @@ import { classDebrief, wantsEasierNext } from '../training/class-debrief.js';
 import { dynModelFrom } from '../training/hr-control.js';
 import { easierNext, setDayOverride } from '../training/planner.js';
 import { evaluateAchievements } from '../training/achievements.js';
-import { traceCursorSec, skippedRanges } from '../training/stats.js';
+import { traceCursorSec, skippedRanges, kcalOf } from '../training/stats.js';
 import { sessionMusicHtml, hydrateSessionMusic } from '../integrations/session-music.js';
 import { renderShareCard, shareSession } from '../integrations/share-card.js';
 import { openHealthShortcut } from '../integrations/health.js';
@@ -260,7 +260,7 @@ export function mount(el, { params = {} } = {}) {
               <div class="stat-grid">
                 ${statCell({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0), count: s.elapsedSec || 0, kind: 'clock' })}
                 ${statCell({ label: 'Ritmo medio', value: s.avgSpeed > 0 ? fmt.pace(s.avgSpeed) : '–:––', unit: '/km' })}
-                ${statCell({ label: 'Kcal', value: fmt.int(s.kcal || 0), count: s.kcal || 0, kind: 'int' })}
+                ${statCell({ label: kcalOf(s).label, value: fmt.int(kcalOf(s).value), count: kcalOf(s).value, kind: 'int' })}
                 ${statCell({ label: 'Vel. media', value: fmt.speed(s.avgSpeed || 0), unit: 'km/h', count: s.avgSpeed || 0, kind: 'speed' })}
                 ${statCell({ label: 'Vel. máx.', value: fmt.speed(s.maxSpeed || 0), unit: 'km/h', count: s.maxSpeed || 0, kind: 'speed' })}
                 ${sixth}
@@ -704,7 +704,9 @@ export function mount(el, { params = {} } = {}) {
     let trends = {};
     try { trends = hrLevelTrends(st, s) || {}; } catch { trends = {}; }
     let zt = null;
-    try { zt = hrZoneTimes(s.hrSeries, st.profile); } catch { zt = s.hrZones || null; }
+    // las zonas de esa clase, tal como se guardaron: no cambian si luego cambia tu FC máxima o tu reposo
+    zt = s.hrZones || null;
+    if (!zt) { try { zt = hrZoneTimes(s.hrSeries, st.profile); } catch { zt = null; } }
     return `${inZoneHtml(s, st)}
       <section class="card sm-card" style="--i:5">
         <div class="sm-card__head"><span class="sm-card__title">Zonas de pulso</span><span class="sm-opt">Apple Watch</span></div>

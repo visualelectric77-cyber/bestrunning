@@ -14,6 +14,7 @@ import { topTracks, trackInfo, loadMusicMeta, TIER_COLORS } from '../integration
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics, fetchHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { vo2Trend } from '../training/health-analysis.js';
+import { isHills } from '../training/hr-model.js';
 import { weekReportInput } from '../training/week-report.js';
 import { healthTab } from './health.js';
 
@@ -524,7 +525,7 @@ function jogHrPoints(s, today) {
   const since = addDays(today, -56);
   const out = [];
   for (const h of (Array.isArray(s.history) ? s.history : [])) {
-    if (!h || h.isTest || !hasHrSeries(h)) continue;
+    if (!h || h.isTest || !hasHrSeries(h) || isHills(h)) continue;
     const day = sesDay(h);
     if (!day || day < since || day > today) continue;
     const lv = safe(() => hrAtLevels(h, { levels: h.levelsAtStart || s.levels }), {});
@@ -821,7 +822,7 @@ function openVo2Sheet() {
         <div class="eyebrow">Cómo subirlo</div>
         <div class="pg-tip">${icon('bolt', 16)}<span>Intervalos de 2–4 minutos a ritmo «rápido»: el estímulo más directo.</span></div>
         <div class="pg-tip">${icon('route', 16)}<span>Sesiones largas y suaves (Z2) los jueves y el finde: construyen la base.</span></div>
-        <div class="pg-tip">${icon('gauge', 16)}<span>Haz el Test VAM en la semana de descarga para medir tu mejora real cada 4 semanas.</span></div>
+        <div class="pg-tip">${icon('gauge', 16)}<span>Haz el Test VAM cuando te toque en el plan (cada 6 semanas) para medir tu mejora real.</span></div>
         <div class="pg-tip">${icon('moon', 16)}<span>Duerme bien y respeta el descanso: ahí es donde tu cuerpo se adapta.</span></div>
       </div>
     </div>`,

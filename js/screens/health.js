@@ -335,14 +335,14 @@ function cargaDetail(s, today) {
   const hPrev = hrvWeeks.slice(0, -1).map((w) => w.avg).filter((x) => x != null);
   const hPct = hNow != null && hPrev.length >= 2 ? Math.round(((hNow - hPrev.reduce((a, x) => a + x, 0) / hPrev.length) / (hPrev.reduce((a, x) => a + x, 0) / hPrev.length)) * 100) : null;
   const read = [
-    pct != null ? `Esta semana llevas un <b class="num">${Math.abs(pct)} %</b> ${pct >= 0 ? 'más' : 'menos'} carga que la media de las 7 anteriores.` : '',
+    pct != null ? `En los últimos 7 días llevas un <b class="num">${Math.abs(pct)} %</b> ${pct >= 0 ? 'más' : 'menos'} carga que la media de ${prev.length === 1 ? 'la semana anterior' : `las ${prev.length} anteriores`}.` : '',
     hPct != null ? `Tu VFC está un <b class="num">${Math.abs(hPct)} %</b> ${hPct >= 0 ? 'por encima' : 'por debajo'} de tu media${hPct <= -10 ? ': tu cuerpo lo está notando' : hPct >= 0 ? ': lo aguantas bien' : ''}.` : '',
   ].filter(Boolean).join(' ');
   const streak = l.streak || 0;
   const rest = streak >= 3
     ? ['Llevas ' + streak + ' días seguidos entrenando', 'Mañana toca descansar o hacer una clase suave de 20′.']
     : streak > 0
-      ? [`${streak === 1 ? 'Hoy has entrenado' : 'Llevas 2 días seguidos'}`, 'Vas bien de descanso: tu cuerpo tiene tiempo de recuperar entre clases.']
+      ? [`${streak === 1 ? (l.trainedToday ? 'Hoy has entrenado' : 'Ayer entrenaste') : 'Llevas 2 días seguidos'}`, 'Vas bien de descanso: tu cuerpo tiene tiempo de recuperar entre clases.']
       : ['Hoy descansas', 'Los días sin clase es cuando tu cuerpo se adapta y mejora.'];
   return `
     <div class="card pg-card pg-health">

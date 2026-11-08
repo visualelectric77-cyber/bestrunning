@@ -205,7 +205,7 @@ function doneHero(day, today, animate) {
       ${stat({ label: 'Distancia', value: fmt.dec1(s.distanceKm || 0), unit: 'km' })}
       ${stat({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0) })}
       ${stat({ label: 'Velocidad media', value: fmt.speed(s.avgSpeed || 0), unit: 'km/h' })}
-      ${stat({ label: 'Energía', value: fmt.int(s.kcal || 0), unit: 'kcal' })}
+      ${stat({ label: stats.kcalOf(s).label, value: fmt.int(stats.kcalOf(s).value) })}
     </div>
     <div class="td-hero__actions">
       ${s.id ? `<button type="button" class="btn btn--primary btn--lg" data-href="#/summary/${enc(s.id)}">Ver resumen</button>` : ''}

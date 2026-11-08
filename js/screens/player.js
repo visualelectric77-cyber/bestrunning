@@ -1103,7 +1103,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
               <span class="hud-top__sub num" data-ref="sub"></span>
             </div>
             <div class="hud-top__r num">
-              <span class="hud-top__el" data-ref="elapsed" aria-label="Transcurrido">0:00</span>
+              <span class="hud-top__el" data-ref="elapsed" aria-label="Tiempo corrido de la clase">0:00</span>
               <i class="hud-top__div" aria-hidden="true"></i>
               <span class="hud-top__rem" data-ref="remaining" aria-label="Restante">−0:00</span>
             </div>

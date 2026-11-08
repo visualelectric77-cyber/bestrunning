@@ -337,7 +337,7 @@ export function mount(el) {
       <div class="ob-intro">
         <p class="eyebrow">Paso 4 de 5</p>
         <h1 class="ob-h1" tabindex="-1">Tu semana</h1>
-        <p class="ob-lead">Te preparo ciclos de 4 semanas que suben la carga poco a poco y terminan con un test para medir tu progreso.</p>
+        <p class="ob-lead">Te preparo ciclos de 4 semanas que suben la carga poco a poco, con un test cada 6 semanas para medir tu progreso.</p>
         <div class="card ob-preview">
           <span class="eyebrow">Así queda tu semana</span>
           <div data-weekprev>${weekPreviewHtml()}</div>
