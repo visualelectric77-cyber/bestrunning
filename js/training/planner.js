@@ -18,6 +18,7 @@ import {
 } from './season.js';
 import { goalOf, goalSig, goalWeekInfo, goalLongMinutes, goalIntro, goalDistance, GOAL_STAGES } from './goal.js';
 import { weekShape, freeWeekRoles, freeTestDay } from './week-shape.js';
+import { CAPACITIES } from './focus-map.js';
 
 export const CYCLE_WEEKS = ['Arranque', 'Progresión', 'Pico', 'Descarga'];
 const WEEK_LF = [0.97, 1.0, 1.04, 0.8];
@@ -351,6 +352,18 @@ function minutesFor(w, info, sch) {
   return base >= 30 ? Math.max(20, roundTo(base * 0.8, 5)) : base;
 }
 
+/* Enfoque del usuario (js/training/focus.js) para la semana de `monday`, o null. Los frenos van aquí: con carrera, en
+   descarga, en semana de test, en transición, cansado, volviendo de un parón o tras una semana mala, el plan es el normal. */
+function focusFor(state, monday, adapt) {
+  const f = state?.plan?.focus;
+  if (!f || typeof f !== 'object') return null;
+  const e = [f.current, ...(Array.isArray(f.past) ? f.past : [])].find((x) => x && CAPACITIES[x.capacity] && !x.declined && x.from <= monday && monday < x.to);
+  if (!e || (Array.isArray(e.holds) && e.holds.includes(monday))) return null;
+  if (adapt.mode === 'tired' || adapt.mode === 'return') return null;
+  const info = calendar(state, monday, 0);
+  return info.goal || info.isDeload || info.isTestWeek || info.phase.key === 'transicion' ? null : e;
+}
+
 function computeWeek(state, W, cache, adapt) {
   const sch = sched(state);
   const incline = hasIncline(state);
@@ -415,6 +428,14 @@ function computeWeek(state, W, cache, adapt) {
     if (ev && !ev.single) { surpriseDay.event = ev; eventDay = surpriseDay; }
   }
   if (!eventDay && surpriseDay) surpriseDay.surprise = true;
+
+  // Enfoque: una sola sesión clave de la semana cambia de tipo, y solo si ya tocaba esa intensidad o más
+  const foc = adapt.focus ? CAPACITIES[adapt.focus.capacity] : null;
+  const keepCap = adapt.focus?.keep ? CAPACITIES[adapt.focus.keep] : null;
+  const keyDays = train.filter((d) => (d.role === 'H' || d.role === 'M') && !d.event && !d.surprise);
+  const slotOrder = (d, cap) => cap.slots.indexOf(d.role);
+  const focusDay = foc ? keyDays.filter((d) => slotOrder(d, foc) >= 0).sort((a, b) => slotOrder(a, foc) - slotOrder(b, foc) || (b.w === sch.keyDay) - (a.w === sch.keyDay))[0] || null : null;
+  const keepDay = keepCap ? keyDays.find((d) => d !== focusDay && slotOrder(d, keepCap) >= 0) || train.find((d) => d.long && d !== focusDay && d.role !== 'T') || null : null;
 
   // Objetivo de carga
   const totalMin = train.reduce((a, d) => a + d.minutes, 0);
@@ -512,6 +533,8 @@ function computeWeek(state, W, cache, adapt) {
           if (d.w === simDay && gd.sim.includes(t.id)) s += 9;
         }
         if (recovering && m.intensity === 'easy') s += 2;
+        if (d === focusDay && foc.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 14;
+        if (d === keepDay && keepCap.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 3;
         const cn = estimate(t.id, d.minutes, 1, 1, incline);
         const dayTarget = kTarget * LPM[d.role] * d.minutes;
         s -= 6 * Math.min(1.5, Math.abs(cn.load - dayTarget) / dayTarget);
@@ -644,6 +667,7 @@ function computeWeek(state, W, cache, adapt) {
     d.templateId = p.id;
     d.family = p.family;
     d.estLoad = p.load;
+    if (d === focusDay && foc.families.includes(p.family)) d.focus = adapt.focus.capacity;
     d.slot = d.role === 'T' ? 'test' : d.event ? 'event' : d.surprise ? 'surprise' : d.long ? 'key' : d.role === 'E' ? 'easy' : 'quality';
     load += p.load;
     easy += p.easy;
@@ -675,7 +699,9 @@ function weekPicks(state, W) {
   const today = nowKey();
   const start = startMonday(state);
   for (let w = 0; w <= W; w++) {
-    const adapt = adaptFor(hx, w ? cache[w - 1] : null, addDays(start, w * 7), today);
+    const base = adaptFor(hx, w ? cache[w - 1] : null, addDays(start, w * 7), today);
+    const fo = focusFor(state, addDays(start, w * 7), base);
+    const adapt = fo ? { ...base, focus: fo, sig: `${base.sig}|f:${fo.capacity}:${fo.keep || ''}` } : base;
     if (cache[w] && cache[w].sig === adapt.sig) continue;
     cache.length = w;
     cache[w] = computeWeek(state, w, cache, adapt);
@@ -702,6 +728,7 @@ function introFor(info, day, adapt) {
     else if (adapt?.mode === 'return') parts.push('Volvemos con calma: nada de recuperar lo perdido de golpe.');
     return parts.join(' ');
   }
+  if (day.focus) parts.push(`Hoy toca tu enfoque: ${CAPACITIES[day.focus].noun}. Es lo que más te hará mejorar ahora.`);
   if (day.surprise) parts.push(`Sorpresa de la semana: hoy salimos del guion del bloque «${theme.name}».`);
   else if (day.w === 1 || (info.isTestWeek && day.w === 2)) parts.push(`${phase.line} ${theme.intro}`);
   else parts.push(`Bloque «${theme.name}» · ${phase.name}.`);

@@ -226,7 +226,7 @@ function trendHtml(t) {
 function typesHtml(t) {
   if (!t?.rows?.length) return '';
   const callouts = [
-    t.best ? `<p class="ca-foot"><span aria-hidden="true">${icon('star', 15)}</span><span>Donde mejor te salen: <b>${esc(t.best.name)}</b>, ${t.best.score} de media.</span></p>` : '',
+    t.best ? `<p class="ca-foot"><span aria-hidden="true">${icon('star', 15)}</span><span>Las que mejor cumples: <b>${esc(t.best.name)}</b>, ${t.best.score} de media.</span></p>` : '',
     t.hardest ? `<p class="ca-foot"><span aria-hidden="true">${icon('flame', 15)}</span><span>Las que más te cuestan: <b>${esc(t.hardest.name)}</b>, esfuerzo ${esc(fmt.dec1(t.hardest.rpe))} de 10.</span></p>` : '',
   ].filter(Boolean).join('');
   return `<section class="pg-section stack">
@@ -253,10 +253,25 @@ function actionsHtml(list) {
   </section>`;
 }
 
-export function reviewTabHtml(r) {
+function focusHtml(f) {
+  if (!f) return '';
+  const off = f.state === 'declined';
+  return `<section class="card ca-card ca-focus${off ? ' is-off' : ''}">
+    <div class="eyebrow">${esc(f.eyebrow)}</div>
+    <h3 class="ca-focus__title">${esc(f.title)}</h3>
+    <p class="ca-focus__text">${esc(f.text)}</p>
+    ${f.keepText ? `<p class="ca-focus__text">${esc(f.keepText)}</p>` : ''}
+    ${f.actionable && !off && f.state !== 'hold' ? '<p class="ca-focus__how">Cambia el tipo de tu sesión clave, sin añadir carga. Si vienes cansado, se pausa solo.</p>' : ''}
+    ${f.resultText ? `<p class="ca-focus__result">${esc(f.resultText)}</p>` : ''}
+    ${f.actionable ? `<button type="button" class="btn btn--secondary btn--block" data-focus="${off ? 'accept' : 'decline'}">${off ? 'Volver a activarlo' : 'No, déjalo como estaba'}</button>` : ''}
+  </section>`;
+}
+
+export function reviewTabHtml(r, focus = null) {
   if (!r) return '';
   return [
     `<section class="card ca-card ca-teaser"><div class="eyebrow">Cómo vas</div>${verdictHtml(r.verdict)}</section>`,
+    focusHtml(focus),
     actionsHtml(r.actions),
     evolutionHtml(r.evolution),
     pillarsHtml(r.pillars),

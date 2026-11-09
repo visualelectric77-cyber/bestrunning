@@ -1338,3 +1338,12 @@
 .ca-action__txt small { font-size: var(--fs-footnote); line-height: 18px; color: var(--text-2); text-wrap: pretty; }
 
 @media (min-width: 760px) { .ca-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Enfoque: lo que el plan está trabajando contigo */
+.ca-focus { display: flex; flex-direction: column; gap: var(--s-2); }
+.ca-focus__title { font-size: var(--fs-title2); line-height: var(--lh-title2); font-weight: 700; letter-spacing: -0.01em; }
+.ca-focus.is-off .ca-focus__title { color: var(--text-2); }
+.ca-focus__text { font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--text-2); }
+.ca-focus__how { font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-3, var(--text-2)); }
+.ca-focus__result { font-size: var(--fs-sub); line-height: var(--lh-sub); font-weight: 600; }
+.ca-focus .btn { margin-top: var(--s-2); }

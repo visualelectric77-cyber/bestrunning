@@ -6,6 +6,8 @@ import { haptic } from '../core/haptics.js';
 import { totals, weeklyBuckets, streakWeeks, streakGoal, dayValues, records, weekProgress } from '../training/stats.js';
 import { ACHIEVEMENTS } from '../training/achievements.js';
 import { coachInsight } from '../training/progression.js';
+import { focusView, setFocusDeclined } from '../training/focus.js';
+import { syncFocus } from '../training/focus-sync.js';
 import { ZONES, LEVEL_KEYS, vamFromLevels, estimateVo2max, vo2Category } from '../training/levels.js';
 import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, round1 } from '../core/utils.js';
 import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
@@ -745,7 +747,7 @@ function view(s, animate, wr = null) {
   if (history.length) {
     parts.push(`<div class="pg-tabs">${segmented({ name: 'pg-tab', options: [{ value: 'train', label: 'Entrenos' }, { value: 'review', label: 'Análisis' }, { value: 'health', label: 'Salud' }], value: progressTab(s) })}</div>`);
     if (progressTab(s) === 'review') {
-      parts.push(safe(() => reviewTabHtml(reviewOf(s)), ''));
+      parts.push(safe(() => reviewTabHtml(reviewOf(s), safe(() => focusView(s), null)), ''));
       return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
     }
     if (progressTab(s) === 'health') {
@@ -848,6 +850,7 @@ function openVo2Sheet() {
 /* ───────────── montaje ───────────── */
 
 export function mount(el) {
+  syncFocus();
   el.classList.add('pg-screen');
   safe(() => ensureWatchHrStyles());
   el.innerHTML = `${navBar({
@@ -928,6 +931,14 @@ export function mount(el) {
     if (e.target.closest('[data-pg="review"]')) {
       haptic('light');
       setTab('review');
+      return;
+    }
+    const focusBtn = e.target.closest('[data-focus]');
+    if (focusBtn) {
+      haptic('selection');
+      selfAt = Date.now();
+      selfState = setState((draft) => setFocusDeclined(draft, focusBtn.dataset.focus === 'decline'));
+      render();
       return;
     }
     const tag = e.target.closest('[data-week-tag]');

@@ -23,6 +23,7 @@ import { eventOn } from '../training/season.js';
 import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
 import { raceSpeedFor, raceWorkoutId } from '../training/race.js';
 import { readiness } from '../training/readiness.js';
+import { syncFocus } from '../training/focus-sync.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
 const INSTALL_KEY = 'br.td.installDismissed';
@@ -582,6 +583,7 @@ function openTrainAnyway(dateKey) {
 /* ───────────── Pantalla ───────────── */
 
 export function mount(el) {
+  syncFocus();
   const s0 = getState();
   let today = todayKey();
   let selected = today;
