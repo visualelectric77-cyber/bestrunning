@@ -1,7 +1,7 @@
 // RITMUP · datos del informe semanal que escribe la IA del iPhone (tarea 'weeklyReport'). Puro: sin DOM ni red.
 // La IA solo redacta: todos los números salen de aquí y `allowed` es la lista exacta que puede usar (la página
 // descarta el texto si aparece otra cifra, con numbersAreGrounded).
-import { weekProgress } from './stats.js';
+import { weekProgress, sessionCounts } from './stats.js';
 import { buildHrModel, sessionHrOffset } from './hr-model.js';
 import { mondayOf, addDays, todayKey } from '../core/utils.js';
 
@@ -12,6 +12,17 @@ const dayOf = (s) => String(s?.dayKey || s?.startedAt || '').slice(0, 10);
 /** Sesiones (sin tests ni descartadas) entre dos dayKey incluidos. */
 function sessionsBetween(history, from, to) {
   return (Array.isArray(history) ? history : []).filter((s) => s && !s.isTest && dayOf(s) >= from && dayOf(s) <= to);
+}
+
+/**
+ * Sesiones de una semana con la regla de toda la app: las del plan que constan como hechas (stats.weekProgress, lo
+ * mismo que «X de Y sesiones» en Progreso) o, si esa semana solo hubo clases fuera del plan, las que cuentan
+ * (stats.sessionCounts). Una clase apenas empezada suma minutos y km, no sesiones.
+ */
+function weekSessions(state, monday, now, list) {
+  let done = 0;
+  try { done = Number(weekProgress(state, monday, now)?.doneSessions) || 0; } catch { done = 0; }
+  return done || list.filter(sessionCounts).length;
 }
 
 /**
@@ -31,8 +42,10 @@ export function weekReportInput(state, now = new Date(), opts = {}) {
   const minutes = Math.round(ses.reduce((a, s) => a + (Number(s.elapsedSec) || 0), 0) / 60);
   const km = r2(ses.reduce((a, s) => a + (Number(s.distanceKm) || 0), 0));
   const hours = minutes / 60;
+  const sessions = weekSessions(state, monday, now, ses);
+  if (!sessions) return null; // solo clases apenas empezadas: aún no hay semana que contar
   const input = {
-    sessions: wp?.doneSessions || ses.length,
+    sessions,
     planned: wp?.plannedSessions ?? 0,
     minutes,
     km,
@@ -58,7 +71,7 @@ export function weekReportInput(state, now = new Date(), opts = {}) {
     const pKm = r2(prev.reduce((a, s) => a + (Number(s.distanceKm) || 0), 0));
     const pMin = Math.round(prev.reduce((a, s) => a + (Number(s.elapsedSec) || 0), 0) / 60);
     // Solo lo que cambia (un «0 km menos» confunde al modelo y al corredor)
-    const vs = { sessions: ses.length - prev.length, km: r2(km - pKm), minutes: minutes - pMin };
+    const vs = { sessions: sessions - weekSessions(state, addDays(monday, -7), now, prev), km: r2(km - pKm), minutes: minutes - pMin };
     for (const k of Object.keys(vs)) if (!vs[k]) delete vs[k];
     if (Object.keys(vs).length) input.vsPrev = vs;
   }

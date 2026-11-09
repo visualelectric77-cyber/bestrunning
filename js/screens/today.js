@@ -12,7 +12,7 @@ import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js'
 import { buildWorkout } from '../training/generator.js';
 import * as progression from '../training/progression.js';
 import * as stats from '../training/stats.js';
-import { ZONES, LEVEL_KEYS } from '../training/levels.js';
+import { ZONES, LEVEL_KEYS, levelReference, levelReferenceLabel } from '../training/levels.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, round1,
 } from '../core/utils.js';
@@ -77,17 +77,6 @@ function dismissInstall() {
   } catch {
     /* almacenamiento no disponible: se ocultará solo en esta visita */
   }
-}
-
-/** Niveles de hace ~4 semanas (o los iniciales si el historial es más corto). */
-function referenceLevels(history, today) {
-  if (!Array.isArray(history) || !history.length) return null;
-  const sorted = history.filter((h) => h?.date && h.levels).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  if (!sorted.length) return null;
-  const limit = addDays(today, -28);
-  let ref = null;
-  for (const h of sorted) if (h.date <= limit) ref = h;
-  return (ref || sorted[0]).levels;
 }
 
 function fallbackWeek(days) {
@@ -160,7 +149,9 @@ function trainHero(day, state, today, animate) {
           ? `<span class="td-hero__status is-event">${icon('star', 12)} ${esc(day.event.name || 'Especial')}</span>`
           : day.surprise
             ? '<span class="td-hero__status">Sorpresa</span>'
-            : '';
+            : day.focus
+              ? '<span class="td-hero__status is-event">Tu enfoque</span>'
+              : '';
   const intro = day.intro || w.intro || '';
   const play = `#/play/${enc(w.id)}?date=${day.date}`;
   const detail = `#/workout/${enc(w.id)}?date=${day.date}&from=today`;
@@ -361,7 +352,9 @@ function heroBlock(day, state, today, animate) {
 
 function speedsBlock(state, today) {
   const lv = state.levels || {};
-  const ref = referenceLevels(state.levelHistory, today);
+  // Con qué se compara y de cuándo es: el rótulo dice ese periodo, no siempre «4 semanas»
+  const period = levelReference(state.levelHistory, today);
+  const ref = period?.levels || null;
   let moved = false;
   const rows = LEVEL_KEYS.map((k) => {
     const v = lv[k] ?? 0;
@@ -387,7 +380,7 @@ function speedsBlock(state, today) {
     </button>`;
   });
   return `<section class="td-section td-speedsec">
-    ${sectionHeader('Tus velocidades', moved ? '<span class="td-aside">vs. hace 4 semanas</span>' : '')}
+    ${sectionHeader('Tus velocidades', moved ? `<span class="td-aside">${esc(levelReferenceLabel(period))}</span>` : '')}
     <div class="list td-speeds">${rows.join('')}</div>
   </section>`;
 }

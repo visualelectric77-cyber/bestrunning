@@ -1,5 +1,5 @@
 // BestRunning · zonas de velocidad, fisiología y estimaciones (sin DOM).
-import { round1, clamp, pad2 } from '../core/utils.js';
+import { round1, clamp, pad2, addDays, daysBetween, fmt } from '../core/utils.js';
 
 /** Zonas de un segmento. El color se usa en gráficos, fondos del reproductor y chips. */
 export const ZONES = {
@@ -72,6 +72,31 @@ export function zoneForSpeed(speed, levels) {
   return best;
 }
 
+/**
+ * Con qué niveles se comparan los de hoy y de cuándo son, para que el rótulo diga el periodo que se mide de verdad.
+ * → null (sin historial) o { levels, date, days, full }.
+ *   full: hay niveles registrados hace `days` días o más, así que `levels` son los que tenías entonces.
+ *   Con un historial más corto la referencia es su primer registro: `date` es su fecha y `days` los días que tiene.
+ */
+export function levelReference(levelHistory, today, days = 28) {
+  const hist = (Array.isArray(levelHistory) ? levelHistory : [])
+    .filter((e) => e && typeof e.date === 'string' && e.levels && e.date <= today)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  if (!hist.length) return null;
+  const limit = addDays(today, -days);
+  let ref = null;
+  for (const e of hist) if (e.date <= limit) ref = e;
+  if (ref) return { levels: ref.levels, date: limit, days, full: true };
+  return { levels: hist[0].levels, date: hist[0].date, days: daysBetween(hist[0].date, today), full: false };
+}
+
+/** Rótulo del periodo de `levelReference`: «vs. hace 4 semanas» solo si lo es; si no, desde cuándo («desde el 26 oct»). */
+export function levelReferenceLabel(ref) {
+  if (!ref) return '';
+  if (ref.full) return ref.days % 7 === 0 ? `vs. hace ${ref.days / 7} semanas` : `vs. hace ${ref.days} días`;
+  return ref.days > 0 ? `desde el ${fmt.dateShort(ref.date).split(' ').slice(1).join(' ')}` : 'desde hoy';
+}
+
 /* ───────────── Fisiología ───────────── */
 
 /** FC máxima estimada (Tanaka): 208 − 0,7 × edad. 46 años ⇒ 176. */
@@ -120,6 +145,52 @@ export function kcalPerMinute(kmh, inclinePct = 0, weightKg = 75) {
 
 /** VO₂máx estimado a partir de la VAM (Léger): 3,5 × VAM. */
 export const estimateVo2max = (vam) => round1(3.5 * vam);
+
+/** Margen (km/h) por redondeos: las velocidades que salen de un test dan una VAM a ±0,1 de la medida. */
+export const VAM_TOL = 0.2;
+
+/**
+ * La VAM (y el VO₂máx) que enseña la app y de dónde sale: una sola regla para todas las pantallas, el coach, las
+ * marcas estimadas y el objetivo.
+ *   · source 'test'   → la que midió tu último test VAM (progression.lastTest), con su fecha.
+ *   · source 'levels' → la de tus velocidades actuales: sin test, o cuando ya corres por encima de lo que midió.
+ * `levelsVam` es siempre la de las velocidades y `behind`, lo que les falta para la del test: tras un test con tope
+ * de subida las velocidades quedan por debajo, y eso se dice con palabras, no enseñando otra VAM.
+ * → { vam, vo2, source, testVam, testDate, levelsVam, behind }
+ */
+export function vamNow(state) {
+  const lv = state?.levels;
+  const levelsVam = lv && LEVEL_KEYS.every((k) => Number(lv[k]) > 0) ? vamFromLevels(lv) : 0;
+  const t = state?.progression?.lastTest;
+  const testVam = Number(t?.vam) > 0 ? round1(Number(t.vam)) : 0;
+  const day = String(t?.date || '').slice(0, 10);
+  const fromTest = testVam > 0 && levelsVam <= testVam + VAM_TOL + 1e-9;
+  const vam = fromTest ? testVam : levelsVam;
+  return {
+    vam,
+    vo2: vam > 0 ? estimateVo2max(vam) : 0,
+    source: fromTest ? 'test' : 'levels',
+    testVam,
+    testDate: testVam > 0 && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null,
+    levelsVam,
+    behind: fromTest && testVam - levelsVam > VAM_TOL + 1e-9 ? round1(testVam - levelsVam) : 0,
+  };
+}
+
+const vamDay = (key) => (key ? ` del ${fmt.dateShort(key).split(' ').slice(1).join(' ')}` : '');
+
+/** De dónde sale la VAM de `vamNow`, con las mismas palabras en todas las pantallas. */
+export function vamSourceLabel(v) {
+  if (v?.source === 'test') return `Medida en tu test${vamDay(v.testDate)}`;
+  return v?.testVam > 0 ? 'Según tus velocidades actuales' : 'Estimada por tus velocidades';
+}
+
+/** Frase que explica la diferencia entre el test y las velocidades cuando la hay ('' si van a la par). */
+export function vamGapNote(v) {
+  if (!v) return '';
+  if (v.source === 'test') return v.behind > 0 ? 'Tus velocidades aún van por debajo: suben poco a poco.' : '';
+  return v.testVam > 0 ? `Tus velocidades van por encima de lo que midió tu test${vamDay(v.testDate)} (${fmt.speed(v.testVam)} km/h).` : '';
+}
 
 /** Categoría orientativa de VO₂máx por edad y sexo (normas tipo ACSM/Cooper, simplificadas). */
 export function vo2Category(vo2, age = 46, sex = 'm') {

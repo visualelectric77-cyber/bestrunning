@@ -796,6 +796,7 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
     date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info, race,
     role: kind === 'rest' ? null : def.role ? ROLE_NAME[def.role] : 'easy',
     surprise: !isOverride && !!def.surprise,
+    focus: !isOverride && kind !== 'rest' && def.focus ? def.focus : null,   // la sesión de la semana que trabaja tu enfoque
     event: !isOverride && def.event ? { key: def.event.key, name: def.event.name } : null,
     intro: kind === 'rest' ? '' : isOverride && !def.role ? '' : introFor(info, def, week.adapt),
   };
@@ -878,6 +879,7 @@ export function planDay(state, dateKey, now = new Date()) {
     isOverride: r.isOverride,
     role: r.role,
     surprise: r.surprise,
+    focus: r.focus || null,
     event: r.event,
     intro: r.intro,
     ...(r.race ? { race: r.race } : {}),

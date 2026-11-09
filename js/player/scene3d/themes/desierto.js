@@ -23,6 +23,7 @@ const SAND_TILE = 9;
 const AHEAD = 520;
 const ROCK_P = 240;     // periodo del patrón de piedras (m)
 const MESA_P = 6000;    // periodo de las mesetas (m)
+const DEG = Math.PI / 180;
 
 export async function createTheme(ctx) {
   const { THREE, root, camera, scene, renderer } = ctx;
@@ -42,14 +43,36 @@ export async function createTheme(ctx) {
   const runner = createRunner(ctx, {
     exposure: 1,
     finale: (p, portrait) => { p.y = portrait ? 9 : 7; p.z = portrait ? 7 : 6; p.lookY = 0; p.lookZ = -60; p.fov = portrait ? 60 : 56; },
+    // PLANO FINAL: corte a ras de la carretera mirando al cielo: la Vía Láctea ocupa dos tercios de la pantalla y los
+    // captafaros se pierden hacia el horizonte. La cámara levanta la vista muy despacio. Con movimiento reducido, fijo.
+    finaleShot: (T, { clock, portrait, still }) => {
+      const e = still ? 0.5 : 1 - Math.exp(-Math.min(clock, 90) / 14);
+      const az = (portrait ? 10 : 6) * DEG;
+      const el = ((portrait ? 13 : 7) + (portrait ? 5 : 3) * e) * DEG;
+      T.position.set(0.9, 0.5 + 0.25 * e, 2 - 1.5 * e);
+      T.lookAt.set(T.position.x + 100 * Math.sin(az) * Math.cos(el), T.position.y + 100 * Math.sin(el), T.position.z - 100 * Math.cos(az) * Math.cos(el));
+      T.fov = portrait ? 70 : 50;
+    },
   });
 
   // ── cielo, entorno, luz de las estrellas ──
-  const sky = skyDome(ctx, skyTex, skyMeta, { gain: 0.7, grad: 0.1, gradEl: 0.6, black: 0.09, tint: new THREE.Color(0.92, 0.95, 1.08) });
+  const sky = skyDome(ctx, skyTex, skyMeta, { gain: 0.75, grad: 0.1, gradEl: 0.6, black: 0.12, tint: new THREE.Color(0.92, 0.95, 1.08), meteor: true });
+  {
+    // La foto trae una cúpula de contaminación lumínica (mostaza, con grano) hasta ~30° de altura: justo la banda donde
+    // cae el número del HUD en vertical, que quedaba sobre un velo gris-verdoso (luminancia 0,15) en vez de sobre las
+    // estrellas. Se baja el panorama 18°: esa cúpula queda bajo el suelo salvo un resto de bruma en el horizonte, y el
+    // campo de estrellas y la Vía Láctea bajan hasta el número (0,10). El tope de la foto pasa de 76° a 58° de altura,
+    // por encima de lo que encuadra la cámara.
+    const tilt = (18 * Math.PI) / 180;
+    sky.u.uCrop.value.z -= tilt;
+    sky.u.uCrop.value.w -= tilt;
+  }
   root.add(sky.mesh);
   scene.environment = envFrom(ctx, envTex);
   scene.environmentIntensity = 0.55;
-  const hor = new THREE.Color().setRGB(...skyMeta.horizon).multiplyScalar(0.3);
+  // niebla más oscura que el cielo del horizonte: las mesetas y la llanura lejana quedan en silueta (con 0,3 salían
+  // más claras que el cielo, como cartón iluminado)
+  const hor = new THREE.Color().setRGB(...skyMeta.horizon).multiplyScalar(0.2);
   scene.fog = new THREE.FogExp2(hor, 0.0011);
   const moon = new THREE.DirectionalLight(new THREE.Color(0.55, 0.62, 0.85), 0.22);
   moon.position.set(0.5, 0.6, -1).multiplyScalar(100);
@@ -170,19 +193,28 @@ export async function createTheme(ctx) {
   root.add(rockGroup);
 
   // ── mesetas lejanas (siluetas de techo plano a 1–3 km; patrón de 6 km) ──
-  const mesaGeo = new THREE.CylinderGeometry(1, 1.25, 1, 18, 3);
+  // Perfil de meseta de verdad (misma malla instanciada, una llamada): talud de derrubios hasta el 40 % de la altura,
+  // pared casi vertical con cárcavas encima y cima en dos niveles con el borde roto. Antes era un cilindro liso.
+  const mesaGeo = new THREE.CylinderGeometry(1, 1, 1, 40, 6);
   {
     const p = mesaGeo.attributes.position;
+    const sm = (v) => { const c = Math.min(1, Math.max(0, v)); return c * c * (3 - 2 * c); };
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i); const z = p.getZ(i); const y = p.getY(i);
+      const rad = Math.hypot(x, z);
       const a = Math.atan2(z, x);
-      const r = 1 + 0.18 * Math.sin(a * 3 + 0.5) + 0.1 * Math.sin(a * 7 + 2.1);
-      p.setXYZ(i, x * r, y, z * r);
+      const h = y + 0.5;
+      let r = 1 + 0.18 * Math.sin(a * 3 + 0.5) + 0.1 * Math.sin(a * 7 + 2.1) + 0.05 * Math.sin(a * 13 + 4.0);
+      if (h < 0.4) r += Math.pow(1 - h / 0.4, 1.25) * 0.75;
+      else r += 0.03 * Math.sin(a * 23 + 1.3) - 0.06 * (h - 0.4);
+      let yy = y;
+      if (h > 0.99) yy = rad > 0.5 ? y - 0.17 * sm((Math.sin(a * 2 + 0.7) - 0.1) / 0.5) - 0.03 * (0.5 + 0.5 * Math.sin(a * 5 + 1.0)) : y - 0.05;
+      p.setXYZ(i, x * r, yy, z * r);
     }
     mesaGeo.computeVertexNormals();
   }
   const mesaMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.1, 0.08, 0.07), roughness: 1 });
-  const nMesa = 22;
+  const nMesa = 26;
   const mesas = new THREE.InstancedMesh(mesaGeo, mesaMat, nMesa * 2);
   // Las dos copias del patrón son la MISMA lista (si no, al enlazar cada 6 km saltaban mesetas). Cada meseta queda
   // lejos de la carretera contando su radio de verdad (base 1,25 × escala, más el bulto de 0,28): antes una meseta
@@ -191,16 +223,20 @@ export async function createTheme(ctx) {
   const mesaList = [];
   for (let k = 0; k < nMesa; k++) {
     const side = k % 2 ? 1 : -1;
-    const w = 120 + mr() * 380;
+    // una de cada seis es un cerro testigo: estrecho y alto (rompe la línea de mesetas anchas)
+    const butte = k % 6 === 3;
+    const w = butte ? 45 + mr() * 40 : 100 + mr() * 300;
     const d = w * (0.6 + mr() * 0.8);
-    const h = 40 + mr() * 110;
-    const reach = Math.max(w, d) * 1.25 * 1.3;
-    mesaList.push({ x: side * (reach + 120 + mr() * 900), h, w, d, z: -(k / nMesa) * MESA_P - mr() * 200 });
+    const h = butte ? 110 + mr() * 70 : 40 + mr() * 110;
+    // radio de verdad: planta (hasta 1,33) + talud (0,75)
+    const reach = Math.max(w, d) * 2.1;
+    mesaList.push({ x: side * (reach + 120 + mr() * 900), h, w, d, rot: mr() * 6.28, z: -(k / nMesa) * MESA_P - mr() * 200 });
   }
   setInstances(ctx, mesas, nMesa * 2, (i, t) => {
     const m = mesaList[i % nMesa];
     t.p.set(m.x, m.h / 2 - 2, m.z - (i >= nMesa ? MESA_P : 0));
     t.s.set(m.w, m.h, m.d);
+    t.e.set(0, m.rot, 0);
   });
   mesas.frustumCulled = false;
   const mesaGroup = new THREE.Group();
@@ -216,6 +252,42 @@ export async function createTheme(ctx) {
   const fog0 = scene.fog.density;
   const fogC0 = scene.fog.color.clone();
   const warm = new THREE.Color(0.55, 0.36, 0.26);
+
+  // ── el cielo, protagonista ──
+  // La Vía Láctea entra en escena a lo largo de la clase: el panorama gira 9° en acimut, tan despacio que no se ve
+  // moverse (empieza fuera de cuadro a la derecha y acaba junto al número). Y, muy de vez en cuando, una estrella
+  // fugaz: un trazo fino de ~0,9 s en la franja libre entre la barra superior y la etiqueta del tramo, como mucho una
+  // cada minuto y medio, sin bloom (brillo < umbral) y nunca con movimiento reducido. Todo sale del reloj de la clase.
+  const crop0 = sky.u.uCrop.value.clone();
+  const totalSec = Math.max(60, ctx.timeline.totalSec);
+  const hash = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return v - Math.floor(v); };
+  const dirOf = (out, az, el) => out.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
+  const METEOR_SLOT = 97; const METEOR_SEC = 0.9;
+  function meteor(f) {
+    const K = sky.u.uMetK.value;
+    K.y = 0;
+    if (f.reducedMotion || liveWeather()?.cloud > 0.5) return;
+    let p = -1; let seed = 0; let az0 = 0; let el0 = 0;
+    if (f.finale > 0) {
+      // uno solo, con el plano final ya asentado, en el cielo que encuadra ese plano
+      p = (runner.finClock - 4.2) / 1.1; seed = 7.3; az0 = 7 * DEG; el0 = 34 * DEG;
+    } else if (f.running) {
+      const k = Math.floor(f.t / METEOR_SLOT);
+      if (hash(k) < 0.65) {
+        p = (f.t - k * METEOR_SLOT - (18 + 55 * hash(k + 0.31))) / METEOR_SEC;
+        seed = k; az0 = (hash(k + 0.57) * 24 - 12) * DEG; el0 = (21 + 3 * hash(k + 0.73)) * DEG;
+      }
+    }
+    if (!(p > 0 && p < 1)) return;
+    const fin = f.finale > 0;
+    const dir = fin || hash(seed + 0.11) < 0.5 ? -1 : 1;   // en el final, hacia la parte oscura del cielo
+    const scale = fin ? 1.6 : 1;
+    dirOf(sky.u.uMetA.value, az0, el0);
+    dirOf(sky.u.uMetB.value, az0 + dir * (5 + 3 * hash(seed + 0.23)) * DEG * scale, el0 - (1.5 + 1.8 * hash(seed + 0.41)) * DEG * scale);
+    K.x = p * 1.4;                                   // la cabeza recorre el trazo y la cola termina de salir
+    K.y = (fin ? 1.5 : 0.85) * Math.pow(Math.sin(Math.PI * p), 0.6);
+    K.z = fin ? 0.0022 : 0.0017;
+  }
 
   const inst = {
     director: { scale: 1.0, maxDown: 0.15, orbit: true },
@@ -238,6 +310,10 @@ export async function createTheme(ctx) {
       scene.fog.density = fog0 * (w ? 1 + 2 * w.cloud + 4 * w.mist : 1);
       scene.fog.color.copy(fogC0).lerp(warm, w ? 0.5 * w.golden + 0.25 * w.day : 0);
       rain.update(f, S, w ? w.rain : 0);
+      const turn = (1 - Math.min(1, Math.max(0, f.t / totalSec))) * 9 * DEG;
+      sky.u.uCrop.value.x = crop0.x + turn;
+      sky.u.uCrop.value.y = crop0.y + turn;
+      meteor(f);
     },
     event(type, data) { runner.event(type, data); },
     get _debug() { return runner.debug(); },

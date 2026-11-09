@@ -5,7 +5,9 @@ import { icon, listIcon, navBar, enableCollapsingHeader, toggle, stepper, segmen
 import { haptic } from '../core/haptics.js';
 import {
   ZONES, LEVEL_KEYS, MIN_LEVEL_GAP, hrZones, hrMaxFromAge, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category, enforceLevelOrder,
+  vamNow, vamSourceLabel, vamGapNote,
 } from '../training/levels.js';
+import { sessionTally, sessionsText } from '../training/stats.js';
 import { CATEGORIES } from '../training/templates.js';
 import { planWeek, cycleInfo, CYCLE_WEEKS } from '../training/planner.js';
 import { scheduleDays, weekShape } from '../training/week-shape.js';
@@ -284,7 +286,7 @@ function rowSummary(key, s) {
       if (isNative()) return 'App del reloj';
       return s.integrations?.watchReminder === false ? 'Sin aviso' : 'Con Atajos';
     case 'install': return isStandalone() ? 'Instalada' : 'Sin instalar';
-    case 'data': return `${hist.length} ${hist.length === 1 ? 'sesión' : 'sesiones'}`;
+    case 'data': return esc(safe(() => sessionsText(hist), ''));
     case 'about': return `v${esc(APP_VERSION)}`;
     default: return '';
   }
@@ -295,7 +297,9 @@ function rootHtml(s) {
   const name = String(p.name || '').trim();
   const hist = Array.isArray(s.history) ? s.history : [];
   const km = hist.reduce((a, h) => a + (h.distanceKm || 0), 0);
-  const vam = safe(() => vamFromLevels(s.levels || DEFAULT_LEVELS), 0);
+  // Las mismas cifras que Progreso: sesiones que cuentan (stats.sessionTally) y la VAM única (levels.vamNow)
+  const nSes = safe(() => sessionTally(hist).sessions, 0);
+  const vam = safe(() => vamNow(s).vam, 0) || safe(() => vamFromLevels(s.levels || DEFAULT_LEVELS), 0);
   const meta = [p.age ? `${p.age} años` : '', p.weightKg ? `${fmt.dec1(p.weightKg).replace(',0', '')} kg` : ''].filter(Boolean).join(' · ');
   const since = memberSince(s);
   const groups = GROUPS.map((g) => group(g.title, groupItems(g).map((k) => {
@@ -314,7 +318,7 @@ function rootHtml(s) {
       <h2 class="st-hero__name">${name ? esc(name) : 'Corredor/a'}</h2>
       <div class="st-hero__meta">${esc(meta)}${since ? `<br>${esc(since)}` : ''}</div>
       <div class="card st-hero__stats">
-        <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'Sesión' : 'Sesiones'}</span></div>
+        <div><b class="num">${nSes}</b><span>${nSes === 1 ? 'Sesión' : 'Sesiones'}</span></div>
         <div><b class="num">${fmt.dec1(km)}</b><span>Kilómetros</span></div>
         <div><b class="num">${fmt.speed(vam)}</b><span>VAM km/h</span></div>
       </div>
@@ -384,13 +388,19 @@ function profileHtml(s) {
 /* ───────────── VELOCIDADES ───────────── */
 
 function vamCardHtml(s) {
-  const vam = safe(() => vamFromLevels(s.levels || DEFAULT_LEVELS), 0);
+  // La VAM única (levels.vamNow), con su origen: la de tu test o la de estas velocidades, nunca dos cifras sueltas
+  const now = safe(() => vamNow(s), null);
+  const vam = Number(now?.vam) || safe(() => vamFromLevels(s.levels || DEFAULT_LEVELS), 0);
   const vo2 = safe(() => estimateVo2max(vam), 0);
   const cat = safe(() => vo2Category(vo2, s.profile?.age || 46, s.profile?.sex || 'm'), null);
-  const last = s.progression?.lastTest;
-  return `<div class="eyebrow">VAM estimada</div>
+  // Aquí se editan las velocidades: si aún van por debajo del test, se dice también a cuánto equivalen
+  const gap = now?.behind > 0
+    ? `Con estas velocidades, ${fmt.speed(now.levelsVam)} km/h: aún van por debajo y suben poco a poco.`
+    : safe(() => vamGapNote(now), '');
+  return `<div class="eyebrow">Tu VAM</div>
     <div class="st-vam__big"><span class="num">${fmt.speed(vam)}</span><span class="unit">km/h</span></div>
-    <div class="st-vam__sub">VO₂máx ≈ <b class="num">${fmt.dec1(vo2)}</b>${cat ? ` · ${esc(cat.label)}` : ''}${last?.vam ? ` · último test ${fmt.speed(last.vam)}` : ''}</div>
+    <div class="st-vam__sub">${esc(safe(() => vamSourceLabel(now), 'Estimada por tus velocidades'))} · VO₂máx ≈ <b class="num">${fmt.dec1(vo2)}</b>${cat ? ` · ${esc(cat.label)}` : ''}</div>
+    ${gap ? `<div class="st-vam__sub">${esc(gap)}</div>` : ''}
     <button type="button" class="btn btn--secondary btn--block st-vam__btn" data-st="vam"><span>Recalcular desde tu VAM</span></button>`;
 }
 
@@ -1366,8 +1376,9 @@ function dataHtml(s) {
   const hist = Array.isArray(s.history) ? s.history : [];
   const bytes = safe(() => new Blob([exportState()]).size, 0);
   const firstKey = hist.reduce((m, h) => (h?.dayKey && (!m || h.dayKey < m) ? h.dayKey : m), null);
+  const nSes = safe(() => sessionTally(hist).sessions, 0);
   return `<section class="card st-datasum">
-      <div><b class="num">${hist.length}</b><span>${hist.length === 1 ? 'Sesión' : 'Sesiones'}</span></div>
+      <div><b class="num">${nSes}</b><span>${nSes === 1 ? 'Sesión' : 'Sesiones'}</span></div>
       <div><b class="num">${firstKey ? esc(fmt.dateShort(firstKey).split(' ').slice(1).join(' ')) : '—'}</b><span>Primera</span></div>
       <div><b class="num">${bytes < 1024 * 1024 ? `${fmt.int(bytes / 1024)}` : fmt.dec1(bytes / 1048576)}<span class="unit">${bytes < 1024 * 1024 ? 'KB' : 'MB'}</span></b><span>Tamaño</span></div>
     </section>
@@ -1455,12 +1466,11 @@ export async function importBackup(input) {
     toast('Ese archivo no es una copia de RITMUP', { kind: 'error' });
     return false;
   }
-  const n = Array.isArray(j.history) ? j.history.length : 0;
   const when = typeof j.exportedAt === 'string' && !Number.isNaN(Date.parse(j.exportedAt))
     ? ` del ${fmt.dateLong(todayKey(new Date(j.exportedAt)))}` : '';
   const yes = await confirmDialog({
     title: '¿Restaurar esta copia?',
-    message: `La copia${when} tiene ${n} ${n === 1 ? 'sesión' : 'sesiones'}. Sustituirá todos tus datos actuales (historial, plan, velocidades y ajustes) por los de la copia.`,
+    message: `La copia${when} tiene ${safe(() => sessionsText(j.history), '') || '0 sesiones'}. Sustituirá todos tus datos actuales (historial, plan, velocidades y ajustes) por los de la copia.`,
     confirmText: 'Restaurar',
     cancelText: 'Cancelar',
     destructive: true,

@@ -130,7 +130,7 @@ export async function createTheme(ctx) {
   const base = [];
   for (let i = 0; i < NR; i++) base.push({ az: 0, span: 1.5, dist: 300, recede: 0, elev: 16 * DEG, top: 24 * DEG, alpha: 1, fold: 1 });
   const comp = {
-    fov: 60, fy: 0.47, vpX: 0.5, shiftY: 0, elTop: 29 * DEG, ceil: 22 * DEG, tierStep: 3 * DEG,
+    fov: 60, fy: 0.47, vpX: 0.5, shiftY: 0, elTop: 29 * DEG, ceil: 22 * DEG, ceilLow: 22 * DEG, tierStep: 3 * DEG,
     riverW: 0.7, ghostX: 1.25, bandEl: 20 * DEG, bandW: 3 * DEG, lineAz0: -10, lineAz1: -9, nearFade: 8,
   };
   // Vertical: cuatro capas a lo ancho, cada vez más lejanas, algo más altas y tenues
@@ -200,7 +200,12 @@ export async function createTheme(ctx) {
     comp.elTop = elAt(0);
     // techo: los rayos se extinguen antes de la barra superior (la placa nunca queda sobre color)
     // (la punta de los rayos, ya casi apagada, puede asomar tras el tercio inferior de la barra: nunca su parte brillante)
-    comp.ceil = top ? elAt((portrait ? top.y + top.h * 0.3 : top.y + top.h + 14) / H) : elAt(0.1);
+    // (vertical, nov-26: los rayos ya no mueren bajo la barra superior: pasan por detrás de su placa —que tiene fondo
+    // propio— y siguen hasta el borde de la pantalla ⇒ cortinas de toda la altura del cielo libre, no una franja)
+    comp.ceil = top ? elAt(portrait ? -0.05 : (top.y + top.h + 14) / H) : elAt(portrait ? -0.05 : 0.1);
+    // (solo las dos cortinas delanteras suben hasta arriba: las dos del fondo, más tenues, se quedan bajo la barra —
+    // la mitad del sobredibujo aditivo, medido)
+    comp.ceilLow = top ? elAt((portrait ? top.y + top.h * 0.3 : top.y + top.h + 14) / H) : elAt(0.1);
     if (sp) {
       const e = elAt((sp.y - 14) / H);
       for (let k = 0; k <= 4; k++) cons.push({ a: azAt((sp.x + (sp.w * k) / 4) / W), el: e });
@@ -223,8 +228,8 @@ export async function createTheme(ctx) {
       b.span = cfg.span[i];
       b.dist = cfg.dist[i];
       b.recede = cfg.recede[i];
-      b.elev = Math.min(comp.ceil - (i ? 4 : 3) * DEG, elevFor(b.az, b.span, b.recede, cons, cfg.minEl[i] * DEG) + cfg.lift[i] * DEG);
-      b.top = comp.ceil;
+      b.elev = Math.min((i < 2 ? comp.ceil : comp.ceilLow) - (i ? 4 : 3) * DEG, elevFor(b.az, b.span, b.recede, cons, cfg.minEl[i] * DEG) + cfg.lift[i] * DEG);
+      b.top = i < 2 ? comp.ceil : comp.ceilLow;
       b.alpha = cfg.alpha[i];
       b.fold = cfg.fold[i];
     }
@@ -233,7 +238,7 @@ export async function createTheme(ctx) {
     comp.bandEl = (lowest + comp.ceil) / 2;
     comp.bandW = Math.max(2 * DEG, (comp.ceil - lowest) / 2);
     // peldaños del test: tres escalones visibles entre el filo base y el techo (con margen para el pliegue residual)
-    comp.tierStep = clamp((comp.ceil - base[0].elev - 2 * DEG) / 3, 1.2 * DEG, 3.6 * DEG);
+    comp.tierStep = clamp((comp.ceilLow - base[0].elev - 2 * DEG) / 3, 1.2 * DEG, 3.6 * DEG);
     // filete del horizonte: en horizontal no cruza por detrás del número (empieza en su borde derecho)
     if (!portrait && sp) { comp.lineAz0 = azAt((sp.x + sp.w - 20) / W); comp.lineAz1 = azAt((sp.x + sp.w + 40) / W); } else { comp.lineAz0 = -10; comp.lineAz1 = -9; }
     // motas cercanas: se apagan antes de saltar demasiados píxeles por fotograma (más lejos en vertical, donde la
@@ -403,7 +408,7 @@ export async function createTheme(ctx) {
     // para inclinar las paredes sin apagar el filo ⇒ se queda la composición base (más fuerte).
     corridor += ((portrait && f.zone === 'sprint' && f.status !== 'finished' && !inFinale ? 1 : 0) * (1 - st.tierMix) - corridor) * k(reduced ? 0.7 : 1.1);
     // el techo del final se abre con la cámara (el HUD de resumen ya no usa la barra superior)
-    const ceilFin = lerp(comp.ceil, comp.elTop + 4 * DEG, fin);
+    const ceilFin = lerp(comp.ceil, comp.elTop + 20 * DEG, fin);
     for (let i = 0; i < NR; i++) {
       const j = jitter[i];
       const kj = k(reduced ? 1.8 : 3.4);
@@ -420,7 +425,9 @@ export async function createTheme(ctx) {
       rib.dist = b.dist;
       rib.recede = b.recede;
       rib.elev = b.elev - gap * 0.3 * tension + j.el;
-      rib.top = ceilFin;
+      rib.top = i < 2 ? ceilFin : lerp(comp.ceilLow, comp.elTop + 20 * DEG, fin);
+      // plano final (sin HUD): las cortinas bajan a colgarse sobre el horizonte y llenan el cielo
+      if (fin > 0) rib.elev = lerp(rib.elev, (3.2 + 3 * i) * DEG + j.el, fin);
       // altura útil hasta el techo; la respiración y la tensión solo la ACORTAN (nunca invade la barra superior)
       rib.heightK = lerp(1, 0.8, tension) * (1 - 0.08 * (1 - br));
       // en vertical la banda libre es estrecha: pliegues menos profundos y más frecuentes (mismo brillo de canto)
@@ -465,7 +472,7 @@ export async function createTheme(ctx) {
     // últimos 3 s: el filo de las cortinas vira al color del tramo siguiente barriendo el cielo (se queda en pausa)
     ru.uNextFront.value = f.nextZone && f.status !== 'finished' ? f.approach * 1.3 : 0;
     ru.uGain.value = 0.34 * (0.92 + 0.16 * st.energy) * (1 + 0.1 * br) * (1 + 0.12 * drop) * (1 + 0.06 * sp.bass * (reduced ? 0 : 1))
-      * (1 + 0.05 * f.approach) * (1 - 0.12 * (1 - st.drift)) * (1 + 0.1 * fin);
+      * (1 + 0.05 * f.approach) * (1 - 0.12 * (1 - st.drift)) * (1 + 0.45 * fin);
     ru.uCap.value = 0.85;
     ru.uSpecK.value = reduced ? 0 : 1;
     ru.uWave.value = waveAmp;
@@ -606,6 +613,10 @@ export async function createTheme(ctx) {
     const feel = ctx.speedFeel;
     gu.uFeel.value.set(feel ? feel.cue : 1, feel ? feel.density : 1);
     gu.uSun.value.copy(sky.u.uSun.value);
+    // reflejo de la aurora en el hielo: el color del filo (y el del tramo siguiente cuando ya barre el cielo)
+    gu.uReflCol.value.copy(low).lerp(next, f.nextZone && f.status !== 'finished' ? clamp01(f.approach) * 0.6 : 0);
+    gu.uRefl.value.set(0.05 * (0.8 + 0.3 * st.energy) * (1 + 0.1 * br) * intro * (1 + 2.4 * fin), 0.085 * (1 + 0.6 * fin), reduced ? 0 : (f.time * 0.02) % 500, 0);
+    gu.uReflAz.value.set(comp.lineAz0, comp.lineAz1);
     gu.uSunAz.value = sky.u.uSunAz.value;
     for (let i = 0; i < RIPS; i++) {
       const r = rips[i];

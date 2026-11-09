@@ -20,10 +20,37 @@ export function sessionCounts(s) {
   return countsAsSession(s);
 }
 
+/**
+ * Clase «completada» (el ✓ del resumen, del historial y de la tarjeta): la marca del motor al acabar (≥ 90 %) o, en
+ * sesiones sin esa marca, el mismo 90 %. Es más exigente que «cuenta como sesión» y se rotula distinto.
+ */
+export function sessionCompleted(s) {
+  return !!s && typeof s === 'object' && (s.completed === true || num(s.completionPct) >= 0.9);
+}
+
+/**
+ * Recuento único del historial: `sessions`, las que cuentan (sessionCounts), y `started`, las clases empezadas que
+ * no llegan a contar. Todo lo que la app rotule «sesiones» sale de aquí; km, minutos y kcal suman también las empezadas.
+ */
+export function sessionTally(history) {
+  const h = list(history);
+  const sessions = h.filter(sessionCounts).length;
+  return { sessions, started: h.length - sessions };
+}
+
+/** «17 sesiones · 1 empezada»: el mismo texto en Hoy, Progreso, Historial y Ajustes. */
+export function sessionsText(history) {
+  const t = sessionTally(history);
+  const bits = [];
+  if (t.sessions || !t.started) bits.push(`${t.sessions} ${t.sessions === 1 ? 'sesión' : 'sesiones'}`);
+  if (t.started) bits.push(`${t.started} ${t.started === 1 ? 'empezada' : 'empezadas'}`);
+  return bits.join(' · ');
+}
+
 export function totals(history) {
   const h = list(history);
   return {
-    sessions: h.filter((s) => num(s.elapsedSec) >= 60).length,
+    sessions: sessionTally(h).sessions,
     km: round2(h.reduce((a, s) => a + num(s.distanceKm), 0)),
     sec: Math.round(h.reduce((a, s) => a + num(s.elapsedSec), 0)),
     kcal: Math.round(h.reduce((a, s) => a + num(s.kcal), 0)),
@@ -46,7 +73,7 @@ export function weeklyBuckets(history, weeks = 12, endKey = todayKey()) {
     if (!b) continue;
     b.km += num(s.distanceKm);
     b.sec += num(s.elapsedSec);
-    if (num(s.elapsedSec) >= 60) b.sessions += 1;
+    if (sessionCounts(s)) b.sessions += 1;
   }
   for (const b of buckets) {
     b.km = round2(b.km);

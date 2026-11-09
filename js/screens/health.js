@@ -53,9 +53,11 @@ function readinessCard({ r, sl }) {
   const stats = [];
   if (r?.resting) stats.push(stat('Reposo', fmt.int(r.resting.now), 'ppm', `${signed(r.resting.delta)} de lo normal`, r.resting.delta >= 3 ? 'is-warn' : r.resting.delta <= 0 ? 'is-ok' : ''));
   if (r?.hrv) stats.push(stat('VFC', fmt.int(r.hrv.now), 'ms', `${signed(r.hrv.pct)} %`, r.hrv.pct <= -10 ? 'is-warn' : r.hrv.pct >= 0 ? 'is-ok' : ''));
-  if (last) stats.push(stat('Sueño', fmtSleep(last.asleep), 'h', sl.base != null ? `${signed(last.asleep - sl.base, ' min')}` : 'anoche'));
+  // Reposo y VFC son la media de tus últimos 7 días frente a las 4 semanas de antes (readiness.js); el sueño, el de anoche
+  const dSleep = last && sl.base != null ? Math.round(last.asleep - sl.base) : null;
+  if (last) stats.push(stat('Anoche', fmtSleep(last.asleep), 'h', dSleep == null ? 'de sueño' : dSleep ? `${fmt.int(Math.abs(dSleep))} min ${dSleep > 0 ? 'más' : 'menos'}` : 'lo normal en ti'));
   return `<div class="card pg-card pg-health">
-    <div class="eyebrow">Recuperación · hoy</div>
+    <div class="eyebrow">Recuperación · últimos 7 días</div>
     ${r?.title ? `<p class="pg-health__title"><span class="pg-health__dot" style="background:${dot}"></span>${esc(r.title)}</p>
     <p class="pg-health__text">${esc(r.text || '')}</p>` : ''}
     ${stats.length ? `<div class="hl-stats hl-stats--${stats.length}">${stats.join('')}</div>` : ''}
@@ -276,13 +278,13 @@ function formaDetail(s, today) {
     : `<div class="card pg-card pg-health">${f ? fitnessWaiting(f) : ''}</div>`;
   const vo2 = v
     ? `<div class="card pg-card pg-health hl-mini">
-        <div class="eyebrow">VO₂ máx</div>
+        <div class="eyebrow">VO₂ máx · Watch</div>
         <p class="hl-big num">${fmt.dec1(v.last)}</p>
         <span class="hl-stat__sub num ${v.change > 0 ? 'is-ok' : ''}">${v.change != null ? `${v.change > 0 ? '+' : v.change < 0 ? '−' : '±'}${fmt.dec1(Math.abs(v.change))} en ${v.weeks} sem.` : shortDate(v.lastDay)}</span>
         ${spark(v.points.map((p) => p.v))}
         <p class="hl-mini__note">Lo estima el Apple Watch al caminar o correr al aire libre.</p>
       </div>`
-    : `<div class="card pg-card pg-health hl-mini"><div class="eyebrow">VO₂ máx</div><p class="hl-mini__note">${isNative() ? 'Sin datos en Salud: el Apple Watch lo estima al caminar o correr al aire libre con buena señal de GPS.' : 'Se ve en la app de RITMUP para iPhone.'}</p></div>`;
+    : `<div class="card pg-card pg-health hl-mini"><div class="eyebrow">VO₂ máx · Watch</div><p class="hl-mini__note">${isNative() ? 'Sin datos en Salud: el Apple Watch lo estima al caminar o correr al aire libre con buena señal de GPS.' : 'Se ve en la app de RITMUP para iPhone.'}</p></div>`;
   const rec = rc
     ? `<div class="card pg-card pg-health hl-mini">
         <div class="eyebrow">Al acabar</div>

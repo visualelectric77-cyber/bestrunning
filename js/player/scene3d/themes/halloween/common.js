@@ -102,7 +102,7 @@ vec3 candleAt(float srel, out float br) {
   return mix(uColOld, uColNew, on);
 }
 // luz de la vela: naranja de calabaza teñido por el color de la zona
-vec3 candleTint(vec3 zc) { return mix(CANDLE, zc, 0.6); }
+vec3 candleTint(vec3 zc) { return mix(CANDLE, zc, 0.74); }
 float flick(float seed) {
   float t = uLamp.z;
   return 1.0 - uLamp.y * (0.06 + 0.06 * sin(t * 7.3 + seed * 40.0) * sin(t * 3.1 + seed * 17.0));

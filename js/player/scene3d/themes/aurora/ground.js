@@ -34,6 +34,9 @@ uniform vec4 uGhost;
 uniform vec3 uSun;       // hora real: resplandor del sol bajo (mismo término que el cielo, reflejado por el satinado)
 uniform float uSunAz;
 uniform vec4 uRip[RIPS]; // ondas del bombo: centro x, centro d (u por delante), radio (u), intensidad
+uniform vec3 uReflCol;   // reflejo de la aurora en el hielo: color (el del filo de las cortinas)
+uniform vec4 uRefl;      // x intensidad, y caída con la depresión (rad), z reloj lento, w -
+uniform vec2 uReflAz;    // ventana de acimut (horizontal: el reflejo no cruza por detrás del número)
 varying vec3 vW;
 RIVER_CHUNK
 NOISE_CHUNK
@@ -63,9 +66,10 @@ void main() {
   vec3 col = uGround * (0.75 + 0.5 * mot);
   // horizonte (mismo color y resplandor que el cielo a elevación 0): el satinado lo refleja y la niebla se funde en él
   vec3 dir = toCam / max(dist, 1e-3);
-  float vp = exp(-abs(atan(dir.x, -dir.z)) * 7.0);
+  float azR = atan(dir.x, -dir.z);   // (un solo atan para el punto de fuga, el sol y el reflejo)
+  float vp = exp(-abs(azR) * 7.0);
   vec3 hz = uHorizon + uAccent * (exp(-abs(dir.y) * 110.0) * (0.0015 + 0.022 * vp) + exp(-abs(dir.y) * 500.0) * 0.012 * vp) * uVpK;
-  float sAz = abs(atan(dir.x, -dir.z) - uSunAz);
+  float sAz = abs(azR - uSunAz);
   hz += uSun * (exp(-abs(dir.y) * 34.0) * (0.3 + 0.7 * exp(-sAz * 2.4)));
   float cosT = clamp(abs(dir.y), 0.0, 1.0);
   float fr = 0.03 + 0.97 * pow(1.0 - cosT, 5.0);
@@ -75,6 +79,13 @@ void main() {
   float feelK = clamp(uFeel.x, 0.0, 1.5);
   float nearK = mix(smoothstep(2.0, 14.0, d), smoothstep(0.6, 5.0, d), min(feelK, 1.0));
   col += uAmb * tex * uRelief * nearK * (0.35 + 0.65 * smoothstep(4.0, 60.0, d) + 0.5 * feelK * (1.0 - smoothstep(6.0, 30.0, d))) * (1.0 - fr * 0.6);
+  // reflejo de la aurora en la llanura helada: el hielo es satinado y rugoso, así que no la copia como un espejo: la
+  // estira hacia ti en columnas verticales suaves (como la luna sobre el mar), más vivas pegadas al horizonte, y deja
+  // ver el relieve de la escarcha. Mismo color que el filo de las cortinas; lento, sin brillos.
+  float dep = max(-dir.y, 0.0);
+  float colsR = 0.58 + 0.42 * sin(azR * 23.0 + uRefl.z * 3.0 + 2.0 * sin(azR * 7.0 - uRefl.z));   // (dos senos: más barato que un ruido)
+  float reflK = exp(-dep / uRefl.y) * smoothstep(0.0015, 0.012, dep) * colsR * smoothstep(uReflAz.x, uReflAz.y, azR);
+  col += uReflCol * reflK * uRefl.x * (0.55 + 0.45 * tex);
   // resplandor del río (del color de cada tramo de río), que también ilumina el relieve
   vec3 rc = uRiverCol;
   for (int k = 0; k < GATES; k++) if (uGate[k].y > 0.0) rc = mix(rc, uGateCol[k], smoothstep(uGate[k].x - 0.5, uGate[k].x + 0.5, d));
@@ -147,6 +158,7 @@ export function createGround(ctx, shared) {
     uMark: shared.uMark, uGhost: shared.uGhost,
     uSun: { value: new THREE.Color(0, 0, 0) }, uSunAz: { value: -0.3 },
     uRip: { value: Array.from({ length: RIPS }, () => new THREE.Vector4(0, -100, 0, 0)) },
+    uReflCol: { value: new THREE.Color() }, uRefl: { value: new THREE.Vector4(0, 0.09, 0, 0) }, uReflAz: { value: new THREE.Vector2(-10, -9) },
   };
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1800, 1800), new THREE.ShaderMaterial({
     uniforms: u, vertexShader: VERT,

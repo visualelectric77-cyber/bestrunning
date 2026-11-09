@@ -217,7 +217,7 @@ function trendHtml(t) {
   return `<section class="pg-section stack">
     ${sectionHeader('Cómo te salen las clases')}
     <div class="card ca-card">
-      <div class="ca-chart-head"><b class="num">${t.avg}</b><small>de 100 de media</small>${dl ? `<span class="ca-mark ${dl > 0 ? 'is-good' : 'is-bad'}">${dl > 0 ? '+' : '−'}${Math.abs(dl)}</span>` : ''}</div>
+      <div class="ca-chart-head"><b class="num">${t.avg}</b><small>de 100 de media</small>${dl ? `<span class="ca-mark ${dl > 0 ? 'is-good' : 'is-bad'}">${dl > 0 ? '+' : '−'}${Math.abs(dl)}</span>${t.half ? `<span class="ca-hint">en las últimas ${t.half}</span>` : ''}` : ''}</div>
       <div class="pg-chart">${barChart(bars, { height: 130, valueFormat: (v) => fmt.int(v) })}</div>
     </div>
   </section>`;
@@ -261,7 +261,7 @@ function focusHtml(f) {
     <h3 class="ca-focus__title">${esc(f.title)}</h3>
     <p class="ca-focus__text">${esc(f.text)}</p>
     ${f.keepText ? `<p class="ca-focus__text">${esc(f.keepText)}</p>` : ''}
-    ${f.actionable && !off && f.state !== 'hold' ? '<p class="ca-focus__how">Cambia el tipo de tu sesión clave, sin añadir carga. Si vienes cansado, se pausa solo.</p>' : ''}
+    ${f.actionable && !off && f.state !== 'hold' && f.state !== 'idle' ? '<p class="ca-focus__how">Cambia el tipo de tu sesión clave, sin añadir carga. Si vienes cansado, se pausa solo.</p>' : ''}
     ${f.resultText ? `<p class="ca-focus__result">${esc(f.resultText)}</p>` : ''}
     ${f.actionable ? `<button type="button" class="btn btn--secondary btn--block" data-focus="${off ? 'accept' : 'decline'}">${off ? 'Volver a activarlo' : 'No, déjalo como estaba'}</button>` : ''}
   </section>`;

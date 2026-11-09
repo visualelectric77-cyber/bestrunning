@@ -3,6 +3,7 @@ import { registerRoute, startRouter, navigate, currentRoute } from './core/route
 import { loadActiveSession, saveActiveSession, activeSessionSavedAt } from './core/store.js';
 import { icon, toast, openSheet } from './ui/components.js';
 import { initLiquid } from './ui/liquid.js';
+import { syncFocus } from './training/focus-sync.js';
 import { esc, fmt } from './core/utils.js';
 import { APP_VERSION } from './version.js';
 import { playIntro, introOnResume } from './ui/intro.js';
@@ -327,6 +328,7 @@ function boot() {
       .catch(() => {});
   }
   errorToasts();
+  syncFocus();
   renderTabbar();
   routes();
   startRouter(document.getElementById('view'));

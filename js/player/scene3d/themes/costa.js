@@ -7,7 +7,7 @@
 // Coste: ~14 llamadas de dibujo, PBR con 2 hileras de luces analíticas en las losas, sin pases de reflejo (el mar
 // refleja el panorama, que es lo que de verdad se ve en él).
 import { createRunner, scrollZ } from './kit/runner.js';
-import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
+import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, addStreaks, setInstances } from './kit/world.js';
 import { createRain, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
@@ -73,7 +73,7 @@ void main() {
   // espuma en la orilla (borde del agua junto a la arena) y en algunas crestas
   float shore = vW.x - (${SEA_X.toFixed(1)});
   float fn = texture2D(uNor, p * 0.21 + uTime * 0.02).b;
-  float foam = smoothstep(-2.2, -0.2, shore) * smoothstep(0.35, 0.75, fn + 0.25 * sin((vW.z - uS) * 0.08 + uTime * 0.6));
+  float foam = smoothstep(-2.2, -0.2, shore) * smoothstep(0.35, 0.75, fn + 0.25 * sin((vW.z - uS) * 0.0797965 + uTime * 0.6));
   col = mix(col, uHorizon * 1.25 + vec3(0.06), foam * 0.55);
   gl_FragColor = vec4(col, 1.0);
   #include <fog_fragment>
@@ -122,6 +122,16 @@ export async function createTheme(ctx) {
   const runner = createRunner(ctx, {
     exposure: 0.92,
     finale: (p, portrait) => { p.y = portrait ? 7.5 : 6; p.z = portrait ? 6 : 5; p.lookY = 0.3; p.lookZ = -48; p.fov = portrait ? 58 : 56; },
+    // PLANO FINAL: corte a la orilla, a la altura de quien se sienta en la arena: el mar entrando a la izquierda, la
+    // arena mojada reflejando el amanecer, la montaña de la bahía al fondo y el paseo con sus balizas perdiéndose a la
+    // derecha. La cámara avanza y sube muy despacio. Con movimiento reducido, plano fijo.
+    finaleShot: (T, { clock, portrait, still }) => {
+      const e = still ? 0.4 : 1 - Math.exp(-Math.min(clock, 90) / 12);
+      const az = -(portrait ? 6 : 12) * Math.PI / 180;
+      T.position.set(-5.0 - 0.3 * e, 0.35 + 0.5 * e, 4 - 5 * e);
+      T.lookAt.set(T.position.x + 100 * Math.sin(az), T.position.y + 3 - 1.5 * e, T.position.z - 100 * Math.cos(az));
+      T.fov = portrait ? 72 : 48;
+    },
   });
 
   // ── cielo, entorno, luz y niebla ──
@@ -163,6 +173,65 @@ export async function createTheme(ctx) {
     return m;
   };
   const beachMat = pbr(ctx, beach, { roughness: 0.75, color: new THREE.Color(0.85, 0.8, 0.75) });
+  // ARENA MOJADA: el mar sube y se retira por la playa (una lámina fina con su borde de espuma, a su ritmo en cada
+  // tramo de orilla), deja la arena oscura y pulida —refleja el cielo— hasta la marca de la última ola, y arriba queda
+  // la arena seca, más clara. Todo en el material de la playa: sin geometría ni llamadas nuevas.
+  const shoreU = { uShore: { value: new THREE.Vector3(0, 0, 0) } };   // x avance (m), y tiempo (s)
+  beachMat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, shoreU, { uShoreSky: waterU.uSky, uShoreNor: waterU.uNor, uShoreCrop: waterU.uCrop, uShoreGain: waterU.uGain });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vShoreW;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n  vShoreW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vShoreW;
+uniform vec3 uShore;
+uniform sampler2D uShoreSky, uShoreNor;
+uniform vec4 uShoreCrop;
+uniform float uShoreGain;
+float gFilm; float gWet; float gFoam;
+vec3 shoreSky(vec3 d) {
+  float az = atan(d.x, -d.z);
+  float el = asin(clamp(d.y, -1.0, 1.0));
+  vec2 uv = vec2((az - uShoreCrop.x) / (uShoreCrop.y - uShoreCrop.x), (max(el, uShoreCrop.z + 0.002) - uShoreCrop.z) / (uShoreCrop.w - uShoreCrop.z));
+  return texture2D(uShoreSky, clamp(uv, vec2(0.002), vec2(0.998))).rgb * uShoreGain;
+}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float zz = vShoreW.z - uShore.x;
+    vec2 sp = vec2(vShoreW.x, zz);
+    float n1 = 0.5 + 0.5 * sin(zz * 0.69 + 1.3 * sin(zz * 0.21));
+    float fn = clamp(0.5 + (texture2D(uShoreNor, sp * 0.21 + uShore.y * 0.02).r - 0.5) * 2.6, 0.0, 1.0);
+    float sw = 0.5 + 0.5 * sin(uShore.y * 0.5 - zz * 0.0452389 + 1.5 * sin(zz * 0.0131947));
+    float xf = -8.1 + 1.9 * sw * sw * (3.0 - 2.0 * sw) + 0.45 * n1 + 0.5 * (fn - 0.5);   // frente de la lámina de agua
+    float xw = -5.6 + 0.5 * n1;                                                          // marca de la última ola
+    float back = xf - vShoreW.x;                                                         // m por detrás del frente
+    gFilm = smoothstep(-0.04, 0.4, back);
+    // espuma: el reborde del frente y, detrás, encaje que se deshace
+    gFoam = (1.0 - smoothstep(0.0, 0.16, abs(back - 0.06))) * smoothstep(0.25, 0.6, fn + 0.3)
+      + gFilm * exp(-back / 0.9) * smoothstep(0.52, 0.72, fn) * 0.8;
+    gFoam = clamp(gFoam, 0.0, 1.0);
+    gWet = 1.0 - smoothstep(xw - 0.5, xw + 0.5, vShoreW.x);
+    diffuseColor.rgb *= mix(vec3(2.1, 1.95, 1.75), vec3(0.5), gWet);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.03, 0.05, 0.06), gFilm * 0.45);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.8, 0.82, 0.84), gFoam);
+  }`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  {
+    // lo mojado refleja el mismo cielo de foto que el mar (lámina: espejo con una onda mínima; arena mojada: satinada)
+    vec2 sp2 = vec2(vShoreW.x, vShoreW.z - uShore.x);
+    vec3 sNr = texture2D(uShoreNor, sp2 * 0.093 + uShore.y * vec2(0.017, 0.013)).rgb * 2.0 - 1.0;
+    // hacia el mar la lámina se riza como él: el borde recto entre la playa y el plano del mar deja de leerse
+    float rip = 0.05 + 0.1 * gFilm + 0.4 * smoothstep(-6.9, -8.0, vShoreW.x);
+    vec3 sN = normalize(vec3(sNr.x * rip, 1.0, sNr.y * rip));
+    vec3 sV = normalize(cameraPosition - vShoreW);
+    vec3 sR = reflect(-sV, sN);
+    sR.y = abs(sR.y);
+    float sF = 0.02 + 0.98 * pow(1.0 - clamp(dot(sN, sV), 0.0, 1.0), 5.0);
+    totalEmissiveRadiance += shoreSky(sR) * (sF * max(gFilm, 0.7 * gWet) * (1.0 - gFoam));
+  }`);
+  };
+  beachMat.customProgramCacheKey = () => 'costa-orilla';
   groundStrip(SEA_X - 0.5, WALL_X, -0.9, beachMat);
   const paveMat = pbr(ctx, paving, { roughness: 0.62, color: new THREE.Color(0.92, 0.9, 0.88) });
   // la textura de losas se extiende 600 m: además del avance, las tiras de 600 m se suceden sin costura (offset)
@@ -182,7 +251,9 @@ export async function createTheme(ctx) {
     }
     dg.computeVertexNormals();
   }
-  dg.translate(EDGE_X + 3 + 35, 0.02, -290);
+  // el borde de la duna arranca 2 cm POR DEBAJO de las losas: a +2 cm quedaba una ranura abierta bajo ese borde por la
+  // que se veía el cielo (una línea clara y fina, a puntos, a lo largo de todo el paseo por el lado de tierra)
+  dg.translate(EDGE_X + 3 + 35, -0.02, -290);
   const dunes = new THREE.Mesh(dg, duneMat);
   dunes.frustumCulled = false;
   const duneGroup = new THREE.Group();
@@ -258,6 +329,11 @@ export async function createTheme(ctx) {
   const rowLamp = new THREE.Vector4(LX - 1.0, 4.9, LAMP_D, 0);
   const rowBol = new THREE.Vector4(WALL_X + 0.55, 0.45, BOL_D, 0);
   const lampU = addLamps(paveMat, ctx, runner, [rowLamp, rowBol], { tint: '#ffd9a8', mix: 0.55, power: 9, range: 16 });
+  // losas mojadas por el relente: cada baliza deja su estela del color del tramo, alargada hacia ti (calidad media o
+  // alta). Las farolas no: probado, sus reflejos caían como dos barras pálidas en mitad del paseo y no mejoraba.
+  const streakU = ctx.qualityLevel >= 2
+    ? addStreaks(paveMat, ctx, runner, [rowBol], { tint: '#ffd9a8', mix: 0.85, power: 2.2, width: 0.1, blur: 0.003, near: 1.2, far: 0.25, jitter: 0.1, dry: 0.7, reach: 120 })
+    : null;
 
   // ── escenario vivo (web 1.15): el amanecer avanza con la clase. Empiezas en la hora azul con las farolas encendidas y
   //    acabas con el día hecho: el cielo se aclara, el sol calienta las losas y las farolas se apagan (las balizas del
@@ -301,6 +377,10 @@ export async function createTheme(ctx) {
     bulbs.material.uniforms.uPower.value = P0.bulb * (0.12 + 0.88 * on);
     lampHalo.material.uniforms.uPower.value = P0.halo * on;
     lampU.uLampPower.value = P0.lamp * (0.3 + 0.7 * on);
+    if (streakU) {
+      // la estela de las balizas (color del tramo) se queda toda la clase, más discreta a pleno sol
+      streakU.uStreakRowK.value[0] = 1 - 0.55 * d;
+    }
   }
 
   const inst = {
@@ -320,8 +400,12 @@ export async function createTheme(ctx) {
       rowLamp.w = lampGroup.position.z + 12;
       rowBol.w = bolGroup.position.z + 4;
       dawn(f, S);
-      waterU.uS.value = S % 4096;
+      // periodo de 10 km: múltiplo exacto de las repeticiones de las cuatro escalas del oleaje (0,031 · 0,093 · 0,0071 ·
+      // 0,21), así al dar la vuelta no hay salto (con 4096 m las olas saltaban ~0,8 m y el mar de fondo ~11 m en el
+      // km 4,1 de la clase)
+      waterU.uS.value = S % 10000;
       waterU.uTime.value = st.rm ? 0 : f.time;
+      shoreU.uShore.value.set(waterU.uS.value, waterU.uTime.value % 3600, 0);
     },
     event(type, data) { runner.event(type, data); },
     get _debug() { return runner.debug(); },

@@ -11,16 +11,22 @@ ok(weekReportInput({ history: [] }, now) === null, 'sin sesiones esta semana ⇒
 ok(weekReportInput({ history: [{ dayKey: '2026-10-14', elapsedSec: 1500, distanceKm: 4 }] }, now) === null, 'solo la semana pasada ⇒ null');
 
 const st = { history: [
-  { id: 'a', dayKey: '2026-10-20', elapsedSec: 1500, distanceKm: 4.1 },
-  { id: 'b', dayKey: '2026-10-22', elapsedSec: 3000, distanceKm: 8.3 },
+  { id: 'a', dayKey: '2026-10-20', elapsedSec: 1500, distanceKm: 4.1, completionPct: 1 },
+  { id: 'b', dayKey: '2026-10-22', elapsedSec: 3000, distanceKm: 8.3, completionPct: 1 },
   { id: 't', dayKey: '2026-10-23', elapsedSec: 900, distanceKm: 2, isTest: true },
-  { id: 'c', dayKey: '2026-10-14', elapsedSec: 1500, distanceKm: 4 },
+  { id: 'c', dayKey: '2026-10-14', elapsedSec: 1500, distanceKm: 4, completionPct: 1 },
 ] };
 const r = weekReportInput(st, now, { readiness: 'amber', goal: '10K el 15 de marzo' });
 ok(r && r.week === '2026-10-19', 'semana del lunes 19');
 ok(r.input.minutes === 75 && r.input.km === 12.4, `minutos y km sin el test (dio ${r.input.minutes} / ${r.input.km})`);
 ok(r.input.avgKmh === 9.9 && r.input.longestMin === 50, 'media y clase más larga');
-ok(r.input.sessions >= 2, 'sesiones hechas');
+ok(r.input.sessions === 2, `sesiones que cuentan (dio ${r.input.sessions})`);
+ok(weekReportInput({ history: [{ id: 'x', dayKey: '2026-10-20', elapsedSec: 150, distanceKm: 0.4, completionPct: 0.1 }] }, now) === null, 'solo una clase apenas empezada ⇒ null');
+{
+  // Una clase apenas empezada suma minutos y km, pero no sesiones (ni en la semana ni en la comparación)
+  const r2 = weekReportInput({ history: [...st.history, { id: 'x', dayKey: '2026-10-21', elapsedSec: 120, distanceKm: 0.3, completionPct: 0.08 }] }, now);
+  ok(r2.input.sessions === 2 && r2.input.minutes === 77 && r2.input.vsPrev.sessions === 1, `empezada: suma minutos, no sesiones (dio ${r2.input.sessions} / ${r2.input.minutes} / ${r2.input.vsPrev?.sessions})`);
+}
 ok(r.input.readiness === 'amber' && r.input.goal === '10K el 15 de marzo', 'semáforo y objetivo');
 ok(r.input.vsPrev && r.input.vsPrev.km === 8.4 && r.input.vsPrev.minutes === 50, 'frente a la semana anterior');
 ok(numbersAreGrounded('Has corrido 12,4 km en 75 min, 8,4 km más que la semana pasada.', r.allowed), 'cifras reales: vale');

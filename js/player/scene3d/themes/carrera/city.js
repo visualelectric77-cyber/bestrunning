@@ -458,6 +458,7 @@ const FENCE_FRAG = /* glsl */ `
 ${HEAD}
 uniform sampler2D uMap;
 uniform float uCue, uLed, uDetail;
+uniform vec4 uWave;      // frente (m por delante), amplitud, ancho (m), -
 varying vec3 vP;
 varying vec3 vW;
 varying float vSide;
@@ -487,7 +488,9 @@ void main() {
   col = mix(col, metal * (0.4 + 0.6 * clamp(uCue, 0.0, 1.5)), post * (1.0 - rail));
   // filete de LED al pie de la valla con el acento de la zona (emisivo bajo, sin destello)
   float led = lineAA(abs(y - 0.07), 0.018, fwY);
-  col += uAccent * led * uLed * exp(-dist * 0.004);
+  // momentos (tramo, km, cuenta atrás): una onda de luz recorre el filete una sola vez (gradual, fina: no es un destello)
+  float wv = uWave.y * exp(-pow((-vP.z - uWave.x) / max(uWave.z, 1.0), 2.0));
+  col += uAccent * led * uLed * (1.0 + 2.6 * wv) * exp(-dist * 0.004);
   col = mix(col, col * vec3(1.2, 0.95, 0.65), uGold * 0.5);
   col = mix(col, uFogCol, fogK(dist));
   gl_FragColor = vec4(col, 1.0);
@@ -517,7 +520,7 @@ export function buildFences(THREE, shared, texture) {
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
   geo.setAttribute('aSide', new THREE.BufferAttribute(new Float32Array(side), 1));
   geo.setIndex(idx);
-  const u = { ...shared, uMap: { value: texture }, uCue: { value: 1 }, uLed: { value: 0.5 }, uDetail: { value: 1 } };
+  const u = { ...shared, uMap: { value: texture }, uCue: { value: 1 }, uLed: { value: 0.5 }, uDetail: { value: 1 }, uWave: { value: new THREE.Vector4(0, 0, 14, 0) } };
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: FENCE_VERT, fragmentShader: FENCE_FRAG, defines: DEFINES });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
@@ -766,7 +769,10 @@ void main() {
     return;
   } else {
     vec3 N = normalize(vN);
-    col = vec3(0.05) * (0.15 + 0.6 * vLit * uLampCol + 0.25 * max(N.y, 0.0));
+    // acero galvanizado: el fuste y el brazo se LEEN (antes, negros sobre fachadas negras: las luminarias parecían
+    // guiones blancos flotando); cerca de la cabeza, la luz que derrama su propia luminaria
+    float spill = smoothstep(LAMP_Y - 3.2, LAMP_Y + 0.1, vW.y);
+    col = vec3(0.13, 0.135, 0.14) * (0.12 + 0.6 * vLit * uLampCol + 0.2 * max(N.y, 0.0) + 0.55 * spill * uLampCol * uLight);
   }
   col = mix(col, uFogCol, fogK(dist));
   gl_FragColor = vec4(col, 1.0);
@@ -779,18 +785,24 @@ attribute vec2 aL;
 varying vec2 vUv;
 varying float vK;
 void main() {
+  // aL.x = 0 ⇒ la instancia extra: el resplandor de los focos de la META en la bruma (ancho como la viga)
+  bool isMeta = abs(aL.x) < 0.5;
   float rel = mod(aL.y - uSLo, ${(LAMPS_N * LAMP_P).toFixed(2)}) - 40.0;
-  vec3 c = bendW(vec3(aL.x * LAMP_HX, LAMP_Y - 0.25, -rel));
+  vec3 c = isMeta ? bendW(vec3(0.0, 6.0, uMetaZ + 0.8)) : bendW(vec3(aL.x * LAMP_HX, LAMP_Y - 0.95, -rel));
   vec4 vc = viewMatrix * vec4(c, 1.0);
-  float R = 1.7;
-  vc.xy += (position.xy) * R;
+  vec4 c0 = projectionMatrix * vc;
+  // cono de luz en el aire húmedo bajo la luminaria (más alto que ancho); la META: una bolsa ancha y baja
+  vec2 R = isMeta ? vec2(15.0, 8.5) : vec2(1.9, 2.5);
+  vc.xy += position.xy * R;
   vUv = position.xy;
   vec4 cl = projectionMatrix * vc;
-  vec2 nd = cl.xy / max(cl.w, 1e-3);
+  vec2 nd = (isMeta ? c0.xy : cl.xy) / max(isMeta ? c0.w : cl.w, 1e-3);
   float inside = smoothstep(uAvoid.x - 0.1, uAvoid.x + 0.04, nd.x) * (1.0 - smoothstep(uAvoid.z - 0.04, uAvoid.z + 0.1, nd.x))
     * smoothstep(uAvoid.y - 0.1, uAvoid.y + 0.04, nd.y) * (1.0 - smoothstep(uAvoid.w - 0.04, uAvoid.w + 0.1, nd.y));
   float d = length(c - cameraPosition);
-  vK = (1.0 - 0.85 * inside) * exp(-d * 0.0035) * smoothstep(8.0, 40.0, d);
+  vK = isMeta
+    ? uMetaK * (1.0 - 0.6 * inside) * exp(-d * 0.0022) * smoothstep(7.0, 30.0, d) * 2.6
+    : (1.0 - 0.85 * inside) * exp(-d * 0.0035) * smoothstep(8.0, 40.0, d) * 1.35;
   gl_Position = cl;
 }`;
 const HALO_FRAG = /* glsl */ `
@@ -798,8 +810,10 @@ ${SHARED_DECL}
 varying vec2 vUv;
 varying float vK;
 void main() {
-  float r2 = dot(vUv, vUv);
-  float a = exp(-r2 * 5.5) * (1.0 - smoothstep(0.7, 1.0, r2));
+  // más densa arriba (junto a la lente) y se abre hacia abajo
+  vec2 q = vec2(vUv.x * (1.25 + 0.35 * vUv.y), vUv.y);
+  float r2 = dot(q, q);
+  float a = exp(-r2 * 5.0) * (1.0 - smoothstep(0.7, 1.0, r2));
   vec3 col = uLampCol * a * 0.06 * vK * uLight;
   col = mix(col, col * vec3(1.15, 0.85, 0.5), uGold * 0.6);
   gl_FragColor = vec4(col, 1.0);
@@ -861,6 +875,9 @@ export function buildLamps(THREE, shared) {
   }
   const inst = new THREE.InstancedBufferAttribute(aL, 2);
   lampGeo.setAttribute('aL', inst);
+  // halos: las mismas instancias + una más (aL.x = 0) para el resplandor de la META
+  const aH = new Float32Array(aL.length + 2);
+  aH.set(aL, 0);
   lampGeo.instanceCount = LAMPS_N * 2;
   const u = { ...shared };
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: LAMP_VERT, fragmentShader: LAMP_FRAG, defines: DEFINES, side: THREE.DoubleSide });
@@ -871,8 +888,8 @@ export function buildLamps(THREE, shared) {
   const hGeo = new THREE.InstancedBufferGeometry();
   hGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
   hGeo.setIndex([0, 1, 2, 0, 2, 3]);
-  hGeo.setAttribute('aL', inst);
-  hGeo.instanceCount = LAMPS_N * 2;
+  hGeo.setAttribute('aL', new THREE.InstancedBufferAttribute(aH, 2));
+  hGeo.instanceCount = LAMPS_N * 2 + 1;
   const hMat = new THREE.ShaderMaterial({
     uniforms: u, vertexShader: HALO_VERT, fragmentShader: HALO_FRAG, defines: DEFINES, transparent: true, depthWrite: false,
     blending: THREE.AdditiveBlending,

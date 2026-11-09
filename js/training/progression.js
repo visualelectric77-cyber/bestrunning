@@ -7,7 +7,7 @@ import { vamValidity, vamHoldsLevels } from './vam-assist.js';
 import { isHills } from './hr-model.js';
 import { clamp, todayKey, addDays, daysBetween, weekdayOf, hashStr, makeRng, fmt, parseKey, DAY_MS } from '../core/utils.js';
 import {
-  ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category,
+  ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category, vamNow, VAM_TOL,
   hrMaxFromAge,
 } from './levels.js';
 import { cycleInfo, nextTestDate, seasonInfo } from './planner.js';
@@ -205,7 +205,7 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
       levels: res.levels,
       changes,
       progression: p,
-      message: `Tu VAM es ${fmt.speed(res.vam)} km/h${delta}. Hemos recalculado tus cuatro velocidades.`,
+      message: testSavedText(res, delta),
     };
   }
 
@@ -425,9 +425,37 @@ export function evaluateTest(session, state = null) {
   const start = normLevels(session?.levelsAtStart || state?.levels);
   const raw = levelsFromVam(vam);
   const levels = {};
-  for (const k of LEVEL_KEYS) levels[k] = r1(clamp(raw[k], start[k] - TEST_MAX_DROP, start[k] + TEST_MAX_RISE));
-  const prev = num(state?.progression?.lastTest?.vam) || vamFromLevels(start);
-  return { vam, levels: enforceLevelOrder(levels), vo2max: estimateVo2max(vam), deltaVam: r1(vam - prev) };
+  // Tope por test: si la VAM pide más cambio del permitido, las velocidades se quedan en el tope y `capped` lo avisa
+  // (la VAM y el VO₂máx siguen siendo los del test: ver levels.vamNow)
+  let hit = false;
+  for (const k of LEVEL_KEYS) {
+    levels[k] = r1(clamp(raw[k], start[k] - TEST_MAX_DROP, start[k] + TEST_MAX_RISE));
+    if (Math.abs(levels[k] - raw[k]) > 1e-9) hit = true;
+  }
+  const out = enforceLevelOrder(levels);
+  const gap = vam - vamFromLevels(out);
+  const capped = !hit || Math.abs(gap) <= VAM_TOL + 1e-9 ? null : gap > 0 ? 'rise' : 'drop';
+  const prevTest = num(state?.progression?.lastTest?.vam);
+  const prev = prevTest || vamFromLevels(start);
+  // deltaFrom: con qué se compara, para rotularlo ('test' = tu test anterior · 'levels' = lo que daban tus velocidades)
+  return { vam, levels: out, vo2max: estimateVo2max(vam), deltaVam: r1(vam - prev), deltaFrom: prevTest ? 'test' : 'levels', capped };
+}
+
+/** Qué pasa con tus velocidades tras un test: lo dice igual el resumen (antes de guardar) y el mensaje al guardar. */
+export function testLevelsText(res, { saved = false } = {}) {
+  if (res?.capped === 'rise') {
+    return `${saved ? 'Subimos' : 'Al guardar, subiremos'} tus velocidades como mucho ${fmt.speed(TEST_MAX_RISE)} km/h cada una. Aún van por debajo de tu VAM: el resto llegará poco a poco.`;
+  }
+  if (res?.capped === 'drop') {
+    return `${saved ? 'Bajamos' : 'Al guardar, bajaremos'} tus velocidades como mucho ${fmt.speed(TEST_MAX_DROP)} km/h cada una: un test flojo no lo cambia todo de golpe.`;
+  }
+  return saved ? 'Hemos recalculado tus cuatro velocidades.' : 'Al guardar, ajustaremos tus velocidades a este resultado.';
+}
+
+/** Mensaje al guardar un test que se aplica. Con tope de bajada no se dice «tu VAM es»: la que queda es la de tus velocidades. */
+export function testSavedText(res, extra = '') {
+  const head = res?.capped === 'drop' ? `Tu test ha dado una VAM de ${fmt.speed(res.vam)} km/h${extra}` : `Tu VAM es ${fmt.speed(res.vam)} km/h${extra}`;
+  return `${head}. ${testLevelsText(res, { saved: true })}`;
 }
 
 /* ───────────── Análisis del coach ───────────── */
@@ -555,11 +583,13 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
   }
 
   // VAM y forma física
-  const vam = num(st.progression?.bestVam) || num(st.progression?.lastTest?.vam);
-  if (vam > 0) {
-    const vo2 = estimateVo2max(vam);
-    const cat = vo2Category(vo2, num(st.profile?.age) || 46, st.profile?.sex || 'm');
-    add(2, `Tu VAM es ${fmt.speed(vam)} km/h, un VO₂máx estimado de ${fmt.dec1(vo2)}: nivel «${cat.label.toLowerCase()}» para tu edad.`);
+  // La misma VAM que Progreso y Perfil (levels.vamNow), y solo si ya has hecho un test
+  const v = vamNow(st);
+  if (v.testVam > 0 && v.vam > 0) {
+    const cat = vo2Category(v.vo2, num(st.profile?.age) || 46, st.profile?.sex || 'm');
+    add(2, v.source === 'test'
+      ? `Tu VAM es ${fmt.speed(v.vam)} km/h, un VO₂máx estimado de ${fmt.dec1(v.vo2)}: nivel «${cat.label.toLowerCase()}» para tu edad.`
+      : `Tus velocidades ya dan una VAM de ${fmt.speed(v.vam)} km/h, por encima de tu último test: un VO₂máx estimado de ${fmt.dec1(v.vo2)}, nivel «${cat.label.toLowerCase()}» para tu edad.`);
   }
 
   // Consejos de fondo

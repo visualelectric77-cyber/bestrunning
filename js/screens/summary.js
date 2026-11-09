@@ -11,15 +11,15 @@ import { navigate } from '../core/router.js';
 import { icon, profileChart, zoneBar, zoneRibbon, effortBars, ring, openSheet, toast, confirmDialog, celebrate, emptyState } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import { workoutFromId } from '../training/generator.js';
-import { applyFeedback, evaluateTest, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
+import { applyFeedback, evaluateTest, testLevelsText, testSavedText, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
 import { vamValidity, vamHoldsLevels } from '../training/vam-assist.js';
-import { classDebrief, wantsEasierNext } from '../training/class-debrief.js';
+import { classDebrief, wantsEasierNext, summaryAiInput } from '../training/class-debrief.js';
 import { classAnalysis } from '../training/class-analysis.js';
 import { classAnalysisHtml } from '../ui/analysis-view.js';
 import { dynModelFrom } from '../training/hr-control.js';
 import { easierNext, setDayOverride } from '../training/planner.js';
 import { evaluateAchievements } from '../training/achievements.js';
-import { traceCursorSec, skippedRanges, kcalOf } from '../training/stats.js';
+import { traceCursorSec, skippedRanges, kcalOf, sessionCounts } from '../training/stats.js';
 import { sessionMusicHtml, hydrateSessionMusic } from '../integrations/session-music.js';
 import { renderShareCard, shareSession } from '../integrations/share-card.js';
 import { openHealthShortcut } from '../integrations/health.js';
@@ -277,8 +277,8 @@ export function mount(el, { params = {} } = {}) {
             ${analysisCards(s, st)}
 
             <section class="card sm-card" style="--i:3">
-              <div class="sm-card__head"><span class="sm-card__title">Plan vs real</span>
-                <span class="sm-legend"><i class="sm-legend__bar"></i>Plan <i class="sm-legend__line"></i>Real${hasHrSeries(s) ? hrLegendHtml() : ''}</span></div>
+              <div class="sm-card__head"><span class="sm-card__title">Velocidad</span>
+                <span class="sm-legend"><i class="sm-legend__bar"></i>Plan${Array.isArray(s.speedTrace) && s.speedTrace.length ? ' <i class="sm-legend__line"></i>Indicada' : ''}${hasHrSeries(s) ? hrLegendHtml() : ''}</span></div>
               <div class="sm-chart">
                 ${workout?.segments?.length
                   ? withHrOverlay(profileChart(workout.segments, { height: 140, tone: 'mono', trace: Array.isArray(s.speedTrace) ? s.speedTrace : null, progressSec: s.isTest || s.completed ? null : traceCursorSec(s), gaps: skippedRanges(s) }), s, { segments: workout.segments, height: 140 })
@@ -339,7 +339,10 @@ export function mount(el, { params = {} } = {}) {
     }
     const vo2 = res?.vo2max ?? estimateVo2max(vam);
     const lv = res?.levels || null;
-    const delta = res?.deltaVam;
+    // Guardado el test, la diferencia es la que se anotó entonces (después «el último test» ya es este)
+    const kept = Number.isFinite(s.test?.deltaVam);
+    const delta = kept ? s.test.deltaVam : res?.deltaVam;
+    const deltaVs = (kept ? s.test.deltaFrom : res?.deltaFrom) === 'test' ? 'respecto a tu test anterior' : 'respecto a lo que daban tus velocidades';
     const prof = st?.profile || {};
     const curMax = prof.hrMax || hrMaxFromAge(prof.age || 46);
     let check = null;
@@ -363,13 +366,13 @@ export function mount(el, { params = {} } = {}) {
           <div class="sm-test__big"><span class="num">${fmt.speed(vam)}</span><small>km/h</small><em>VAM</em></div>
           <div class="sm-test__big sm-test__big--alt"><span class="num">${fmt.dec1(vo2)}</span><small>ml/kg/min</small><em>VO₂máx est.</em></div>
         </div>
-        ${Number.isFinite(delta) && delta !== 0 ? `<p class="sm-test__delta ${delta > 0 ? 'is-up' : 'is-down'}">${icon(delta > 0 ? 'arrow-up' : 'arrow-down', 14)}${delta > 0 ? '+' : '−'}${fmt.speed(Math.abs(delta))} km/h respecto al anterior</p>` : ''}
+        ${Number.isFinite(delta) && delta !== 0 ? `<p class="sm-test__delta ${delta > 0 ? 'is-up' : 'is-down'}">${icon(delta > 0 ? 'arrow-up' : 'arrow-down', 14)}${delta > 0 ? '+' : '−'}${fmt.speed(Math.abs(delta))} km/h ${deltaVs}</p>` : ''}
         ${checkHtml}
         ${showLevels ? `
           <div class="sm-test__levels">
             ${LEVEL_KEYS.map((k) => `<div class="sm-test__lv" style="--zc:${zoneColor(k)}"><span>${esc(ZONES[k].short)}</span><b class="num">${fmt.speed(lv[k])}</b></div>`).join('')}
           </div>
-          <p class="muted sm-note">Al guardar, ajustaremos tus velocidades a este resultado.</p>` : ''}
+          <p class="muted sm-note">${esc(testLevelsText(res))}</p>` : ''}
       </section>`;
   }
 
@@ -517,27 +520,15 @@ export function mount(el, { params = {} } = {}) {
   async function askCoach(s0) {
     const s = findSession() || s0;
     if (!s || s.aiNote) return;
-    const r1 = (x) => Math.round(Number(x) * 10) / 10;
-    const r2 = (x) => Math.round(Number(x) * 100) / 100;
     const fx = feelings().find((x) => x.key === s.feeling);
-    const input = {
-      title: s.title || '',
-      minutes: Math.round((Number(s.elapsedSec) || 0) / 60),
-      km: r2(s.distanceKm || 0),
-      avgKmh: r1(s.avgSpeed || 0),
-      maxKmh: r1(s.maxSpeed || 0),
+    // Lo que se le pasa a la IA sale de class-debrief.summaryAiInput: tipo de clase, cómo se completó, sensación,
+    // ajustes de velocidad y de qué debe ir el consejo (para que dependa de la clase y no sea siempre el mismo)
+    const { input, allowed } = summaryAiInput(s, {
+      segments: workout?.segments || null,
       feel: fx?.label || '',
       record: (() => { try { return recordBadges(s, getState().history || []).some((b) => b.record); } catch { return false; } })(),
-    };
-    if (s.hrAvg) input.hrAvg = s.hrAvg;
-    if (s.hrMax) input.hrMax = s.hrMax;
-    const off = hrOffsetOf(s);
-    if (off && Math.abs(off.ppm) >= 5) input.vsPrev = { hrVsUsual: off.ppm, atKmh: off.speed };
-    const lc = (Array.isArray(s.levelChanges) ? s.levelChanges : []).map((c) => ({ level: c.level, from: c.from, to: c.to }));
-    if (lc.length) input.levelChanges = lc;
-    const allowed = [input.minutes, input.km, input.avgKmh, input.maxKmh, input.hrAvg, input.hrMax,
-      off ? off.ppm : null, off ? Math.abs(off.ppm) : null, off ? off.speed : null,
-      ...lc.flatMap((c) => [c.from, c.to])].filter((v) => v != null);
+      hrOffset: hrOffsetOf(s),
+    });
     const out = await aiRequest('sessionSummary', input);
     if (disposed || !out) { if (!disposed) render(); return; }
     const note = { headline: String(out.headline || '').slice(0, 80), body: String(out.body || '').slice(0, 400), tip: String(out.tip || '').slice(0, 160) };
@@ -1034,7 +1025,7 @@ export function mount(el, { params = {} } = {}) {
           lastTest: { date: ses.dayKey || todayKey(), vam: testRes.vam },
           bestVam: Math.max(Number(progression.bestVam) || 0, testRes.vam),
         };
-        message = `Tu VAM es ${fmt.speed(testRes.vam)} km/h. Hemos recalculado tus cuatro velocidades.`;
+        message = testSavedText(testRes);
       } else if (held && testRes?.vam > 0) {
         message = `Tu VAM ha salido ${fmt.speed(testRes.vam)} km/h, pero el test es dudoso: tus velocidades no cambian.`;
       } else if (testRes?.vam > 0) {
@@ -1053,7 +1044,7 @@ export function mount(el, { params = {} } = {}) {
       const h = (d.history || []).find((x) => x.id === id);
       if (h) {
         Object.assign(h, { feeling: draft.feeling, rpe, hrAvg, hrMax, notes, levelChanges: changes });
-        if (ses.isTest && testRes?.vam) h.test = { ...(h.test || {}), vam: testRes.vam };
+        if (ses.isTest && testRes?.vam) h.test = { ...(h.test || {}), vam: testRes.vam, deltaVam: testRes.deltaVam, deltaFrom: testRes.deltaFrom };
       }
     });
 
@@ -1249,7 +1240,9 @@ const sessionTime = (x) => {
 function recordBadges(s, history) {
   const t0 = sessionTime(s);
   const others = history.filter((x) => x && x.id !== s.id && sessionTime(x) < t0);
-  if (!others.length) return s.elapsedSec > 0 ? [{ icon: 'star', text: 'Primera sesión', record: false }] : [];
+  // «Primera sesión» es la primera que cuenta (stats.sessionCounts), como el logro y el recuento de Progreso;
+  // hasta entonces no hay récords: no se compara con clases apenas empezadas
+  if (!others.some(sessionCounts)) return sessionCounts(s) ? [{ icon: 'star', text: 'Primera sesión', record: false }] : [];
   const out = [];
   const max = (fn) => Math.max(0, ...others.map((x) => Number(fn(x)) || 0));
   if (s.distanceKm > 0.5 && s.distanceKm > max((x) => x.distanceKm)) out.push({ icon: 'trophy', text: 'Récord de distancia', record: true });

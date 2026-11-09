@@ -9,7 +9,7 @@ import { navigate, back } from '../core/router.js';
 import { icon, navBar, enableCollapsingHeader, chip, stat, profileChart, zoneBar, zoneRibbon, effortBars, photo, openSheet, toast, confirmDialog, actionSheet, celebrate } from '../ui/components.js';
 import { haptic } from '../core/haptics.js';
 import { FEELINGS, hrLevelTrends } from '../training/progression.js';
-import { traceCursorSec, skippedRanges, kcalOf } from '../training/stats.js';
+import { traceCursorSec, skippedRanges, kcalOf, sessionTally, sessionsText } from '../training/stats.js';
 import { evaluateAchievements } from '../training/achievements.js';
 import {
   startWatchHrImport, openWatchHrSheet, hasPendingWatchHr, hrFieldsFrom, hrFieldsCleared, hasHrSeries, hrZoneTimes,
@@ -382,7 +382,7 @@ function listHtml(items, feel) {
     return `<section class="hs-month">
       <div class="hs-month__head">
         <h3>${esc(g.label)}</h3>
-        <span>${g.items.length} ${g.items.length === 1 ? 'sesión' : 'sesiones'} · ${fmt.dec1(km)} km · ${esc(fmt.durationLong(sec))}</span>
+        <span>${esc(sessionsText(g.items))} · ${fmt.dec1(km)} km · ${esc(fmt.durationLong(sec))}</span>
       </div>
       <div class="hs-group">${g.items.map((h, i) => rowHtml(h, feel, { extra: extras.has(h.id), sameDay: i > 0 && !!h.dayKey && g.items[i - 1].dayKey === h.dayKey })).join('')}</div>
     </section>`;
@@ -411,8 +411,10 @@ function mountList(el) {
     const km = items.reduce((a, h) => a + (h.distanceKm || 0), 0);
     const sec = items.reduce((a, h) => a + (h.elapsedSec || 0), 0);
     if (sumEl) {
+      // «Sesiones» son las que cuentan (stats.sessionTally), como en Progreso; km y tiempo suman también las empezadas
+      const nSes = sessionTally(items).sessions;
       sumEl.innerHTML = `<div class="stat-grid hs-summary">
-        ${stat({ label: items.length === 1 ? 'Sesión' : 'Sesiones', value: String(items.length) })}
+        ${stat({ label: nSes === 1 ? 'Sesión' : 'Sesiones', value: String(nSes) })}
         ${stat({ label: 'Distancia', value: fmt.dec1(km), unit: 'km' })}
         ${sec < 3600
           ? stat({ label: 'Tiempo', value: fmt.int(Math.round(sec / 60)), unit: 'min' })
@@ -600,7 +602,7 @@ function detailHtml(ses, s, segments) {
   const series = hasHrSeries(ses);
   if (segs.length) {
     parts.push(`<section class="card hs-card">
-      <div class="hs-card__head"><div class="eyebrow">Perfil de la sesión</div><span class="hs-legend">${trace ? '<i></i>Tu velocidad real' : ''}${series ? hrLegendHtml() : ''}</span></div>
+      <div class="hs-card__head"><div class="eyebrow">Perfil de la sesión</div><span class="hs-legend">${trace ? '<i></i>Vel. indicada' : ''}${series ? hrLegendHtml() : ''}</span></div>
       <div class="hs-profile" data-profile>${profileHtml(ses, segs, levels)}</div>
     </section>`);
   }

@@ -39,6 +39,11 @@ const DTT = 0.25;         // resolución de la tabla de distancia real (s)
 const GOLD = '#ffd60a';
 const MOOD_KEYS = ['dh', 'fov', 'light', 'rail', 'plen', 'pint', 'exp'];
 const VIS10 = Math.pow(10, 0.85) / 1.35;
+// Luces del público (móviles encendidos en la grada): densidad por zona — el estadio se anima cuando aprietas
+const CROWD = { warmup: 0.05, walk: 0.04, jog: 0.06, run: 0.09, fast: 0.14, sprint: 0.22, cooldown: 0.07 };
+const CROWD_READY = 0.42;  // antes de empezar, a oscuras: un mar de luces esperando
+const CROWD_FINAL = 0.5;   // plano final: el estadio entero encendido
+const WAVE_T = 4.4;        // una ola de luces da la vuelta al estadio en este tiempo (s)
 /** Inversa exacta de visualSpeed() del núcleo: u/s visuales → km/h reales (conserva la forma de las rampas). */
 const kmhOfVis = (v) => (v > 0 ? Math.pow(v * VIS10, 1 / 1.85) : 0);
 
@@ -96,6 +101,7 @@ export async function createTheme(ctx) {
       uniforms: {
         uMap: { value: map }, uColor: { value: new THREE.Color(color) }, uOpacity: { value: opacity },
         uFogD: { value: G.uFogD.value }, uFog: { value: G.uFog.value }, uNear: { value: new THREE.Vector2(near[0], near[1]) },
+        uKey: { value: 0 },
       },
       vertexShader: DECAL_VERT, fragmentShader: DECAL_FRAG, transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4, ...extra,
@@ -175,6 +181,7 @@ export async function createTheme(ctx) {
 
   // ── colores ──
   const gold = C(GOLD);
+  const WHITE = C('#ffffff');
   const cur = new THREE.Color();
   const sweepFrom = new THREE.Color();
   const sweepTo = new THREE.Color();
@@ -218,6 +225,14 @@ export async function createTheme(ctx) {
   let sweep = null;          // { t0 }
   let dropAt = -1e9;
   let dropU = 0;
+  let dropK = 1;             // intensidad del barrido de las vallas (1 drop · 0,55 cambio de tramo)
+  let power = -1;            // encendido del estadio (0..1); −1 = sin inicializar
+  let countN = 0;            // último número de la cuenta atrás (3, 2, 1)
+  let crowdK = -1;           // densidad suavizada de las luces del público
+  let waveAt = -1e9;         // ola de luces del público: inicio, origen (u del muro) y fuerza
+  let waveU = 0;
+  let waveAmp = 0;
+  let finClock = 0;          // reloj del plano final (vaivén una vez asentado)
   let countAt = -1e9;
   let testSign = null;       // { at, vam }
   let recAt = -1e9;          // reloj del último 'record' {on: true} (con las luces de tu récord, el rótulo no lo pisa)
@@ -226,7 +241,6 @@ export async function createTheme(ctx) {
   let lastRecord = false;
   let finaleOn = false;
   let finaleInit = false;
-  let finAng = 0;
   let introOn = null;
   let bugA = 0;
   const bugKey = { kind: 0, a: -1, b: -1, c: -1 };   // qué hay compuesto en el rótulo (sin cadenas por fotograma)
@@ -273,6 +287,9 @@ export async function createTheme(ctx) {
     const sp = rectOf('speed');
     const W = Math.max(1, ctx.hud.width);
     const H = Math.max(1, ctx.hud.height);
+    const tp = rectOf('top');
+    if (tp && !finaleOn) lights.u.uAvoid2.value.set((tp.x / W) * 2 - 1, 1 - ((tp.y + tp.h + 4) / H) * 2, ((tp.x + tp.w) / W) * 2 - 1, 1 - ((tp.y - 4) / H) * 2);
+    else lights.u.uAvoid2.value.set(2, 2, 2, 2);
     if (!sp || finaleOn) { lights.u.uAvoid.value.set(2, 2, 2, 2); return; }
     // con margen: la etiqueta de zona y la fila del fantasma pueden asomar por encima / debajo del bloque
     const m = 14;
@@ -601,22 +618,42 @@ export async function createTheme(ctx) {
       const de = f.time - dropAt;
       if (de >= 0 && de < 3.4) {
         SU.uSweepB.value.x = (dropU + 30 + de * 190) % SU.uSweepB.value.w;
-        SU.uSweepB.value.y = Math.sin(Math.PI * clamp01(de / 3.4)) * (rm ? 0.4 : 1);
+        SU.uSweepB.value.y = Math.sin(Math.PI * clamp01(de / 3.4)) * (rm ? 0.4 : 1) * dropK;
       } else SU.uSweepB.value.y = 0;
+
+      // ── encendido del estadio: a oscuras antes de empezar; con el 3-2-1 entran las baterías de focos por tercios
+      // (cada una con su rampa) y al arrancar ya está todo encendido. Sin cuenta atrás (reanudar, capturas), encendido.
+      const powT = rm || f.status !== 'ready' ? 1 : countN >= 3 ? 0.36 : countN === 2 ? 0.68 : countN === 1 ? 0.94 : 0;
+      power = power < 0 ? powT : damp(power, powT, 2.4, dt);
+      const powK = 0.3 + 0.7 * power;
+
+      // ── luces del público: densidad por zona (gradual) y ola que da la vuelta en cada km, en la mitad y al atacar ──
+      const crowdT = f.finale ? CROWD_FINAL : f.status === 'ready' ? CROWD_READY * (1 - 0.6 * power) + 0.05 : (CROWD[f.zone] ?? 0.06) * (1 - 0.3 * pauseK);
+      crowdK = crowdK < 0 ? crowdT : damp(crowdK, crowdT, f.finale ? 1.6 : 0.7, dt);
+      const we = f.time - waveAt;
+      let wAmp = 0;
+      if (we >= 0 && we < WAVE_T && !rm) {
+        SU.uCrowd.value.y = (waveU + (we / WAVE_T) * SU.uSweepB.value.w) % SU.uSweepB.value.w;
+        wAmp = Math.sin(Math.PI * we / WAVE_T) * waveAmp;
+      }
+      SU.uCrowd.value.x = crowdK;
+      SU.uCrowd.value.z = wAmp;
+      SU.uCrowd.value.w = rm ? 0 : f.time % 600;
+      SU.uCrowdK.value.set(0.6, f.dpr || 1);
 
       // ── luz del estadio y focos (en la vuelta a la calma se apaga una de cada dos baterías) ──
       const fe = f.finale ? easeInOutSine(clamp01(f.finale)) : 0;
-      const light = mood.light * (1 - 0.08 * pauseK);
-      G.uLight.value = light * (1 + 1.1 * fe);
-      SU.uLight.value = light * (1 + 2.2 * fe);   // final: gradas legibles
+      const light = mood.light * (1 - 0.08 * pauseK) * powK;
+      G.uLight.value = light * (1 + 2.0 * fe);   // final: el estadio a plena luz
+      SU.uLight.value = light * (1 + 2.6 * fe);  // final: gradas legibles
       G.uFogD.value = 0.0042 * (1 - 0.65 * fe);   // final: el aire se aclara (el óvalo entero se lee)
       SU.uFogD.value = G.uFogD.value;
-      lights.u.uDim.value.set(1, 1 - 0.62 * dimK * (1 - fe), 0, 0);
-      sky.u.uHazeK.value = 1 - 0.35 * dimK;
+      lights.u.uDim.value.set(1, 1 - 0.62 * dimK * (1 - fe), power, 0);
+      sky.u.uHazeK.value = (1 - 0.35 * dimK * (1 - fe)) * powK;
       for (let i = 0; i < 6; i++) {
         const b = lights.specBanks[i];
         toWorld(b.x, b.y, b.z, out3);
-        G.uBank.value[i].set(out3.x, out3.y, out3.z, (i % 2 ? 1 - 0.62 * dimK : 1) * 0.9);
+        G.uBank.value[i].set(out3.x, out3.y, out3.z, (i % 2 ? 1 - 0.62 * dimK * (1 - fe) : 1) * 0.9 * power);
       }
 
       // ── rótulo de retransmisión en pantalla: resultado del test VAM (grande) o el próximo cambio a N metros ──
@@ -676,6 +713,8 @@ export async function createTheme(ctx) {
           avoidRect();
           finMark.visible = false;
           finA = 0;
+          G.uRing.value.set(0, 1e6, 0, 1);
+          G.uDArea.value = 0.35;
           rig.settle.position = 1.1; rig.settle.lookAt = 1.1; rig.settle.shift = 1.2; rig.settle.fov = 1.4;
           rig.snap();
         }
@@ -700,6 +739,11 @@ export async function createTheme(ctx) {
           sweepTo.copy(ctx.zoneColor(data.zone || 'jog'));
           sweep = { t0: now };
           post.pulse(0.04, 1.2);
+          // el color del tramo nuevo da la vuelta al estadio por las vallas (una pasada, tenue) y, si atacas (rápido o
+          // sprint), una ola de luces recorre la grada
+          SU.uSweepBCol.value.copy(sweepTo).lerp(WHITE, 0.2);
+          dropAt = now; dropU = wallU(lastSig); dropK = 0.55;
+          if ((ctx.zoneRank?.[data.zone] ?? 0) >= 4 && now - waveAt > WAVE_T) { waveAt = now; waveU = wallU(lastSig); waveAmp = 0.3; }
           break;
         }
         case 'seek':
@@ -707,11 +751,11 @@ export async function createTheme(ctx) {
           sweep = null;
           if (testRamp && testRamp.t0 < 0 && now - testRamp.armedAt < 4) testRamp.t0 = now;
           break;
-        case 'countdown': countAt = now; break;
+        case 'countdown': countAt = now; { const n = Number(data?.n); if (Number.isFinite(n)) countN = n; } break;
         case 'record': if (data?.on) recAt = now; break;
-        case 'km': post.pulse(0.03, 1.4); break;
-        case 'halfway': post.pulse(0.04, 1.6); break;
-        case 'drop': dropAt = now; dropU = wallU(lastSig); post.pulse(0.05, 1.8); break;
+        case 'km': post.pulse(0.03, 1.4); waveAt = now; waveU = wallU(lastSig); waveAmp = 0.42; break;
+        case 'halfway': post.pulse(0.04, 1.6); waveAt = now; waveU = wallU(lastSig); waveAmp = 0.6; break;
+        case 'drop': SU.uSweepBCol.value.setRGB(0.9, 0.93, 1.0); dropAt = now; dropU = wallU(lastSig); dropK = 1; post.pulse(0.05, 1.8); break;
         case 'testEnd': {
           const vam = Number(data?.test?.vam ?? data?.vam);
           if (Number.isFinite(vam) && vam > 0) testSign = { at: now, vam };
@@ -733,17 +777,33 @@ export async function createTheme(ctx) {
     },
   };
 
-  /* ───────────── Plano final: corte limpio a un plano cenital del óvalo entero ───────────── */
+  /* ───────────── Plano final: corte limpio al plano de héroe del estadio ───────────── */
 
   function startFinale(f) {
     finaleInit = true;
     finaleOn = true;
+    finClock = 0;
     avoidRect();
     finalCol.copy(lastRecord ? gold : ctx.zoneColor(f.zone));
     fin.set(`${fmtKm(f.distanceKm)} KM`, 'Distancia total');
-    // distancia total pintada en el centro del césped, legible desde la cámara del plano final
-    toWorld(0, 0.03, 0, finPos);
-    finAng = 0;
+    // distancia total pintada en el césped como un gráfico virtual de retransmisión: anamórfico (trapecio que se abre
+    // con la distancia) para la cámara ya asentada ⇒ en pantalla se lee recto, sin la fuga de un rótulo tumbado; queda
+    // fijo en el mundo (el avance y el vaivén de la cámara lo deforman apenas: está pintado, no flota)
+    {
+      const D = portrait ? HALF_STRAIGHT + R0 + WALL + 35 : R0 + WALL + 29;   // distancia en planta cámara → centro del campo
+      const dn = portrait ? D - 31 : D - 29;
+      const df = portrait ? D + 33 : D + 29;
+      const key = 0.86 * (df / dn - 1);
+      const wn = portrait ? 31 : 27;
+      const c = (dn + df) / 2 - D;                                          // el centro del gráfico, algo más allá del centro
+      if (portrait) toWorld(c, 0.03, 0, finPos); else toWorld(0, 0.03, -c, finPos);
+      const m = finMark.userData.mesh;
+      m.scale.set(wn, df - dn, 1);
+      m.material.uniforms.uKey.value = key;
+      // «arriba» del gráfico = alejándose de la cámara (eje largo en vertical, eje corto en horizontal)
+      if (portrait) toWorld(c + 10, 0.03, 0, finLook); else toWorld(0, 0.03, -c - 10, finLook);
+      finMark.rotation.set(0, Math.atan2(-(finLook.x - finPos.x), -(finLook.z - finPos.z)), 0);
+    }
     finMark.position.copy(finPos);
     finMark.visible = true;
     finA = 0;
@@ -752,39 +812,54 @@ export async function createTheme(ctx) {
   }
 
   /**
-   * Cámara del plano final (en el espacio del estadio, convertida al marco del corredor, que queda quieto): vertical,
-   * desde detrás de una curva a lo largo del eje largo (el óvalo llena el alto); horizontal, desde un lateral. Deriva
-   * en órbita lentísima (≤ 1°/s). El bordillo se enciende entero en el color final; las gradas, legibles.
+   * Plano de héroe (el HUD se retira: pantalla completa). Corte limpio a la cámara de cabecera de una retransmisión,
+   * DENTRO del estadio, entre el anfiteatro y la cubierta (en el espacio del estadio, convertida al marco del corredor,
+   * que queda quieto). Vertical: desde lo alto del fondo, a lo largo del eje largo — las dos rectas fugan hacia la curva
+   * del fondo, la grada y la corona de focos al fondo, la noche encima. Horizontal: la cámara principal de la tribuna.
+   * Secuencia (gradual, sin destellos): el bordillo se enciende desde la meta y da la vuelta entera («vuelta de honor»
+   * en el color final; oro si acabaste por delante de tu marca) con una ola de luces del público que lo acompaña por
+   * la grada; todas las baterías de focos vuelven; la distancia total aparece pintada en el césped. La cámara avanza
+   * despacio mientras tanto y después se queda en un vaivén lentísimo. Movimiento reducido: plano fijo, todo encendido.
    */
   function finaleCamera(f, fe, dt) {
     const T = rig.target;
-    finAng += (f.reducedMotion ? 0 : 0.012) * (dt || 0);
-    const ca = Math.cos(finAng);
-    const sa = Math.sin(finAng);
-    let px; let py; let pz; let lx; let lz;
-    // dentro de la abertura de la cubierta (nada la tapa), alta: el óvalo entero, gradas alrededor
-    if (portrait) { px = -(HALF_STRAIGHT + 50); py = 175; pz = 6; lx = 14; lz = 0; }
-    else { px = -6; py = 150; pz = 70; lx = 0; lz = -4; }
-    toWorld(px * ca - pz * sa, py, px * sa + pz * ca, finCam);
-    toWorld(lx, 0, lz, finLook);
+    const rm = f.reducedMotion;
+    finClock += dt || 0;
+    const sway = rm ? 0 : smoothstep(3.4, 6.5, finClock);
+    const sx = sway * Math.sin((finClock - 3.4) * 0.19);
+    const sy = sway * Math.sin((finClock - 3.4) * 0.13);
+    const push = rm ? 1 : fe;
+    if (portrait) {
+      const back = HALF_STRAIGHT + R0 + WALL + 43 - 8 * push;        // en lo alto del anfiteatro del fondo, bajo la cubierta
+      toWorld(-back, 39.5 - 3 * push + 0.7 * sy, 2.6 * sx, finCam);
+      toWorld(40, 0, 0, finLook);
+      T.fov = 50;
+      T.shift.set(0, 0.25);
+    } else {
+      const side = R0 + WALL + 34 - 5 * push;                        // tribuna de la recta de meta
+      toWorld(3.5 * sx, 24.5 - 1.5 * push + 0.5 * sy, side, finCam);
+      toWorld(0, 0, -14, finLook);
+      T.fov = 50;
+      T.shift.set(0, 0.1);
+    }
     T.position.copy(finCam);
     T.lookAt.copy(finLook);
-    T.fov = portrait ? 58 : 54;
-    T.shift.set(portrait ? 0 : -0.14, portrait ? 0.12 : 0.15);
     T.roll = 0;
     rig.settle.position = 1.2; rig.settle.lookAt = 1.2; rig.settle.shift = 1.2; rig.settle.fov = 1.2;
-    // el gráfico mira a la cámara final (su «arriba» se aleja de ella)
-    const fx = finPos.x - finCam.x;
-    const fz = finPos.z - finCam.z;
-    const gw = portrait ? 30 : 34;
-    finMark.rotation.set(0, Math.atan2(-fx, -fz), 0);
-    finMark.userData.mesh.scale.set(gw, gw * 0.5 * 2.3, 1);
-    finA = damp(finA, smoothstep(0.25, 0.75, f.finale), 2.5, dt || 0.016);
+    finA = damp(finA, smoothstep(0.55, 0.95, f.finale), 2.2, dt || 0.016);
     finMark.userData.mesh.material.uniforms.uOpacity.value = finA * 0.95;
-    // el óvalo entero dibujado por el bordillo, en el color final (oro si acabaste por delante de tu marca)
+    // vuelta de honor: el bordillo se enciende desde donde acabaste y da la vuelta entera en el color final
+    const lap = rm ? 1 : smoothstep(0.06, 0.98, f.finale);
     G.uCur.value.copy(finalCol);
-    G.uRailBase.value = mood.rail + 1.25 * Math.max(fe, 0.35);
+    G.uRailBase.value = mood.rail + 1.25;
+    G.uRing.value.set(wrapS(lastSig), lap >= 1 ? 1e6 : lap * LC, 1.6 * (1 - lap), 0.06);
     G.uGoldK.value = 0;
+    G.uDArea.value = -0.9;                                           // los fondos, a plena luz (no un hueco negro)
+    // la ola de luces del público acompaña al frente de la vuelta
+    if (lap < 1) {
+      SU.uCrowd.value.y = wallU(lastSig + lap * LC) % SU.uSweepB.value.w;
+      SU.uCrowd.value.z = 0.5 * Math.sin(Math.PI * lap);
+    }
     bugMesh.visible = false;
     bugA = 0;
     markA.visible = false;

@@ -1,2 +1,2 @@
 // Versión de la app (la reescribe tools/precache.mjs; no editar a mano salvo emergencia).
-export const APP_VERSION = '1.27.0';
+export const APP_VERSION = '1.28.0';

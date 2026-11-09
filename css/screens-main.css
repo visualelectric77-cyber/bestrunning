@@ -1626,6 +1626,7 @@
   text-transform: uppercase;
 }
 .pn-card .br-chip { height: 18px; padding: 0 6px; border-radius: 5px; }
+.br-chip--focus { color: var(--accent); }
 
 /* Sesiones extra de un día */
 .pn-day > .br-extras { grid-column: 2; display: flex; flex-direction: column; gap: 6px; }

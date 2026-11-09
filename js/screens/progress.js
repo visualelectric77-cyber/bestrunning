@@ -3,12 +3,12 @@ import { getState, setState, subscribe } from '../core/store.js';
 import { icon, listIcon, navBar, enableCollapsingHeader, segmented, sectionHeader, ring, openSheet, photo } from '../ui/components.js';
 import { lineChart, barChart, heatmapCalendar, gauge } from '../ui/charts.js';
 import { haptic } from '../core/haptics.js';
-import { totals, weeklyBuckets, streakWeeks, streakGoal, dayValues, records, weekProgress } from '../training/stats.js';
+import { totals, weeklyBuckets, streakWeeks, streakGoal, dayValues, records, weekProgress, sessionCounts, sessionsText } from '../training/stats.js';
 import { ACHIEVEMENTS } from '../training/achievements.js';
 import { coachInsight } from '../training/progression.js';
 import { focusView, setFocusDeclined } from '../training/focus.js';
 import { syncFocus } from '../training/focus-sync.js';
-import { ZONES, LEVEL_KEYS, vamFromLevels, estimateVo2max, vo2Category } from '../training/levels.js';
+import { ZONES, LEVEL_KEYS, vamFromLevels, estimateVo2max, vo2Category, levelReference, levelReferenceLabel, vamNow, vamSourceLabel, vamGapNote } from '../training/levels.js';
 import { esc, fmt, todayKey, mondayOf, addDays, daysBetween, parseKey, clamp, round1 } from '../core/utils.js';
 import { predictRaces, fmtRaceTime } from '../training/race-predict.js';
 import { hasHrSeries, hrAtLevels, ensureWatchHrStyles, HR_COLOR } from '../integrations/watch-hr.js';
@@ -19,6 +19,7 @@ import { vo2Trend } from '../training/health-analysis.js';
 import { isHills } from '../training/hr-model.js';
 import { weekReportInput } from '../training/week-report.js';
 import { trainingReview } from '../training/training-review.js';
+import { weeklyAverage } from '../training/evolution.js';
 import { reviewTabHtml, reviewTeaserHtml } from '../ui/analysis-view.js';
 import { healthTab } from './health.js';
 
@@ -80,7 +81,7 @@ function fitnessAge(vo2, sex) {
 /* Respaldos locales por si stats.js devuelve algo inesperado. */
 function localTotals(history) {
   return history.reduce(
-    (a, h) => ({ sessions: a.sessions + 1, km: a.km + (h.distanceKm || 0), sec: a.sec + (h.elapsedSec || 0), kcal: a.kcal + (h.kcal || 0) }),
+    (a, h) => ({ sessions: a.sessions + (safe(() => sessionCounts(h), false) ? 1 : 0), km: a.km + (h.distanceKm || 0), sec: a.sec + (h.elapsedSec || 0), kcal: a.kcal + (h.kcal || 0) }),
     { sessions: 0, km: 0, sec: 0, kcal: 0 },
   );
 }
@@ -96,7 +97,7 @@ function localWeekly(history, weeks, endKey) {
     if (i == null) continue;
     out[i].km += h.distanceKm || 0;
     out[i].sec += h.elapsedSec || 0;
-    out[i].sessions += 1;
+    if (safe(() => sessionCounts(h), false)) out[i].sessions += 1;
   }
   return out;
 }
@@ -153,15 +154,6 @@ function levelSeries(s, today) {
   for (const e of hist) if (e.date <= today) byDay.set(e.date, e.levels);
   if (s.levels) byDay.set(today, s.levels);
   return [...byDay.keys()].sort().map((date) => ({ date, levels: byDay.get(date) }));
-}
-
-/** Niveles de referencia de hace ~4 semanas (o los primeros registrados). */
-function refLevels(series, today) {
-  if (!series.length) return null;
-  const limit = addDays(today, -28);
-  let ref = series[0];
-  for (const p of series) if (p.date <= limit) ref = p;
-  return ref.levels;
 }
 
 function deltaChip(d, unit = '') {
@@ -332,7 +324,7 @@ function kpiGrid(s, history, animate) {
         ${(t.sec || 0) < 3600 // por debajo de una hora, minutos: «0,7 h» se leía raro
     ? statHtml('Tiempo', count(Math.round((t.sec || 0) / 60), 0), 'min')
     : statHtml('Tiempo', count((t.sec || 0) / 3600, 1), 'h')}
-        ${statHtml('Sesiones', count(t.sessions || history.length, 0))}
+        ${statHtml('Sesiones', count(Number(t.sessions) || 0, 0))}
         ${statHtml('Racha', count(streak, 0), streak === 1 ? 'semana' : 'semanas')}
       </div>
     </div>
@@ -346,23 +338,27 @@ function insightCard(text) {
   </section>`;
 }
 
-function weeklyHead(buckets, metric) {
+/** Día de tu primera clase (o null): para saber si llevas más semanas de las que enseña la gráfica. */
+const firstSessionDay = (history) => history.map((h) => h?.dayKey || isoToKey(h?.startedAt)).filter(Boolean).sort()[0] || null;
+
+function weeklyHead(buckets, metric, firstDay) {
   const val = (b) => (metric === 'min' ? (b.sec || 0) / 60 : b.km || 0);
-  const last4 = buckets.slice(-4);
-  const prev4 = buckets.slice(-8, -4);
-  const avg = last4.reduce((a, b) => a + val(b), 0) / Math.max(1, last4.length);
-  const avgPrev = prev4.reduce((a, b) => a + val(b), 0) / Math.max(1, prev4.length);
+  const unit = metric === 'min' ? 'min' : 'km';
+  const show = (v) => (metric === 'min' ? fmt.int(v) : fmt.dec1(v));
+  const vs = (text) => `<div class="pg-week-head__delta"><span class="pg-week-head__vs">${text}</span></div>`;
+  // «km/semana» es una media de semanas completas desde que empezaste (evolution.weeklyAverage); la semana en curso
+  // no entra y, si aún no hay ninguna completa, se enseña lo que llevas y se dice
+  const a = weeklyAverage(buckets, firstDay, val);
+  if (a.avg == null) return `<div class="pg-big num">${show(a.current)}<span class="unit">${unit}</span></div>${vs('Esta semana, aún en curso')}`;
+  if (a.weeks === 1) return `<div class="pg-big num">${show(a.avg)}<span class="unit">${unit}</span></div>${vs('La semana pasada')}`;
   let delta = '';
-  if (avgPrev > 0) {
-    const pct = Math.round(((avg - avgPrev) / avgPrev) * 100);
+  if (a.prevAvg > 0) {
+    const pct = Math.round(((a.avg - a.prevAvg) / a.prevAvg) * 100);
     const cls = pct > 0 ? 'pg-delta--up' : pct < 0 ? 'pg-delta--down' : 'pg-delta--flat';
-    delta = `<span class="pg-delta ${cls}">${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)} %</span><span class="pg-week-head__vs">frente a las 4 anteriores</span>`;
-  } else if (avg > 0) {
-    delta = `<span class="pg-week-head__vs">Media de las últimas 4 semanas</span>`;
+    delta = `<div class="pg-week-head__delta"><span class="pg-delta ${cls}">${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)} %</span><span class="pg-week-head__vs">frente a ${a.prevWeeks === 1 ? 'la anterior' : `las ${a.prevWeeks} anteriores`}</span></div>`;
   }
-  const big = metric === 'min' ? fmt.int(avg) : fmt.dec1(avg);
-  return `<div class="pg-big num">${big}<span class="unit">${metric === 'min' ? 'min' : 'km'}/semana</span></div>
-    <div class="pg-week-head__delta">${delta}</div>`;
+  return `<div class="pg-big num">${show(a.avg)}<span class="unit">${unit}/semana</span></div>
+    ${vs(`Media de tus últimas ${a.weeks} semanas completas`)}${delta}`;
 }
 
 function weeklyChart(buckets, metric) {
@@ -399,7 +395,7 @@ function weeklyCard(history, today, metric) {
       <div class="eyebrow">Por semana</div>
       ${segmented({ name: 'pg-metric', options: [{ value: 'km', label: 'Km' }, { value: 'min', label: 'Minutos' }], value: m })}
     </div>
-    <div class="pg-week-head" data-weekly-head>${weeklyHead(buckets, m)}</div>
+    <div class="pg-week-head" data-weekly-head>${weeklyHead(buckets, m, firstSessionDay(history))}</div>
     <div class="pg-chart" data-weekly-chart>${weeklyChart(buckets, m)}</div>
   </section>`;
 }
@@ -407,11 +403,15 @@ function weeklyCard(history, today, metric) {
 function speedsSection(s, today) {
   const levels = s.levels || {};
   const series = levelSeries(s, today);
-  const ref = refLevels(series, today);
+  // La misma referencia que en Hoy, y debajo de la lista se dice de cuándo es
+  const period = levelReference(s.levelHistory, today);
+  const ref = period?.levels || null;
+  let moved = false;
   const tiles = LEVEL_KEYS.map((k) => {
     const z = ZONES[k];
     const cur = levels[k] || 0;
     const d = round1(cur - (ref?.[k] ?? cur));
+    if (Math.abs(d) >= 0.05) moved = true;
     return `<div class="list__row pg-level">
       <span class="zdot" style="--zc:var(--z-${k})" aria-hidden="true"></span>
       <span class="pg-level__main"><span class="list__title">${esc(z?.name || k)}</span><span class="pg-level__pace num">${fmt.pace(cur)} /km</span></span>
@@ -443,7 +443,7 @@ function speedsSection(s, today) {
 
   return `<section class="pg-section stack">
     ${sectionHeader('Tus velocidades', `<button type="button" class="btn btn--ghost pg-link" data-href="#/settings/speeds">Ajustar</button>`)}
-    <div class="list pg-levels">${tiles}</div>
+    <div class="list pg-levels">${tiles}${moved ? `<p class="pg-levels__note">Cambio ${esc(levelReferenceLabel(period).replace(/^vs\. /, 'frente a '))}</p>` : ''}</div>
     ${chart}
     ${vo2Card(s)}
     ${racesCard(s)}
@@ -471,18 +471,19 @@ function racesCard(s) {
 
 function vo2Data(s) {
   const levels = s.levels || {};
-  const vam = Number(safe(() => vamFromLevels(levels), 0)) || 0;
+  // Una sola VAM para toda la app (levels.vamNow): la de tu último test o, si ya corres por encima, la de tus velocidades
+  const now = safe(() => vamNow(s), null);
+  const vam = Number(now?.vam) || Number(safe(() => vamFromLevels(levels), 0)) || 0;
   const vo2 = Number(safe(() => estimateVo2max(vam), 0)) || 0;
   const age = Number(s.profile?.age) || 46;
   const sex = s.profile?.sex === 'f' ? 'f' : 'm';
   const cat = safe(() => vo2Category(vo2, age, sex), null) || { tier: 2, label: 'Bueno', thresholds: [34, 39, 44, 49] };
   const t = cat.thresholds;
-  // De dónde sale cada cifra: la nuestra (test VAM si tus velocidades siguen siendo las del test; si no, tus velocidades)
-  // y, si la hay, la que estima el Apple Watch (otro cálculo, sobre todo al aire libre: no tienen por qué coincidir)
-  const testVam = Number(s.progression?.lastTest?.vam) || 0;
-  const fromTest = testVam > 0 && Math.abs(testVam - vam) <= 0.2;
+  // De dónde sale cada cifra: la nuestra (ver vamNow) y, si la hay, la que estima el Apple Watch (otro cálculo, sobre
+  // todo al aire libre: no tienen por qué coincidir)
+  const fromTest = now?.source === 'test';
   const watch = safe(() => vo2Trend(cachedHealthMetrics(), todayKey())?.last, null);
-  return { vam, vo2, age, sex, cat, t, min: t[0] - 8, max: t[3] + 8, color: VO2_COLORS[cat.tier] || 'var(--accent)', fitAge: fitnessAge(vo2, sex), fromTest, watch };
+  return { vam, vo2, age, sex, cat, t, min: t[0] - 8, max: t[3] + 8, color: VO2_COLORS[cat.tier] || 'var(--accent)', fitAge: fitnessAge(vo2, sex), fromTest, watch, now };
 }
 
 function vo2Scale(d) {
@@ -495,8 +496,7 @@ function vo2Scale(d) {
 
 function vo2Card(s) {
   const d = vo2Data(s);
-  const test = s.progression?.lastTest;
-  const testKey = test?.date ? (test.date.length > 10 ? isoToKey(test.date) : test.date) : null;
+  const gapNote = safe(() => vamGapNote(d.now), '');
   const ageDiff = d.age - d.fitAge;
   const fitTxt = ageDiff >= 2
     ? `${d.fitAge <= 25 ? 'Al menos ' : ''}${ageDiff} años por debajo de tu edad`
@@ -514,9 +514,10 @@ function vo2Card(s) {
       ${d.watch ? `<div><span>Apple Watch</span><b class="num">${fmt.dec1(d.watch)}</b></div>` : ''}
     </div>
     <div class="stat-grid stat-grid--2 pg-vo2__facts">
-      ${statHtml('VAM actual', `<span class="num">${fmt.speed(d.vam)}</span>`, 'km/h', `<span class="pg-vo2__note">${testKey ? `Último test: ${esc(shortDate(testKey))}` : 'Estimada por tus velocidades'}</span>`)}
+      ${statHtml('Tu VAM', `<span class="num">${fmt.speed(d.vam)}</span>`, 'km/h', `<span class="pg-vo2__note">${esc(safe(() => vamSourceLabel(d.now), 'Estimada por tus velocidades'))}</span>`)}
       ${statHtml('Edad de forma', `<span class="num">${d.fitAge <= 25 ? '≤' : '≈'}${'\u2009'}${d.fitAge}</span>`, 'años', `<span class="pg-vo2__note">${esc(fitTxt)}</span>`)}
     </div>
+    ${gapNote ? `<p class="muted pg-vo2__gap">${esc(gapNote)}</p>` : ''}
     <button type="button" class="btn btn--secondary btn--block pg-vo2__more" data-pg="vo2"><span>Qué significa y cómo subirlo</span></button>
   </div>`;
 }
@@ -582,8 +583,9 @@ function heartSection(s, today) {
   let line = '';
   if (pts.length) {
     const last = pts[pts.length - 1];
-    // Referencia: la sesión más cercana a 4 semanas antes (al menos 3 semanas atrás)
-    const refs = pts.filter((p) => daysBetween(p.date, last.date) >= 21);
+    // Referencia: la sesión más cercana a 4 semanas antes (al menos 3 semanas atrás) y a la misma velocidad de trote:
+    // si tu trote ha cambiado, el pulso de entonces no es comparable y no se da diferencia
+    const refs = pts.filter((p) => daysBetween(p.date, last.date) >= 21 && Math.abs(p.speed - last.speed) <= 0.15 + 1e-9);
     const ref = refs.length ? refs.reduce((a, b) => (Math.abs(daysBetween(b.date, last.date) - 28) < Math.abs(daysBetween(a.date, last.date) - 28) ? b : a)) : null;
     const d = ref ? last.avg - ref.avg : null;
     const weeks = ref ? Math.max(1, Math.round(daysBetween(ref.date, last.date) / 7)) : 0;
@@ -640,7 +642,7 @@ const RECORD_DEFS = [
   { key: 'maxSpeed', label: 'Velocidad punta', ic: 'bolt', color: 'var(--z-sprint)', value: (v) => [fmt.speed(v), 'km/h'] },
   { key: 'maxAvgSpeed', label: 'Mejor media', ic: 'gauge', color: 'var(--z-run)', value: (v) => [fmt.speed(v), 'km/h'] },
   { key: 'mostSprintSec', label: 'Más tiempo a sprint', ic: 'flame', color: 'var(--z-fast)', value: (v) => [fmt.clock(v), 'min'] },
-  { key: 'bestVam', label: 'Mejor VAM', ic: 'target', color: 'var(--c-test)', value: (v) => [fmt.speed(v), 'km/h'] },
+  { key: 'bestVam', label: 'Mejor VAM en test', ic: 'target', color: 'var(--c-test)', value: (v) => [fmt.speed(v), 'km/h'] },
 ];
 
 function recordsSection(history) {
@@ -719,12 +721,12 @@ function medalsGrid(list, got) {
       </details>`;
 }
 
-function historyLink(count) {
+function historyLink(history) {
   return `<div class="list pg-history-link">
     <button type="button" class="list__row" data-href="#/history">
       ${listIcon('list')}
       <span class="list__title">Historial completo</span>
-      <span class="list__value">${count} ${count === 1 ? 'sesión' : 'sesiones'}</span>
+      <span class="list__value">${esc(safe(() => sessionsText(history), ''))}</span>
       <span class="list__chev">${icon('chevron-right', 14)}</span>
     </button>
   </div>`;
@@ -774,7 +776,7 @@ function view(s, animate, wr = null) {
     parts.push(recordsSection(history));
   }
   parts.push(achievementsSection(s));
-  if (history.length) parts.push(historyLink(history.length));
+  if (history.length) parts.push(historyLink(history));
   return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
 }
 
@@ -830,7 +832,7 @@ function openVo2Sheet() {
         <b class="num">${fmt.dec1(d.vo2)}</b><span>ml/kg/min</span><em><i class="zdot" style="--zc:${d.color}" aria-hidden="true"></i>${esc(d.cat.label)}</em>
       </div>
       <p>El <b>VO₂máx</b> es el máximo oxígeno que tu cuerpo puede usar por minuto y por kilo. Es el mejor indicador de tu forma cardiovascular y uno de los que más se relacionan con la salud a largo plazo.</p>
-      <p><b>Cómo lo calculamos:</b> a partir de tu VAM (velocidad aeróbica máxima, ${fmt.speed(d.vam)} km/h) con la fórmula de Léger: VO₂máx ≈ 3,5 × VAM. Es una estimación orientativa; un test de laboratorio sería más preciso.${d.fromTest ? '' : getState().progression?.lastTest ? ' Ahora sale de tus velocidades actuales, que ya no son las de tu último test.' : ' Hasta que hagas un test VAM, sale de tus velocidades.'}</p>
+      <p><b>Cómo lo calculamos:</b> a partir de tu VAM (velocidad aeróbica máxima, ${fmt.speed(d.vam)} km/h) con la fórmula de Léger: VO₂máx ≈ 3,5 × VAM. Es una estimación orientativa; un test de laboratorio sería más preciso. ${d.fromTest ? `Tu VAM es la que midió tu último test.${d.now?.behind > 0 ? ' Tus velocidades aún van por debajo: un test las sube como mucho 1 km/h de golpe, y el resto llega poco a poco.' : ''}` : d.now?.testVam > 0 ? 'Ahora sale de tus velocidades actuales, que ya van por encima de lo que midió tu último test.' : 'Hasta que hagas un test VAM, sale de tus velocidades.'}</p>
       ${d.watch ? `<p><b>Apple Watch: ${fmt.dec1(d.watch)}.</b> Es otra estimación, la de Apple, que se calcula sobre todo al caminar o correr al aire libre. Por eso las dos cifras no tienen por qué coincidir.</p>` : ''}
       <div class="eyebrow">Referencia ${esc(d.sex === 'f' ? 'para mujeres' : 'para hombres')} ${esc(ageBand(d.age))}</div>
       <div class="list pg-vtable">${rows}</div>
@@ -913,7 +915,7 @@ export function mount(el) {
     if (!Array.isArray(buckets) || !buckets.length) buckets = localWeekly(history, 12, todayKey());
     const head = body.querySelector('[data-weekly-head]');
     const chart = body.querySelector('[data-weekly-chart]');
-    if (head) head.innerHTML = weeklyHead(buckets, metric);
+    if (head) head.innerHTML = weeklyHead(buckets, metric, firstSessionDay(history));
     if (chart) chart.innerHTML = weeklyChart(buckets, metric);
   };
 

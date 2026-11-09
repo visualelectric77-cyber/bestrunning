@@ -21,9 +21,11 @@ import {
   goalStatus, goalOf, goalIntro, goalBlock, makeGoal, setGoal, clearGoal, GOAL_DISTANCES, GOAL_STAGES, goalDistance,
   parseGoalTime, fmtGoalTime, paceText, predictedFor, goalDateRange, raceDateText,
 } from '../training/goal.js';
+import { vamNow } from '../training/levels.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, makeRng,
 } from '../core/utils.js';
+import { focusView } from '../training/focus.js';
 
 const MORE_SVG =
   '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
@@ -319,7 +321,7 @@ function seasonCal(state, monday) {
 
 function weekSummary(days) {
   const train = days.filter((d) => d.workout && d.kind !== 'rest');
-  const done = days.filter((d) => d.status === 'done').length;
+  const done = train.filter((d) => d.status === 'done').length;   // solo los días con clase del plan, como Hoy y Progreso
   const sec = train.reduce((a, d) => a + mins(d.workout) * 60, 0);
   const km = train.reduce((a, d) => a + (d.workout.estDistanceKm || 0), 0);
   const min = Math.round(sec / 60);
@@ -399,6 +401,7 @@ function dayRow(day, today, i, createdKey, state) {
   const badges = `${day.kind === 'test' || w.isTest ? '<span class="pn-badge">Test</span>' : ''}${
     day.event && !day.isOverride ? `<span class="br-chip br-chip--event">${esc(day.event.name || 'Especial')}</span>` : ''}${
     day.surprise && !day.event && !day.isOverride ? '<span class="br-chip br-chip--surprise">Sorpresa</span>' : ''}${
+    day.focus && !day.event ? '<span class="br-chip br-chip--focus">Tu enfoque</span>' : ''}${
     day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}`;
   const label = `${capitalize(fmt.weekdayName(wd))} ${dnum}: ${w.title}, ${catName(w.category)}, ${mins(w)} minutos.${
     status === 'done' ? ' Hecho.' : status === 'missed' ? ' No realizada.' : ''
@@ -468,6 +471,14 @@ function goalCaption(gs) {
   return [left, right];
 }
 
+/** Fila «Tu enfoque»: lo que el plan está trabajando contigo estas semanas (el detalle y el porqué, en Progreso › Análisis). */
+function focusRowHtml(state) {
+  const f = safe(() => focusView(state), null);
+  if (!f || !f.actionable || f.state === 'declined') return '';
+  const when = f.state === 'next' ? ' · desde el lunes' : f.state === 'hold' ? ' · en pausa' : f.state === 'idle' ? ' · esta semana no' : '';
+  return `<div class="list pn-next"><button type="button" class="list__row" data-focus-open aria-label="${esc(`Tu enfoque: ${f.title}${when}. Ver por qué.`)}">${icon('bolt', 20)}<span class="list__title">Tu enfoque</span><span class="list__value">${esc(f.title)}${when}</span><span class="list__chev" aria-hidden="true">${icon('chevron-right', 14)}</span></button></div>`;
+}
+
 /** Tarjeta del objetivo en Mi plan (o una fila discreta para añadirlo). */
 function goalCardHtml(state, today) {
   const gs = safe(() => goalStatus(state, today), null);
@@ -524,7 +535,7 @@ export function openGoalSheet() {
 
   const placeholder = (k) => ({ '5k': '25:00', '10k': '50:00', '15k': '1:15:00', '21k': '1:50:00' }[k] || '50:00');
   const hint = () => {
-    const pred = safe(() => predictedFor(dist, state.levels), null);
+    const pred = safe(() => predictedFor(dist, state.levels, vamNow(state).vam), null);
     const sec = parseGoalTime(timeRaw, dist);
     const out = [];
     if (timeRaw && !sec) out.push(`<span class="pn-gsheet__err">Escribe el tiempo como ${placeholder(dist)}${dist === '21k' || dist === '15k' ? '' : ' (minutos y segundos)'}.</span>`);
@@ -670,6 +681,7 @@ function view(state, monday, today, first) {
     ${goalCardHtml(state, today)}
     ${block}
     ${weekSummary(days)}
+    ${monday === curMonday ? focusRowHtml(state) : ''}
     ${testNote}
     <p class="pn-hint">${icon('drag', 15)}<span>Mantén pulsado un día y arrástralo sobre otro para intercambiarlos.</span></p>
     <ol class="pn-days${first ? ' stagger' : ''}" aria-label="Días de la semana">${days.map((d, i) => dayRow(d, today, i, createdKeyOf(state), state)).join('')}</ol>
@@ -1105,6 +1117,13 @@ export function mount(el, { query } = {}) {
     if (wk && !wk.disabled) return changeWeek(Number(wk.dataset.week));
     const ics = e.target.closest('[data-ics]');
     if (ics) return exportIcs(ics);
+    if (e.target.closest('[data-focus-open]')) {
+      e.preventDefault();
+      haptic('light');
+      setState((d) => { d.ui = d.ui || {}; d.ui.progressTab = 'review'; });
+      navigate('#/progress');
+      return;
+    }
     if (e.target.closest('[data-goal-edit]')) {
       haptic('light');
       return openGoalSheet();

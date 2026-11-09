@@ -2,13 +2,13 @@
 // veredicto por semana (fuerte, normal, flojo o sin correr). La app no diagnostica: ve que tu pulso fue anormalmente
 // alto y lo dice; la causa (resfriado, cansancio…) sale de tus notas o la marcas tú.
 import { buildHrModel, sessionHrOffset, steadyPoints, isHills } from './hr-model.js';
-import { sessionDay } from './stats.js';
+import { sessionDay, weekKeyOf } from './stats.js';
 import { fmt, todayKey, addDays, mondayOf, daysBetween } from '../core/utils.js';
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const MAX_WEEKS = 16;
-const HARD_FEEL = new Set(['hard', 'max', 'fail']);
+const HARD_FEEL = new Set(['max', 'fail']);   // «Exigente» es una clase bien llevada (lo dice el Resumen y así lo trata el plan): solo cuentan como duras «Al límite» y «No pude»
 const WEAK_HR = 5;           // ppm por encima de tus semanas anteriores para llamar «flojo» a una semana
 const STRONG_HR = -4;
 
@@ -71,7 +71,8 @@ function buildWeeks(state, items, now, model, refSpeed) {
   for (let i = count - 1; i >= 0; i--) {
     const monday = addDays(thisMon, -7 * i);
     const sunday = addDays(monday, 6);
-    const list = items.filter((it) => { const d = sessionDay(it.s); return d >= monday && d <= sunday; });
+    // una clase adelantada cuenta en la semana del día que cubría, como en «Esta semana»
+    const list = items.filter((it) => { const d = weekKeyOf(it.s); return d >= monday && d <= sunday; });
     const sessions = list.map((it) => it.s);
     const km = sessions.reduce((a, s) => a + num(s.distanceKm), 0);
     const sec = sessions.reduce((a, s) => a + num(s.elapsedSec), 0);
@@ -123,17 +124,21 @@ function compareEras(weeks, refSpeed) {
   const early = active.slice(0, size);
   const late = active.slice(-size);
   const col = (list, fn) => list.map(fn).filter((v) => v != null && v > 0);
+  // Los kilómetros por semana cuentan todas las semanas del calendario, también las que no corriste: si no, no sería
+  // una media por semana sino «por semana que salió»
+  const closed = weeks.filter((w) => !w.inProgress);
+  const since = closed.slice(Math.max(0, closed.indexOf(active[0])));
   const rows = [
     compareRow(`Pulso a ${fmt.speed(refSpeed || 0)} km/h`, 'ppm', col(early, (w) => w.hr), col(late, (w) => w.hr), (v) => fmt.int(Math.round(v)), true, 2, true),
     compareRow('Velocidad de Correr', 'km/h', col(early, (w) => w.runSpeed), col(late, (w) => w.runSpeed), (v) => fmt.speed(v), false, 0.1, true),
-    compareRow('Kilómetros por semana', 'km', col(early, (w) => w.km), col(late, (w) => w.km), (v) => fmt.dec1(v), false, 1),
+    compareRow('Kilómetros por semana', 'km', since.slice(0, size).map((w) => w.km), since.slice(-size).map((w) => w.km), (v) => fmt.dec1(v), false, 1),
     compareRow('Esfuerzo que te cuesta', '/10', col(early, (w) => w.rpe), col(late, (w) => w.rpe), (v) => fmt.dec1(v), true, 0.5),
   ].filter(Boolean);
   if (!rows.length) return null;
   // Mandan el pulso y las velocidades: que hagas menos kilómetros un mes no significa que estés peor
   const fit = rows.filter((r) => r.fitness);
   const score = (list) => list.filter((r) => r.better === true).length - list.filter((r) => r.better === false).length;
-  const trend = score(fit) || score(rows);
+  const trend = fit.length ? score(fit) : score(rows);   // con pulso o velocidades medidos, un empate es un empate: no lo deciden los kilómetros
   const verdict = trend > 0 ? { tone: 'good', title: 'Estás mejor que al empezar' }
     : trend < 0 ? { tone: 'warn', title: 'Has perdido algo de lo ganado' }
       : { tone: 'neutral', title: 'Te mantienes como al empezar' };
@@ -162,6 +167,30 @@ function highlights(weeks, refSpeed) {
     slump = { monday: w.monday, title: `Semana del ${shortDay(w.monday)}`, text: `${cause}${w.reasons[0] || 'Una semana floja'}. ${back ? 'Ya lo has recuperado.' : later.length ? 'Sigues sin recuperar del todo.' : 'Es la última: vigílalo.'}`, back };
   }
   return { best, slump };
+}
+
+/**
+ * Media por semana de verdad, para lo que se rotula «km/semana» o «min/semana»: solo semanas completas (la que está en
+ * curso aún no ha acabado) y solo desde la primera en la que corriste (las de antes no son semanas de cero).
+ * buckets: [{ monday, km, sec }] de la más antigua a la actual · value: (cubo) → número · firstDay: tu primera clase.
+ * → { avg (null sin semanas completas), weeks, prevAvg (null si no hay con qué comparar), prevWeeks, current }
+ */
+export function weeklyAverage(buckets, firstDay, value, span = 4) {
+  const list = Array.isArray(buckets) ? buckets : [];
+  const val = (b) => num(value(b));
+  const closed = list.slice(0, -1);
+  let from = closed.findIndex((b) => num(b.km) > 0 || num(b.sec) > 0);
+  if (firstDay && list.length && firstDay < list[0].monday) from = 0; // llevas más tiempo del que cabe en la ventana
+  const mine = from < 0 ? [] : closed.slice(from);
+  const last = mine.slice(-span);
+  const prev = mine.slice(-2 * span, -span);
+  return {
+    avg: last.length ? mean(last.map(val)) : null,
+    weeks: last.length,
+    prevAvg: prev.length ? mean(prev.map(val)) : null,
+    prevWeeks: prev.length,
+    current: list.length ? val(list[list.length - 1]) : 0,
+  };
 }
 
 /** → { refSpeed, weeks (de más antigua a más nueva), compare, best, slump, counts } */

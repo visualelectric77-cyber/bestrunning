@@ -13,7 +13,7 @@
 // del inicio del plan. Sin objetivo, nada de esto se aplica y el plan queda exactamente igual.
 import { addDays, mondayOf, daysBetween, weekdayOf, fmt } from '../core/utils.js';
 import { predictRaces } from './race-predict.js';
-import { vamFromLevels } from './levels.js';
+import { vamFromLevels, vamNow } from './levels.js';
 
 export const GOAL_VERSION = 1;
 
@@ -185,9 +185,13 @@ export function fmtGoalTime(sec) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
-/** Marca prevista hoy para la distancia ({ fastSec, slowSec, paceSec } o null), con js/training/race-predict.js. */
-export function predictedFor(distanceKey, levels) {
-  const vam = Number(vamFromLevels(levels || {})) || 0;
+/**
+ * Marca prevista hoy para la distancia ({ fastSec, slowSec, paceSec } o null), con js/training/race-predict.js.
+ * `vam`: la de levels.vamNow(state), para que la previsión sea la misma que «Tus marcas estimadas» de Progreso;
+ * sin ella, la de las velocidades.
+ */
+export function predictedFor(distanceKey, levels, vam0 = null) {
+  const vam = Number(vam0) > 0 ? Number(vam0) : Number(vamFromLevels(levels || {})) || 0;
   const r = predictRaces(vam).find((x) => x.key === distanceKey);
   return r ? { fastSec: r.fastSec, slowSec: r.slowSec, paceSec: r.paceSec, vam } : null;
 }
@@ -216,7 +220,7 @@ export function goalStatus(state, today, { keepDays = 6 } = {}) {
   if (daysLeft < -keepDays) return null;
   const planStart = isKey(state?.plan?.startDate) ? mondayOf(state.plan.startDate) : null;
   const paceSec = g.targetSec ? Math.round(g.targetSec / dist.km) : null;
-  const predicted = predictedFor(g.distance, state?.levels);
+  const predicted = predictedFor(g.distance, state?.levels, vamNow(state).vam);
   return {
     goal: g,
     dist,

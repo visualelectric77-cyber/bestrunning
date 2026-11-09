@@ -22,7 +22,8 @@ export const isRaceTemplate = (templateId) => typeof templateId === 'string' && 
 export function raceSpeedFor(distanceKey, { targetSec = null, levels = null } = {}) {
   const d = goalDistance(distanceKey);
   if (!d) return null;
-  if (Number(targetSec) > 0) return round1(clamp((d.km / Number(targetSec)) * 3600, 5, 22));
+  // con tiempo objetivo, la décima se redondea HACIA ARRIBA: a 10,9 km/h un 10K en 55:00 acababa en 55:03 y el objetivo no se cumplía
+  if (Number(targetSec) > 0) return clamp(Math.ceil(((d.km / Number(targetSec)) * 3600 - 1e-9) * 10) / 10, 5, 22);
   const lv = levels || {};
   const vam = Number(lv.jog) > 0 ? vamFromLevels(lv) : 0;
   const p = predictRaces(vam).find((r) => r.key === d.key);

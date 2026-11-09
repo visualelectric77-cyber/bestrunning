@@ -50,6 +50,10 @@ vec3 waveColor(float srel, out float br) {
  *   camH (m), fovP / fovL (°, vertical), horizonP (fracción bajo el número), moods, chainSec, chainFar (m), preDim,
  *   finale: (pose, portrait) ⇒ escribe pose { y, z, lookY, lookZ, fov } · title: texto del rótulo del evento o null,
  *   exposure (base), titleColor
+ *   finaleShot: (T, { clock, p, portrait, still }) ⇒ PLANO FINAL propio (opcional; sin él, la grúa de siempre). El
+ *     escenario escribe la pose objetivo T { position, lookAt, fov } en cada fotograma: clock = s desde el corte, p =
+ *     avance 0..1 del final, still = movimiento reducido (plano fijo). El corredor hace el corte (rig.snap) en el
+ *     primer fotograma, pone el desplazamiento de lente a cero y un asentamiento corto.
  */
 export function createRunner(ctx, o = {}) {
   const { THREE, rig, post, timeline: tl, util, camera } = ctx;
@@ -125,6 +129,8 @@ export function createRunner(ctx, o = {}) {
   let chainZone = 'jog';
   let finaleInit = false;
   let finaleOn = false;
+  let finClock = 0;
+  const shotInfo = { clock: 0, p: 0, portrait: true, still: false };
   let lastRecord = false;
   let clockT = 0;
   const gold = new THREE.Color('#ffd60a');
@@ -272,19 +278,31 @@ export function createRunner(ctx, o = {}) {
       if (introOn && f.intro >= 1) introOn = false;
       const h = camH + mood.dh + 0.1 * st.pauseK + (o.introRise ?? 2.4) * intro;
       if (f.finale > 0) {
+        const first = !finaleInit;
         if (!finaleInit) {
           finaleInit = true; finaleOn = true;
           const fc = lastRecord ? gold : ctx.zoneColor(f.zone);
           startChain(u.uColNew.value, fc, 1, CHAIN_SEC * 1.2);
           if (title) title.visible = false;
         }
-        if (o.finale) o.finale(finalePose, st.portrait);
-        T.position.set(0, finalePose.y, finalePose.z);
-        T.lookAt.set(0, finalePose.lookY, finalePose.lookZ);
-        T.fov = finalePose.fov;
-        T.shift.set(st.portrait ? 0 : base.sx * 0.5, st.portrait ? 0.1 : -0.12);
-        T.roll = 0;
-        rig.settle.position = 2.4; rig.settle.lookAt = 2.2; rig.settle.shift = 2; rig.settle.fov = 2.2;
+        if (o.finaleShot) {
+          // plano final propio del escenario: corte limpio y, después, lo que el escenario mueva (despacio)
+          finClock = first ? 0 : finClock + dt;
+          shotInfo.clock = finClock; shotInfo.p = clamp01(f.finale); shotInfo.portrait = st.portrait; shotInfo.still = st.rm;
+          T.shift.set(0, 0);
+          T.roll = 0;
+          rig.settle.position = 0.6; rig.settle.lookAt = 0.6; rig.settle.shift = 0.6; rig.settle.fov = 0.6;
+          o.finaleShot(T, shotInfo);
+          if (first) rig.snap();
+        } else {
+          if (o.finale) o.finale(finalePose, st.portrait);
+          T.position.set(0, finalePose.y, finalePose.z);
+          T.lookAt.set(0, finalePose.lookY, finalePose.lookZ);
+          T.fov = finalePose.fov;
+          T.shift.set(st.portrait ? 0 : base.sx * 0.5, st.portrait ? 0.1 : -0.12);
+          T.roll = 0;
+          rig.settle.position = 2.4; rig.settle.lookAt = 2.2; rig.settle.shift = 2; rig.settle.fov = 2.2;
+        }
       } else {
         if (finaleOn) {
           finaleOn = false; finaleInit = false;
@@ -328,6 +346,9 @@ export function createRunner(ctx, o = {}) {
         default: break;
       }
     },
+
+    /** Segundos desde el corte al plano final (0 fuera del final). */
+    get finClock() { return finaleOn ? finClock : 0; },
 
     debug() { return { S: st.S, chain: !!chain, drift: driftErr, horizonY: st.horizonY }; },
   };

@@ -22,6 +22,7 @@ uniform float uSunAz;  // azimut del resplandor
 uniform sampler2D uPhotoT;   // web 1.14: cielo de foto (la Vía Láctea real, CC0) bajo la aurora, solo de noche
 uniform vec4 uPhotoCrop;
 uniform float uPhotoK;
+uniform vec2 uPhotoCut;      // x umbral sobre la media local, y ganancia de las estrellas
 ${SKY_SAMPLE}
 varying vec2 vNdc;
 void main() {
@@ -34,7 +35,21 @@ void main() {
   float az = atan(dir.x, -dir.z);
   if (uPhotoK > 0.0) {
     // estrellas y Vía Láctea de verdad (punto negro: fuera el velo del panorama), apagadas pegadas al horizonte
-    vec3 ph = max(skyCrop(uPhotoT, uPhotoCrop, dir) - 0.09, 0.0) / 0.91;
+    // El panorama es una larga exposición con el fondo MUY levantado (mediana ≈ 0,17–0,31 lineal según la altura): con
+    // un punto negro fijo de 0,09 quedaba un velo gris granulado que tapaba la aurora y subía la luminancia tras la
+    // barra superior. Punto negro LOCAL: se resta la media del entorno (mip 5 de la misma textura ≈ 1,4°, ya generado;
+    // una lectura más, de un mip bajo) ⇒ el velo cae a negro a cualquier altura y solo quedan las estrellas; el
+    // cuadrado les da jerarquía (pocas brillantes, muchas tenues) y afina su núcleo: cielo negro, la aurora manda.
+    const vec3 LUM = vec3(0.2126, 0.7152, 0.0722);
+    float elp = asin(clamp(y, -1.0, 1.0));
+    vec2 suv = clamp(vec2((az - uPhotoCrop.x) / (uPhotoCrop.y - uPhotoCrop.x),
+      (max(elp, uPhotoCrop.z + 0.002) - uPhotoCrop.z) / (uPhotoCrop.w - uPhotoCrop.z)), vec2(0.002), vec2(0.998));
+    vec3 raw = texture2D(uPhotoT, suv).rgb;
+    float lraw = dot(raw, LUM);
+    float lloc = dot(textureLod(uPhotoT, suv, 5.0).rgb, LUM);
+    float st = max(lraw - lloc * uPhotoCut.x, 0.0);
+    // (acotado: ni la estrella más brillante, en lo alto, donde el fondo local es más oscuro, llega al umbral del bloom)
+    vec3 ph = raw * min(st * st * uPhotoCut.y / max(lraw, 1e-3), 1.3);
     float night = 1.0 - smoothstep(0.01, 0.08, dot(uZenith, vec3(0.33)));
     // fuera el resplandor de pueblo de la foto pegado al horizonte (ahí manda la aurora) y sin tintes cálidos
     float lphT = dot(ph, vec3(0.2126, 0.7152, 0.0722));
@@ -102,6 +117,7 @@ export function createSky(ctx) {
     uSun: { value: new THREE.Color(0, 0, 0) },
     uSunAz: { value: -0.3 },
     uPhotoT: { value: null }, uPhotoCrop: { value: new THREE.Vector4(-1, 1, 0, 1) }, uPhotoK: { value: 0 },
+    uPhotoCut: { value: new THREE.Vector2(1.45, 4.5) },
   };
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));

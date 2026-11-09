@@ -86,7 +86,7 @@ void main() {
 
 export const GROUND_FRAG = /* glsl */ `
 uniform vec3 uTrack, uGrass, uApron, uPaint, uFog, uCur, uSweepCol, uSweepFrom, uGold, uSpecCol, uEnv;
-uniform float uSigCam, uFogD, uLight, uSpec, uMotion, uRailBase, uApproach, uGoldK, uDetail, uPaintK;
+uniform float uSigCam, uFogD, uLight, uSpec, uMotion, uRailBase, uApproach, uGoldK, uDetail, uPaintK, uDArea, uHdr;
 uniform vec4 uGate[3];        // x σrel, y intensidad de la línea, z activa (color del bordillo), w -
 uniform vec3 uGateCol[3];
 uniform vec4 uPacer;          // x cabeza σrel, y longitud, z intensidad, w respiración (pausa)
@@ -98,6 +98,7 @@ uniform vec4 uMoment;         // x σrel MITAD, y intensidad, z σrel META de la
 uniform vec4 uBank[6];        // focos (mundo) + intensidad (reflejo satinado)
 uniform vec2 uLaneCam;        // calle de la cámara [r0, r1]
 uniform vec2 uFeel;           // sensación de velocidad: x contraste de las señales cercanas, y separación de las marcas (σ)
+uniform vec4 uRing;           // plano final · vuelta de honor del bordillo: x σ de salida, y metros encendidos, z brillo de la cabeza, w nivel sin encender
 uniform sampler2D uTartanT, uTartanN, uGrassT;   // web 1.14: tartán y césped de foto (CC0)
 uniform float uPhoto;
 varying vec3 vW;
@@ -154,10 +155,12 @@ void main() {
   float tB = dot(texture2D(uTartanT, p / 7.1 + 0.37).rgb, vec3(0.3, 0.59, 0.11));
   synth = mix(synth, synth * (tA * 1.7 + tB * 0.9), uPhoto);
   vec3 gT = texture2D(uGrassT, p / 2.4).rgb * 0.6 + texture2D(uGrassT, p / 9.0 + 0.21).rgb * 0.4;
-  grass = mix(grass, grass * gT * 3.2, uPhoto);
+  // (la foto es hierba seca, amarillenta: con una ganancia gris el campo salía caqui/tierra. Ganancia por canal que
+  // devuelve el tono a un verde oscuro y sobrio, con la misma luminancia media)
+  grass = mix(grass, grass * gT * vec3(2.2, 3.9, 5.2), uPhoto);
   // áreas de concursos en los fondos (dentro de las curvas): sintético algo más oscuro, sin borde marcado con el césped
   float dArea = step(TA, ax) * (1.0 - trackM);
-  synth *= 1.0 - 0.35 * dArea;
+  synth *= 1.0 - uDArea * dArea;
   vec3 base = mix(synth, grass, grassM);
   // el carril del LED del fantasma: una regleta oscura de 6 cm junto al bordillo
   base *= 1.0 - 0.45 * lineAA(abs(r + 0.13), 0.03, fwR);
@@ -179,6 +182,14 @@ void main() {
   float camLine = max(lineAA(abs(r - uLaneCam.x), 0.07, fwR), lineAA(abs(r - uLaneCam.y), 0.07, fwR));
   float rhythm = lineAA(sR, 0.05, fwM) * camLine * near * clamp(0.15 + 0.5 * uFeel.x, 0.0, 1.0);
   float paint = max(max(max(lane, hurdle * 0.55), fin * across), rhythm);
+  // rotulación de los fondos (zonas D), como en un estadio real: pasillo de jabalina (4 m) con su línea de lanzamiento
+  // y una línea paralela al bordillo. Solo se lee en el plano final; de cerca nunca entra en cuadro
+  float fwP = edge - 0.02 + 1e-5;
+  float dIn = ax - TA;
+  float dMark = lineAA(abs(abs(p.y) - 2.0), 0.03, fwP) * step(0.0, dIn) * step(dIn, 27.0);
+  dMark = max(dMark, lineAA(abs(dIn - 27.0), 0.035, fwP) * step(abs(p.y), 2.0));
+  dMark = max(dMark, lineAA(abs(r + 5.5), 0.03, fwR));
+  paint = max(paint, dMark * dArea * 0.6);
   vec3 col = mix(base, uPaint * uPaintK, paint);
   col = mix(col, vec3(0.42, 0.43, 0.45) * uPaintK, curb);       // bordillo de aluminio
 
@@ -216,7 +227,11 @@ void main() {
   // base del carril: LED en reposo del color de la zona (tras un barrido, el nuevo color por detrás del frente)
   vec3 baseCol = uCur;
   if (uSweep.w > 0.5) baseCol = mix(uSweepFrom, uSweepCol, 1.0 - smoothstep(uSweep.x - fwS, uSweep.x + fwS, srel));
-  float baseK = uRailBase * mix(0.55, 1.0, ledMod);
+  // plano final: el bordillo se enciende desde la meta y da la vuelta entera (uRing.y ≥ vuelta ⇒ todo encendido)
+  float ringD = mod(sig - uRing.x, TLC);
+  float ringLit = 1.0 - smoothstep(uRing.y - 1.5, uRing.y, ringD);
+  float ringK = mix(uRing.w, 1.0, ringLit) + uRing.z * ringLit * exp(-max(uRing.y - ringD, 0.0) / 7.0);
+  float baseK = uRailBase * mix(0.55, 1.0, ledMod) * ringK;
   vec3 rail = baseCol * baseK;
   // pacer (Wavelight): bloque de luz a tu velocidad objetivo, más intenso hacia la cabeza
   float ph = uPacer.x; float pl = uPacer.y;
@@ -225,11 +240,18 @@ void main() {
   float pac = blk * (0.3 + 0.7 * tt * tt) * uPacer.z;
   pac += bandAA(srel, ph - 2.2, ph, fwS + 0.05) * 0.8 * uPacer.z;
   vec3 pcol = mix(zoneColAt(srel, fwS), uGold, uGoldK);
-  rail += pcol * pac * 2.6 * ledMod;
+  rail += pcol * pac * uHdr * ledMod;
   // charco de luz del pacer sobre la pista junto al bordillo (los LED iluminan el suelo): se lee de lejos
   float poolS = smoothstep(ph - pl - 3.0, ph - pl + 3.0, srel) * (1.0 - smoothstep(ph - 2.5, ph + 3.5, srel)) * smoothstep(3.0, 11.0, srel);
   float pool = exp(-abs(r + 0.03) / 0.2) * (1.0 - ledA) * poolS;
-  em += pcol * uPacer.z * 0.26 * pool;
+  // la luz que el bloque deja en el suelo (charco y reflejo en la calle 1) no puede tener los cantos a cuchillo del
+  // propio LED: su perfil a lo largo de la pista se funde en ~3 m y el color cambia en ~1,2 m en la línea de cambio
+  vec3 pcolR = mix(zoneColAt(srel, fwS + 1.2), uGold, uGoldK);
+  float pacR = (smoothstep(ph - pl - 1.5, ph - pl + 1.5, srel) * (0.3 + 0.7 * tt * tt) + 0.8 * smoothstep(ph - 3.7, ph - 0.7, srel))
+    * (1.0 - smoothstep(ph - 1.0, ph + 2.0, srel)) * uPacer.z;
+  vec3 baseR = baseCol;
+  if (uSweep.w > 0.5) baseR = mix(uSweepFrom, uSweepCol, 1.0 - smoothstep(uSweep.x - fwS - 1.2, uSweep.x + fwS + 1.2, srel));
+  em += pcolR * uPacer.z * 0.26 * pool;
   // últimos 3 s: el tramo de carril hasta la línea de cambio se enciende tenue con el color siguiente
   if (uGate[0].z > 0.5) rail += uGateCol[0] * uApproach * 0.55 * bandAA(srel, 0.0, uGate[0].x, fwS + 0.05) * ledMod;
   // barrido de color a lo largo del bordillo en el cambio de tramo (una sola pasada)
@@ -240,7 +262,7 @@ void main() {
   }
   em += rail * ledA;
   // reflejo suave de la hilera de LED sobre la calle 1 (satinado): el color de la zona tiñe el borde de la pista
-  em += (baseCol * uRailBase * 0.55 + pcol * pac * 0.12) * exp(-max(r - 0.02, 0.0) / 0.42) * step(0.02, r) * trackM * gloss;
+  em += (baseR * uRailBase * ringK * 0.55 + pcolR * pacR * 0.12) * exp(-max(r - 0.02, 0.0) / 0.42) * step(0.02, r) * trackM * gloss;
   // fila blanca del fantasma (tu mejor marca) + marcas de 100 m en la misma regleta
   float gh = uGhost.x; float gl = uGhost.y;
   float gt = clamp((srel - (gh - gl)) / gl, 0.0, 1.0);
@@ -298,6 +320,9 @@ export const STAND_FRAG = /* glsl */ `
 uniform vec3 uFog, uBoardCol, uAccent, uFascia, uRim;
 uniform float uFogD, uLight, uEq, uBoardK, uDetail;
 uniform vec4 uSweepB;       // x frente (u, m), y intensidad, z ancho, w vuelta (m)
+uniform vec3 uSweepBCol;    // color del barrido de las vallas (blanco en el drop, el del tramo nuevo en un cambio)
+uniform vec4 uCrowd;        // luces del público: x densidad base (0..1), y frente de la ola (u, m), z fuerza de la ola, w reloj
+uniform vec2 uCrowdK;       // x brillo, y píxeles de dispositivo por px CSS (tamaño del punto)
 uniform sampler2D uSpecTex;
 varying vec4 vInfo;
 varying vec3 vW;
@@ -313,8 +338,11 @@ void main() {
   float u = vInfo.w;
   float fwU = fwidth(u) + 1e-4;
   float fwA = fwidth(along) + 1e-4;
+  vec2 gU = vec2(dFdx(u), dFdy(u));            // (derivadas fuera de las ramas: las usan las luces del público)
+  vec2 gA = vec2(dFdx(along), dFdy(along));
   vec3 col;
   vec3 em = vec3(0.0);
+  vec3 crowd = vec3(0.0);
   float dist = length(vW - cameraPosition);
   if (face < 0.5) {
     // muro de vallas LED sobrias, SIN texto: panel oscuro, filete fino del acento arriba, medidor de música y barrido del drop
@@ -332,7 +360,7 @@ void main() {
     float sweep = exp(-ds / max(uSweepB.z, 0.1)) * uSweepB.y * inB;
     em += uBoardCol * 0.012 * inB * (1.0 - gap);
     em += uAccent * (meter * 0.2 + top * uBoardK) * (1.0 - gap);
-    em += vec3(0.9, 0.93, 1.0) * sweep * 0.9 * (1.0 - gap);
+    em += uSweepBCol * sweep * 0.9 * (1.0 - gap);
     col += vec3(0.05) * lineAA(abs(along - 1.09), 0.012, fwA);   // canto superior del muro
   } else if (face < 2.5) {
     col = vec3(0.010, 0.011, 0.013) * (face < 1.5 ? 1.6 : 0.9);  // pasillo y contrahuella
@@ -363,6 +391,41 @@ void main() {
     // de lejos (detrás del número, al fondo) los cantos se funden en una textura serena
     float farL = 1.0 - 0.55 * smoothstep(60.0, 160.0, dist);
     em += uRim * (nose * (0.55 + 0.45 * (1.0 - v)) * mix(1.0, 0.7, upper) + stepN * 0.35) * (1.0 - vom) * spill * farL;
+    // luces del público: móviles encendidos en la grada. Una celda de 1,4 m × 2 filas puede llevar un punto, redondo
+    // en pantalla a cualquier distancia (~1 px CSS) y con energía conservada cuando la celda ya no tiene píxeles (sin
+    // centelleo al moverse la cámara). La densidad sube poco a poco (sprint, final) y una ola la recorre en km y mitad:
+    // cada luz entra fundiéndose, nunca de golpe. Sin bloom (por debajo del umbral) y sin depender de uLight.
+    if (uCrowd.x + uCrowd.z > 0.002) {
+      vec2 cq = vec2(u / 1.4, along / (rowH * 2.0));
+      vec2 ci = floor(cq);
+      float hs = hash12(ci + upper * 57.0 + 0.5);
+      float dw = abs(u - uCrowd.y);
+      dw = min(dw, uSweepB.w - dw);
+      float pr = (uCrowd.x + uCrowd.z * exp(-dw * dw / 2600.0)) * (0.25 + 0.75 * occ) * (1.0 - aisle) * (1.0 - vom);
+      if (hs < pr) {
+        float h2 = hash12(ci + 7.1);
+        vec2 dc = fract(cq) - (vec2(h2, hash12(ci + 3.7)) * 0.5 + 0.25);
+        // de celda a píxeles con el jacobiano (la grada se ve en escorzo y sesgada: sin él, el punto sale estirado)
+        vec2 gx = gU / 1.4;
+        vec2 gy = gA / (rowH * 2.0);
+        float det = gx.x * gy.y - gx.y * gy.x;
+        float adet = max(abs(det), 1e-9);
+        float ngx = length(gx);
+        float ngy = length(gy);
+        vec2 sp = vec2(gy.y * dc.x - gx.y * dc.y, gx.x * dc.y - gy.x * dc.x) / (det < 0.0 ? -adet : adet);
+        float rad = max(0.95, 0.62 * uCrowdK.y);
+        float r2 = rad * rad;
+        // donde una dirección de la celda ya no tiene píxeles (de canto o muy lejos), su media en esa dirección: nunca
+        // un rectángulo del tamaño de la celda, y sin parpadeo al moverse la cámara
+        vec2 lod = 1.0 - smoothstep(vec2(0.1), vec2(0.24), vec2(ngx, ngy) * rad);
+        vec2 cov = min(1.77 * rad * vec2(ngx, ngy), vec2(1.0));
+        float ex = dc.x * ngy / adet;
+        float ey = dc.y * ngx / adet;
+        float pt = mix(mix(cov.x * cov.y, exp(-ex * ex / r2) * cov.y, lod.x), mix(exp(-ey * ey / r2) * cov.x, exp(-dot(sp, sp) / r2), lod.x), lod.y);
+        float tw = 0.8 + 0.2 * sin(uCrowd.w * (0.7 + 2.2 * h2) + hs * 61.0);
+        crowd = mix(vec3(1.0, 0.92, 0.8), vec3(0.8, 0.89, 1.0), h2) * (pt * tw * smoothstep(0.0, 0.06, pr - hs) * (0.3 + 0.7 * h2 * h2) * uCrowdK.x);
+      }
+    }
   } else if (face < 4.5) {
     col = vec3(0.0085, 0.009, 0.0102) * (0.85 + 0.3 * v);                     // frente del anfiteatro superior
     em += uRim * 1.4 * lineAA(abs(v - 0.96), 0.03, fwidth(v) + 1e-4);          // su borde superior, iluminado
@@ -383,7 +446,7 @@ void main() {
   float fx = dist * uFogD;
   float fogK = 1.0 - exp(-fx * fx);
   col = mix(col, uFog, fogK);
-  col += em * uLight * exp(-dist * 0.0022);
+  col += (em * uLight + crowd) * exp(-dist * 0.0022);
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -396,8 +459,9 @@ attribute vec3 aNrm;     // hacia dónde mira (al campo, inclinada hacia abajo)
 attribute vec4 aRnd;     // x -, y brillo, z temperatura, w grupo (batería)
 uniform vec2 uSize;      // semiancho, semialto (m)
 uniform float uMargin;   // margen del halo (m)
-uniform vec4 uDim;       // atenuación por grupo (vuelta a la calma): grupos pares/impares
+uniform vec4 uDim;       // x, y atenuación por grupo (vuelta a la calma): pares/impares · z encendido del estadio (0..1)
 uniform vec4 uAvoid;     // rectángulo NDC del número de velocidad: los focos no se colocan detrás (composición)
+uniform vec4 uAvoid2;    // ídem para la barra superior
 varying vec2 vL;
 varying float vI;
 varying float vT;
@@ -419,13 +483,18 @@ void main() {
     vec2 n = cc.xy / cc.w;
     float inside = min(min(n.x - uAvoid.x, uAvoid.z - n.x), min(n.y - uAvoid.y, uAvoid.w - n.y));
     vI *= 1.0 - smoothstep(-0.08, 0.02, inside);
+    float inside2 = min(min(n.x - uAvoid2.x, uAvoid2.z - n.x), min(n.y - uAvoid2.y, uAvoid2.w - n.y));
+    vI *= 1.0 - smoothstep(-0.05, 0.02, inside2);
   }
+  // encendido del estadio (cuenta atrás): las baterías entran una a una, cada una con su rampa (nunca de golpe)
+  vI *= mix(0.07, 1.0, smoothstep(0.0, 0.3, uDim.z * 1.3 - fract(aRnd.w * 0.6180339)));
   gl_Position = c;
 }`;
 
 export const BANK_FRAG = /* glsl */ `
 uniform vec2 uSize;
 uniform float uMargin, uCell, uHalo;
+uniform vec2 uAir;       // halo de aire iluminado alrededor de cada batería: x radio (m), y intensidad
 uniform vec3 uWarm, uCool;
 varying vec2 vL;
 varying float vI;
@@ -443,6 +512,8 @@ void main() {
   lamp = mix(lamp, 0.4, smoothstep(0.18, 0.55, fw));
   float frame = inside * 0.05;
   float halo = exp(-(outside * outside) / (uHalo * uHalo)) * (1.0 - inside) * 0.05 + inside * 0.04;
+  // aire iluminado: un velo amplio y muy tenue alrededor (bruma de estadio, no rayos), que muere antes del borde del quad
+  halo += exp(-(outside * outside) / (uAir.x * uAir.x)) * uAir.y * (1.0 - smoothstep(uMargin * 0.7, uMargin, outside));
   vec3 c = mix(uWarm, uCool, vT);
   float a = (inside * lamp * 2.1 + frame + halo) * vI;
   if (a < 0.0005) discard;
@@ -452,11 +523,13 @@ void main() {
 /* ───────────────────────── Texto pintado / gráficos virtuales ───────────────────────── */
 
 export const DECAL_VERT = /* glsl */ `
-varying vec2 vUv;
+uniform float uKey;      // gráfico anamórfico (plano final): el borde lejano es (1 + uKey) veces más ancho que el cercano
+varying vec3 vUvq;       // uv proyectivo (uv·q, q): sin el pliegue en la diagonal de un trapecio de dos triángulos
 varying vec3 vW;
 void main() {
-  vUv = uv;
-  vec4 w = modelMatrix * vec4(position, 1.0);
+  float q = 1.0 + uKey * uv.y;
+  vUvq = vec3(uv * q, q);
+  vec4 w = modelMatrix * vec4(position.x * q, position.y, position.z, 1.0);
   vW = w.xyz;
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
@@ -467,10 +540,10 @@ uniform vec3 uColor;
 uniform float uOpacity, uFogD;
 uniform vec2 uNear;           // distancia (m) a la que la rotulación pintada empieza / acaba de aparecer
 uniform vec3 uFog;
-varying vec2 vUv;
+varying vec3 vUvq;
 varying vec3 vW;
 void main() {
-  vec4 t = texture2D(uMap, vUv);
+  vec4 t = texture2D(uMap, vUvq.xy / vUvq.z);
   float dist0 = length(vW - cameraPosition);
   float a = t.a * uOpacity * smoothstep(uNear.x, uNear.y, dist0);
   if (a < 0.003) discard;

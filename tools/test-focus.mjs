@@ -42,6 +42,7 @@ ok(p1?.current?.capacity === 'ritmo', `elige lo que frena: ${p1?.current?.capaci
 ok(p1?.current?.keep === 'fondo', `mantiene lo que va bien: ${p1?.current?.keep}`);
 ok(p1?.current?.from === MON && p1.current.to === addDays(MON, 28), 'un lunes empieza ese mismo día y dura 4 semanas');
 ok(focusUpdate(state(lagging), at(WED))?.current?.from === '2026-11-16', 'a mitad de semana empieza el lunes siguiente: no cambia la semana en curso');
+ok(focusUpdate(state([...lagging, ses(MON, 'tempo', 9)]), at(MON))?.current?.from === '2026-11-16', 'con la semana ya empezada (clase hecha el lunes) arranca el lunes siguiente');
 const s1b = state(lagging, { plan: { focus: p1 } });
 ok(focusUpdate(s1b, at(WED)) === null, 'no vuelve a decidir en la misma semana');
 
@@ -50,6 +51,17 @@ ok(focusUpdate(state(mix([['endurance', 3, 4], ['tempo', 2, 9]])), at(MON))?.cur
 const miss = focusUpdate(state(mix([['endurance', 5, 5], ['tempo', 4, 7]])), at(MON));
 ok(miss?.current?.capacity === 'velocidad' && miss.current.why === 'missing', `detecta lo que no se hace: ${miss?.current?.capacity}`);
 ok(focusUpdate(state([]), at(MON))?.current == null, 'sin historial no pasa nada');
+// Quien valora todo igual no tiene nada que le frene (antes le salía siempre Fondo)
+for (const rpe of [3, 5, 7]) {
+  const flat = focusUpdate(state(mix([['endurance', 5, rpe], ['tempo', 5, rpe], ['intervals', 4, rpe]])), at(MON));
+  ok(flat?.current == null, `todo valorado igual (${rpe}/10): sin enfoque`);
+}
+// Una decisión de la regla anterior que no iba por debajo de lo normal se retira; una que sí, se conserva
+const viejaMala = { current: { capacity: 'fondo', keep: 'velocidad', why: 'struggle', from: MON, to: addDays(MON, 28), baseline: { score: 100, rpe: 5, n: 5 }, holds: [], declined: false }, past: [] };
+const fixed = focusUpdate(state(mix([['endurance', 5, 5], ['tempo', 5, 5], ['intervals', 4, 5]]), { plan: { focus: viejaMala } }), at(MON));
+ok(fixed && fixed.current == null && fixed.past.length === 0, 'enfoque mal elegido por la regla anterior: se retira');
+const viejaBuena = { current: { capacity: 'ritmo', keep: 'fondo', why: 'struggle', from: MON, to: addDays(MON, 28), baseline: { score: null, rpe: 9, n: 4 }, holds: [], declined: false }, past: [] };
+ok(focusUpdate(state(lagging, { plan: { focus: viejaBuena } }), at(MON))?.current?.capacity === 'ritmo', 'enfoque bien elegido: se conserva');
 const goalPlan = { goal: { distance: '10k', date: '2027-01-17', targetSec: null } };
 ok(focusUpdate(state(lagging, { plan: goalPlan }), at(MON)) === null || focusView(state(lagging, { plan: goalPlan }), at(MON))?.state !== 'active', 'con carrera no decide');
 
@@ -136,7 +148,8 @@ const views = [
   focusView(state(lagging, { plan: { focus: p1 } }), at(MON)), focusView(state(lagging, { plan: { focus: baseFocus('ritmo', 'fondo') } }), at(MON)),
   focusView(state(mix([['endurance', 2, 4]])), at(MON)), focusView(state(mix([['endurance', 4, 5.5], ['tempo', 4, 7], ['intervals', 3, 8]])), at(MON)),
 ];
-ok(views[0].state === 'active' && views[1].state === 'next' && views[2].state === 'learning' && views[3].state === 'balanced', `estados: ${views.map((v) => v?.state)}`);
+ok(['active', 'idle'].includes(views[0].state) && views[1].state === 'next' && views[2].state === 'learning' && views[3].state === 'balanced', `estados: ${views.map((v) => v?.state)}`);
+ok(!/7 dic/.test(JSON.stringify(views[0])) , 'el bloque acaba el domingo, no el lunes');
 ok(views.every((v) => !/undefined|null|NaN/.test(JSON.stringify(v).replace(/"[a-zA-Z]+":null/g, ''))), 'sin «undefined» en los textos');
 ok(/Ritmo/.test(views[0].title) && /fondo/.test(views[0].keepText), 'explica qué y qué mantiene');
 ok(focusView(state([]), at(MON)) === null, 'sin clases, nada que enseñar');

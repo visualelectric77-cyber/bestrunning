@@ -161,6 +161,8 @@ export async function createTheme(ctx) {
   let pauseK = 0;
   let titleA = 0;
   let lastFeel = -1;
+  let batEvt = -1e9;         // bandada extra de un momento (km, mitad)
+  let finT0 = 0;
   const clock = { t: 0 };
   const rectOf = (kind) => { for (const r of ctx.hud.rects) if (r.kind === kind) return r; return null; };
 
@@ -326,12 +328,16 @@ export async function createTheme(ctx) {
       ground.u.uFeel.value.x = feel ? feel.cue : 1;
 
       // ── luna: dirección (marco del corredor) para la luz y el reflejo; algo más alta para iluminar ──
-      const mAz = comp.moonAz - heading;
+      // plano final en vertical: la grúa inclina la cámara y el horizonte sube hasta el número; la luna (medio salida a la
+      // derecha) quedaba justo detrás de la última cifra. Se desliza ~5° a la derecha con la grúa (paralaje: no se nota)
+      const mAz = comp.moonAz + (portrait ? 0.085 * fe : 0) - heading;
       const mEl = Math.max(comp.moonEl, 0) * 0.5 + 0.12;
       S_.uMoonDir.value.set(Math.sin(mAz) * Math.cos(mEl), Math.sin(mEl), -Math.cos(mAz) * Math.cos(mEl));
       // disco de la luna en pantalla (redondo con cualquier óptica): se proyecta su dirección con la cámara vigente
       const MV = sky.u.uMoonV.value;
-      MV.set(Math.sin(mAz) * Math.cos(comp.moonEl), Math.sin(comp.moonEl), -Math.cos(mAz) * Math.cos(comp.moonEl));
+      // plano final (vertical): la luna termina de salir tras las colinas mientras sube la grúa (disco entero sobre el camino)
+      const mElD = comp.moonEl + (portrait ? 0.05 * fe : 0);
+      MV.set(Math.sin(mAz) * Math.cos(mElD), Math.sin(mElD), -Math.cos(mAz) * Math.cos(mElD));
       tmpV.copy(MV).multiplyScalar(1000).add(camera.position).applyMatrix4(camera.matrixWorldInverse);
       const MS = sky.u.uMoonS.value;
       if (tmpV.z < -1) {
@@ -365,7 +371,8 @@ export async function createTheme(ctx) {
       S_.uLamp.value.z = f.time;
       const fb = 1 + 0.3 * fe;
       pumpkins.gu.uGlow.value = 0.5 + 0.45 * fe;
-      C.z = (f.status === 'ready' && !chain ? readyDim : 1) * (1 - 0.22 * pauseK) * fb;
+      // las velas laten muy poco con el pulso de la música (±4 %; nunca con movimiento reducido)
+      C.z = (f.status === 'ready' && !chain ? readyDim : 1) * (1 - 0.22 * pauseK) * fb * (rm ? 1 : 0.97 + 0.08 * (f.beat || 0));
       S_.uFogP.value.z = rm ? 0 : f.time * 0.35;
       // final: el aire se aclara un poco (el camino entero se lee desde arriba)
       S_.uFogP.value.x = 0.0068 * (1 - 0.35 * fe);
@@ -376,7 +383,11 @@ export async function createTheme(ctx) {
       SU.uTime.value = f.time;
       const bp = (f.time + BAT_OFF) / 85;
       const bu = (bp - Math.floor(bp)) / 0.36;
-      if (!rm && bu < 1 && !f.finale && lvl >= 1) {
+      // momento: en cada km y a mitad de clase cruza una bandada extra (lejos, despacio, por delante de la luna)
+      const be = (f.time - batEvt) / 30.6;
+      if (!rm && be >= 0 && be < 1 && !(bu < 1) && !f.finale && lvl >= 1) {
+        SU.uBats.value.set(be, Math.sin(Math.PI * be) * 0.95, 1, 0);
+      } else if (!rm && bu < 1 && !f.finale && lvl >= 1) {
         SU.uBats.value.set(bu, Math.sin(Math.PI * bu) * 0.95, 1, 0);
       } else SU.uBats.value.y = 0;
       SU.uHouse.value.w = 1 - 0.3 * pauseK;
@@ -452,8 +463,8 @@ export async function createTheme(ctx) {
           chain = null;
           S_.uChain.value.w = 0;
           break;
-        case 'km': post.pulse(0.03, 1.4); break;
-        case 'halfway': post.pulse(0.04, 1.6); break;
+        case 'km': post.pulse(0.03, 1.4); batEvt = now; break;
+        case 'halfway': post.pulse(0.04, 1.6); batEvt = now; break;
         case 'drop': post.pulse(0.04, 1.6); break;
         case 'finish': post.pulse(0.04, 2.5); break;
         case 'quality': applyQuality(); break;
@@ -487,6 +498,7 @@ export async function createTheme(ctx) {
   function startFinale(f) {
     finaleInit = true;
     finaleOn = true;
+    finT0 = clock.t;
     finalCol.copy(lastRecord ? gold : ctx.zoneColor(f.zone));
     // una última cadena: todo el camino se enciende en el color final
     S_.uColOld.value.copy(S_.uColNew.value);
@@ -504,7 +516,11 @@ export async function createTheme(ctx) {
     const py = portrait ? 6.8 : 5.4;
     const pz = portrait ? 5 : 4;
     const look = portrait ? 42 : 45;
-    T.position.set(0, py, pz);
+    // con el plano asentado no se queda en una foto fija: la grúa sigue avanzando muy despacio por encima del camino
+    // (5 m en ~40 s) con un vaivén lentísimo. Con movimiento reducido, quieto.
+    const tt = f.reducedMotion ? 0 : Math.max(0, clock.t - finT0);
+    const sway = clamp01((tt - 3) / 4);
+    T.position.set(0.5 * sway * Math.sin(tt * 0.17), py + 0.3 * sway * Math.sin(tt * 0.13), pz - 5 * (1 - Math.exp(-tt / 16)));
     T.lookAt.set(0, portrait ? 0.4 : 0.8, -look);
     T.fov = portrait ? 56 : 58;
     T.shift.set(portrait ? 0 : base.sx * 0.5, portrait ? 0.1 : -0.12);

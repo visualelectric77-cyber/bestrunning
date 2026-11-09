@@ -36,6 +36,9 @@ const SWEEP_T = 2.8;        // duración de la curva que barre las laderas tras 
 const GATE_PASS_T = 1.8;    // la línea recién cruzada se apaga en este tiempo (s)
 const BACK_LEN = 2600;      // longitud de la maqueta final (u): la clase entera, comprimida
 const BACK_EXAG = 1.55;     // exageración vertical de la maqueta
+const AUR_K = 0.26;          // intensidad base de la aurora (0,12 hasta nov-26: apenas se veía tras la barra superior)
+const MIST_RUN = [1 / 420, 34];   // bruma de valle en carrera: densidad y techo (u) — las sierras se despegan por capas
+const MIST_FIN = [1 / 1100, 30];  // en la maqueta final, la de siempre (más densa le borra el relieve)
 const MARK_NEAR = 360;      // el rótulo de KM/MITAD/META solo aparece en sus últimos metros (u)
 /** Nivel de calidad → detalle de malla (la media tiene su propio LOD: bajar de alta alivia de verdad los vértices). */
 const lodFor = (level) => (level >= 3 ? 'high' : level === 2 ? 'med' : level === 1 ? 'low' : 'eco');
@@ -73,7 +76,7 @@ export async function createTheme(ctx) {
     uMoonDir: { value: MOON_RUN.clone() },
     uRimCol: { value: C(0.07, 0.086, 0.125) },
     uHaze: { value: C(0.036, 0.046, 0.072) },
-    uHazeLow: { value: C(0.046, 0.057, 0.084) },
+    uHazeLow: { value: C(0.078, 0.097, 0.143) },   // bruma baja a la luz de la luna (×1,7 nov-26: mar de bruma en los valles)
     uLineCol: { value: C(0.1, 0.114, 0.14) },
     uAccent: { value: new THREE.Color() },
     uPathCur: { value: new THREE.Color() },
@@ -90,11 +93,11 @@ export async function createTheme(ctx) {
     uSweep: { value: new THREE.Vector4() },
     uMark: { value: new THREE.Vector4() },
     uGhost: { value: new THREE.Vector4() },
-    uFog: { value: new THREE.Vector4(1 / 3000, 1 / 1100, 30, 0) },
+    uFog: { value: new THREE.Vector4(1 / 3000, MIST_RUN[0], MIST_RUN[1], 0) },
     uMisc: { value: new THREE.Vector4(0, 0, 0, 1) },
     uLines: { value: new THREE.Vector4(2, 160, 0.2, 1) },
     uRockT: { value: null }, uSnowT: { value: null }, uPhoto: { value: 0 },
-    uRoute: { value: new THREE.Vector2(-1e9, 1e9) },
+    uRoute: { value: new THREE.Vector3(-1e9, 1e9, 0) },
     uFeel: { value: new THREE.Vector2(1, 1) },
   };
   const NOISE = ctx.shaders.NOISE;
@@ -179,8 +182,8 @@ export async function createTheme(ctx) {
   const st = {
     portrait: true, fx: 0.5, fy: 0.57, fov: 56, eye: 2.7, side: 0.32, hudV: -1, tlv: tl.version,
     eyeS: 2.7, fovAdd: 0, pauseK: 0, yOff: 0, lastR: 0, lastS: 0, time: 0, testEndAt: -1e9, floatPending: false,
-    dropAt: -1e9, aurT: 0, aurBase: 0.42, aurAz: 0, aurW: 2, accentR: 160, markKey: 0, peakSeg: -1, peakSpeed: -1, peakU: 0, bass: 0,
-    ghostD: 30, ghostTxtAt: -1e9, fin: null, finK: 0, sOff: 0, lastKmh: 0, ramp: null,
+    dropAt: -1e9, kmAt: -1e9, aurT: 0, aurBase: 0.42, aurAz: 0, aurW: 2, accentR: 160, markKey: 0, peakSeg: -1, peakSpeed: -1, peakU: 0, bass: 0,
+    ghostD: 30, ghostTxtAt: -1e9, fin: null, finK: 0, finAz: 0, sOff: 0, lastKmh: 0, ramp: null,
   };
   const tmp = new THREE.Vector3();
   const pos = new THREE.Vector3();
@@ -349,6 +352,12 @@ export async function createTheme(ctx) {
       SW.x = prof.R(prof.sb[seg]) - 0.6 - (rm ? 10 : 19) * e;
       SW.y = smoothstep(0, 0.22, e) * Math.pow(1 - e / SWEEP_T, 1.4) * 0.95;
       U.uSweepCol.value.copy(ctx.zoneColor(f.zone));
+    } else if (st.time - st.kmAt < SWEEP_T && st.time >= st.kmAt && !st.fin && !rm) {
+      // cada km y la mitad: la misma curva de nivel, en plata, baja una vez por las laderas desde tu cota
+      const e = st.time - st.kmAt;
+      SW.x = Rcam - 0.6 - 19 * e;
+      SW.y = smoothstep(0, 0.22, e) * Math.pow(1 - e / SWEEP_T, 1.4) * 0.7;
+      U.uSweepCol.value.copy(U.uMarkCol.value);
     } else SW.y = 0;
 
     // Hito más cercano por delante: KM n · MITAD · META
@@ -403,11 +412,11 @@ export async function createTheme(ctx) {
     // la aurora vive siempre en la banda alta del encuadre: si la cámara cabecea hacia arriba (subida), sube con ella
     A.y = st.fin ? 0.5 : st.aurBase + Math.max(0, pitchNow) * 1.05;
     const intense = clamp01(((RANK[f.zone] ?? 2) - 1) / 4);
-    A.x = (0.12 + 0.03 * intense + (rm ? 0 : 0.022 * st.bass + 0.025 * drop * drop)) * (ctx.qualityLevel === 0 ? 0.8 : 1) * (st.fin ? 0.6 : 1);
+    A.x = (AUR_K + 0.03 * intense + (rm ? 0 : 0.022 * st.bass + 0.025 * drop * drop)) * (ctx.qualityLevel === 0 ? 0.8 : 1) * (st.fin ? 1.25 : 1);
     A.z = st.aurT;
     A.w = ctx.qualityLevel > 0 ? 1 : 0;
     skyU.uAurHem.value.copy(U.uAccent.value).multiplyScalar(0.75).lerp(skyU.uAurBody.value, 0.18);
-    skyU.uStars.value.set(ctx.qualityLevel > 0 ? 1 : 0.7, ctx.qualityLevel > 0 ? 0.012 : 0, st.aurAz, st.aurW);
+    skyU.uStars.value.set(ctx.qualityLevel > 0 ? 1 : 0.7, ctx.qualityLevel > 0 ? 0.012 : 0, st.fin ? st.finAz : st.aurAz, st.fin ? 1.2 : st.aurW);
     const misc = U.uMisc.value;
     misc.y = rec;
     misc.z = rm || !f.musicBeat ? 0 : f.beat;
@@ -550,7 +559,8 @@ export async function createTheme(ctx) {
     modelAt(prof.sb[0], markPos); markPos.y += 4;
     tagGhost.place(markPos, camera, ctx.size, finRects, f.dt, k, 4);
     modelAt(prof.sb[n], peakPos); peakPos.y += 4;
-    tagMark.place(peakPos, camera, ctx.size, finRects, f.dt, k, 4);
+    // (la META se rotula cuando la ruta, que se dibuja desde la salida, llega a ella)
+    tagMark.place(peakPos, camera, ctx.size, finRects, f.dt, f.reducedMotion ? k : smoothstep(0.9, 1, f.finale), 4);
   }
 
   /**
@@ -568,10 +578,11 @@ export async function createTheme(ctx) {
     const s1 = sEndClass + 150 + 1400 / c;
     const rows = backMesh.geometry.userData.rows || 420;
     U.uBack.value.set(s0, (s1 - s0) / rows, sEndClass, c);
-    U.uRoute.value.set(sStart - U.uAnchor.value, sEndClass - U.uAnchor.value);
+    U.uRoute.value.set(sStart - U.uAnchor.value, sEndClass - U.uAnchor.value, 0);
     U.uBack2.value.set(BACK_EXAG, BASE, (sEndClass - sStart) * c, 0);
     U.uMoonDir.value.copy(MOON_FIN);
-    st.fin = { t0: st.time, len: (sEndClass - sStart) * c, c, rm: f.reducedMotion };
+    U.uMoonCol.value.setRGB(0.55, 0.6, 0.72).multiplyScalar(1.7);   // maqueta: luz rasante más franca, relieve esculpido
+    st.fin = { t0: st.time, len: (sEndClass - sStart) * c, c, rm: f.reducedMotion, s0: sStart, s1: sEndClass };
     st.finK = 1;
     terrain.visible = false;
     backMesh.visible = true;
@@ -584,6 +595,8 @@ export async function createTheme(ctx) {
     U.uMisc.value.x = 1;
     U.uExag.value = 1;
     U.uFog.value.w = 0.8;
+    U.uFog.value.y = MIST_FIN[0]; U.uFog.value.z = MIST_FIN[1];
+    U.uHazeLow.value.setRGB(0.046, 0.057, 0.084);
     finaleCamera(f);
     rig.snap();
   }
@@ -594,8 +607,11 @@ export async function createTheme(ctx) {
     terrain.visible = true;
     backMesh.visible = false;
     U.uMoonDir.value.copy(MOON_RUN);
+    U.uMoonCol.value.setRGB(0.55, 0.6, 0.72);
     U.uMisc.value.x = 0;
     U.uFog.value.w = 0;
+    U.uFog.value.y = MIST_RUN[0]; U.uFog.value.z = MIST_RUN[1];
+    U.uHazeLow.value.setRGB(0.078, 0.097, 0.143);
     rig.settle.position = 0.9; rig.settle.lookAt = 0.9;
     st.hudV = -1;
     rig.snap();
@@ -613,14 +629,21 @@ export async function createTheme(ctx) {
     const Lc = F.len;
     const drift = F.rm ? 0 : Math.min(tF, 30);
     const rise = 1 + 0.004 * drift;
+    // la ruta se dibuja sola de la salida a la meta mientras dura el corte (≈ 3 s): la clase entera, repasada de un
+    // trazo; después queda completa. Movimiento reducido: ya dibujada.
+    const draw = F.rm ? 1 : smoothstep(0.04, 0.96, f.finale);
+    U.uRoute.value.set(F.s0 - U.uAnchor.value, F.s0 + (F.s1 - F.s0) * draw - U.uAnchor.value, 1.6 * (1 - smoothstep(0.9, 1, draw)));
     if (st.portrait) {
-      const ang = 0.16 + 0.012 * drift;                       // rad: ~0,7°/s alrededor del centro de la ruta
+      // tres cuartos más bajo que el cenital de antes (0,6 → 0,36 de altura): las cumbres se recortan unas sobre otras
+      // y la ruta sube por el encuadre de la meta (abajo) a la salida (arriba); órbita lentísima que cruza su eje
+      const ang = -0.1 + 0.0045 * drift;
       const cz = Lc * 0.42;
-      const R = Lc * 0.92;
-      T.position.set(Math.sin(ang) * R, Lc * 0.6 * rise, cz - Math.cos(ang) * R);
+      const R = Lc * 0.82;
+      T.position.set(Math.sin(ang) * R, Lc * 0.36 * rise, cz - Math.cos(ang) * R);
       T.lookAt.set(0, 0, cz);
       T.fov = 44;
-      T.shift.set(0, 0.17);
+      T.shift.set(0, 0.16);
+      st.finAz = Math.atan2(-Math.sin(ang), -Math.cos(ang));
     } else {
       const ang = 0.95 + 0.012 * drift;
       const cz = Lc * 0.5;
@@ -653,7 +676,7 @@ export async function createTheme(ctx) {
     event(type, data) {
       switch (type) {
         case 'gate': post.pulse(0.03, 1.4); break;             // exposición +3 %: sin destellos
-        case 'km': case 'halfway': post.pulse(0.02, 1.2); break;
+        case 'km': case 'halfway': post.pulse(0.02, 1.2); st.kmAt = st.time; break;
         case 'drop': st.dropAt = st.time; post.pulse(0.04, 2.2); break;
         case 'testEnd':
           st.testEndAt = st.time;

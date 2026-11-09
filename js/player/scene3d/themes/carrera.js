@@ -50,6 +50,7 @@ const MOODS = {
   sprint: { dh: -0.06, fov: 2.8, light: 1.02, crowd: 1.0, exp: 0.95, led: 0.66 },
   cooldown: { dh: 0.06, fov: -0.5, light: 0.86, crowd: 0.36, exp: 0.9, led: 0.28 },
 };
+const FIN_D = 17;          // m antes de la línea donde empieza el plano final (la grúa se retira 19 m más)
 const GOLD_LAMP = [1.0, 0.66, 0.3];
 const BASE_LAMP = [1.0, 0.8, 0.58];
 
@@ -107,7 +108,7 @@ export async function createTheme(ctx) {
   root.add(crowd.mesh);
   const lamps = buildLamps(THREE, SH);
   root.add(lamps.mesh, lamps.halo);
-  const runners = buildRunners(THREE, SH, rand, 44);
+  const runners = buildRunners(THREE, SH, rand, 60);   // un pelotón algo más denso: con 44 la avenida quedaba vacía cerca de ti
   root.add(runners.mesh);
   const atlas = makeArchAtlas(THREE, aniso, SLOTS + 1);
   const arches = buildArches(THREE, SH, atlas);
@@ -244,6 +245,10 @@ export async function createTheme(ctx) {
   let feelD = -1;
   let bend = 0;
   let bendInit = false;
+  // momentos: onda de luz por el filete de LED de las vallas (una vez) y ánimo del público al cruzar un km
+  const wave = { t0: -1e9, dur: 2.4, from: 0, to: 260, amp: 0 };
+  let kmCheerAt = -1e9;
+  function startWave(from, to, dur, amp) { wave.t0 = clock.t; wave.dur = dur; wave.from = from; wave.to = to; wave.amp = amp; }
   const lampCol = SH.uLampCol.value;
   const rectOf = (kind) => { for (const r of ctx.hud.rects) if (r.kind === kind) return r; return null; };
   const clock = { t: 0 };
@@ -286,7 +291,7 @@ export async function createTheme(ctx) {
     G.uDetail.value = lvl >= 2 ? 1 : lvl === 1 ? 0.6 : 0;
     builds.mesh.geometry.instanceCount = builds.count;
     crowd.mesh.geometry.instanceCount = Math.round(crowd.count * (lvl >= 2 ? 1 : lvl === 1 ? 0.7 : 0.45));
-    runners.mesh.geometry.instanceCount = lvl >= 2 ? runners.count : lvl === 1 ? 32 : 22;
+    runners.mesh.geometry.instanceCount = lvl >= 2 ? runners.count : lvl === 1 ? 40 : 24;
     lamps.halo.visible = !eco;
   }
   applyQuality();
@@ -340,7 +345,8 @@ export async function createTheme(ctx) {
       }
       // momento: cruzar un arco (exposición +3–6 %, una vez)
       if (seekGuard <= 0 && slotPrevRel[k] > 0 && rel <= 0 && f && !f.finale) {
-        if (a.kind === 1) { post.pulse(0.06, 2.4); cheerAt = clock.t; crossedMeta = true; } else post.pulse(0.035, 1.4);
+        if (a.kind === 1) { post.pulse(0.06, 2.4); cheerAt = clock.t; crossedMeta = true; } else { post.pulse(0.035, 1.4); kmCheerAt = clock.t; }
+        startWave(0, 260, 2.6, 1);
       }
       slotPrevRel[k] = rel;
     }
@@ -429,12 +435,24 @@ export async function createTheme(ctx) {
         BASE_LAMP[1] + (GOLD_LAMP[1] - BASE_LAMP[1]) * gold,
         BASE_LAMP[2] + (GOLD_LAMP[2] - BASE_LAMP[2]) * gold,
       );
-      SH.uLight.value = mood.light * (1 - 0.1 * pauseK) * (1 + 0.3 * fe);
+      // entrada (primeros 2,6 s): la avenida se enciende mientras baja la grúa
+      SH.uLight.value = mood.light * (1 - 0.1 * pauseK) * (1 + 0.3 * fe) * (introOn ? 0.55 + 0.45 * easeOutCubic(clamp01(f.intro)) : 1);
       SH.uAccent.value.copy(f.accent);
       sky.u.uGoldK.value = 0.6 * fe;
       if (photoSky) photoSky.u.uTint.value.setRGB(1 + 0.5 * fe, 1 + 0.15 * fe, 1 - 0.3 * fe);
-      fences.u.uLed.value = mood.led * (1 - 0.5 * pauseK) * (1 - 0.6 * fe);
-      CU.uEnergy.value = clamp01(Math.max(mood.crowd, 0.85 * cheer, fe) * (1 - 0.6 * pauseK));
+      // el filete de LED respira con el pulso de la música (±16 %, nunca con movimiento reducido)
+      fences.u.uLed.value = mood.led * (1 - 0.5 * pauseK) * (1 - 0.6 * fe) * (rm ? 1 : 0.92 + 0.32 * (f.beat || 0));
+      {
+        const wu = (f.time - wave.t0) / wave.dur;
+        const W4 = fences.u.uWave.value;
+        if (wu >= 0 && wu < 1 && !rm) {
+          W4.x = wave.from + (wave.to - wave.from) * easeInOutSine(wu);
+          W4.y = wave.amp * Math.sin(Math.PI * Math.min(1, wu * 1.15));   // entra y sale suave
+          W4.z = 10 + 0.05 * Math.abs(W4.x);
+        } else W4.y = 0;
+      }
+      const kmCheer = Math.exp(-Math.max(0, f.time - kmCheerAt) / 3.5);
+      CU.uEnergy.value = clamp01(Math.max(mood.crowd, 0.85 * cheer, fe, 0.9 * kmCheer) * (1 - 0.6 * pauseK));
       CU.uMotionK.value = rm ? 0.3 : 1;
       CU.uDens.value = finaleOn ? 0.8 : 0.64;
 
@@ -480,7 +498,8 @@ export async function createTheme(ctx) {
 
     event(type, data = {}) {
       switch (type) {
-        case 'gate': post.pulse(0.03, 1.2); break;
+        case 'gate': post.pulse(0.03, 1.2); startWave(0, 260, 2.4, 1); break;
+        case 'countdown': startWave(150, 0, 0.85, 0.8); break;   // 3-2-1: la luz viene hacia ti por las vallas
         case 'seek':
           driftErr = 0;
           bendInit = false;
@@ -488,8 +507,8 @@ export async function createTheme(ctx) {
           for (let k = 0; k < SLOTS; k++) slotPrevRel[k] = 1e9;
           if (race && Number(data?.to) < race.end) crossedMeta = false;
           break;
-        case 'halfway': if (!race) post.pulse(0.03, 1.6); break;
-        case 'km': if (!race) post.pulse(0.025, 1.4); break;
+        case 'halfway': if (!race) { post.pulse(0.03, 1.6); startWave(0, 260, 2.6, 1); kmCheerAt = clock.t; } break;
+        case 'km': if (!race) { post.pulse(0.025, 1.4); startWave(0, 260, 2.6, 1); kmCheerAt = clock.t; } break;
         case 'finish': post.pulse(0.05, 2.5); break;
         case 'quality': applyQuality(); break;
         default: break;
@@ -515,8 +534,8 @@ export async function createTheme(ctx) {
     finA = 0;
     adv = 0;
     const im = iMeta;
-    // la cámara se planta 34 m antes de la meta (sin carrera: donde estabas)
-    finS = im >= 0 ? ARCHS[im].s - 34 : lastSCam;
+    // la cámara se planta FIN_D m antes de la meta (sin carrera: donde estabas)
+    finS = im >= 0 ? ARCHS[im].s - FIN_D : lastSCam;
     const secs = race ? race.end - race.start : tl.totalSec;
     finTime.userData.setText(fmtRace(secs));
     finSub.userData.setText(race ? `Tu tiempo · ${race.label}` : 'Tu tiempo');
@@ -536,24 +555,31 @@ export async function createTheme(ctx) {
   }
 
   /**
-   * Plano elevado de la meta (vertical y horizontal): grúa a 8–9 m, 34 m antes de la línea, mirando al pórtico; deriva
-   * lentísima (≤ 1°/s). Tu tiempo, pintado en el asfalto a 12 m de la línea; el reloj del pórtico marca lo mismo.
+   * Plano final de HÉROE (la app oculta el HUD: pantalla completa, salvo una tarjeta baja). Corte limpio a ras de
+   * asfalto, 17 m antes de la línea, mirando hacia arriba al pórtico (reloj con tu tiempo, «META», los focos y su
+   * reflejo en el agua) mientras los que llegan cruzan a tu lado; después una grúa lenta (9 s) sube y se retira hasta el
+   * plano alto, donde aparece TU TIEMPO pintado en el asfalto. Luego, deriva lentísima. Movimiento reducido: directamente
+   * el plano alto, quieto.
    */
   function finaleCamera(f, fe, dt) {
     const T = rig.target;
-    finAng += (f.reducedMotion ? 0 : 0.01) * (dt || 0);
+    const still = f.reducedMotion;
+    finAng += (still ? 0 : 0.01) * (dt || 0);
+    const p = still ? 1 : smoothstep(0, 1, clamp01((f.time - finT0) / 9));
     const sw = Math.sin(finAng);
-    const lat = portrait ? 1.2 + 6 * sw : 2.5 + 7 * sw;
-    const h = portrait ? 8.2 : 7.2;
-    T.position.set(lat, h, 0);
-    T.lookAt.set(0, portrait ? 2.6 : 3.4, -34);
-    T.fov = portrait ? 56 : 50;
-    T.shift.set(0, portrait ? 0.06 : 0.02);
+    const mixp = (a, b) => a + (b - a) * p;
+    const lat = (portrait ? mixp(2.3, 1.2) : mixp(3.0, 2.5)) + (portrait ? 6 : 7) * sw * p;
+    T.position.set(lat, mixp(1.25, portrait ? 9.0 : 7.2), mixp(0, 19));
+    // (sin carrera no hay pórtico: el plano bajo mira a la avenida y a los que corren delante)
+    T.lookAt.set(0, mixp(iMeta >= 0 ? (portrait ? 6.6 : 5.2) : 2.2, portrait ? 2.6 : 3.4), -FIN_D);
+    T.fov = portrait ? mixp(66, 56) : mixp(54, 50);
+    T.shift.set(0, portrait ? mixp(0, 0.1) : 0.02);
     T.roll = 0;
     rig.settle.position = 1.4; rig.settle.lookAt = 1.4; rig.settle.shift = 1.2; rig.settle.fov = 1.2;
-    finA = damp(finA, smoothstep(0.2, 0.7, f.finale), 2.2, dt || 0.016);
+    finA = damp(finA, smoothstep(0.45, 0.8, p), 2.2, dt || 0.016);
     // rótulo: el tiempo grande y la etiqueta, tendidos en el asfalto y estirados en profundidad (se leen desde la grúa)
-    const zT = -21;
+    // tu tiempo, pintado 13 m antes de la línea (lo descubre la grúa al subir)
+    const zT = -(FIN_D - 13);
     const tw = portrait ? 8.6 : 9.6;
     const asp = finTime.material.map.userData.aspect || 3;
     const stretch = 2.4;

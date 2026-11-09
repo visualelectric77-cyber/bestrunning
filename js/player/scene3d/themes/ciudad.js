@@ -16,7 +16,8 @@
 // Coste (Berlín): ~20 mallas; los edificios son una sola (≈ 4.200 huellas). ~270.000 triángulos en calidad alta.
 // Datos © colaboradores de OpenStreetMap (ODbL): la escena lleva su atribución en una esquina.
 // Cada ciudad es una entrada de CITIES (datos + aspecto); el registro carga `import('./ciudad.js').then((m) => m.madrid)`.
-import { createRunner } from './kit/runner.js';
+import { createRunner, kmhOfVis } from './kit/runner.js';
+import { runnerParts, RUN_POSE, RUN_ALBEDO } from './carrera/runners.js';
 import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, setInstances } from './kit/world.js';
 
 const AHEAD = 14;        // m por delante y por detrás para el rumbo (curvas suaves)
@@ -94,8 +95,25 @@ async function createCity(ctx, C) {
 
   const runner = createRunner(ctx, {
     exposure: 0.95,
-    finale: (p, portrait) => { p.y = portrait ? 14 : 10; p.z = 10; p.lookY = 4; p.lookZ = -60; p.fov = portrait ? 58 : 56; },
+    // PLANO FINAL DE HÉROE (la app oculta el HUD: pantalla completa). Si acabas EN la meta: CONTRAPLANO — corte al otro
+    // lado del pórtico, a ras de calle, mirando hacia atrás: «META · FINISH» de frente, las vallas y el público a los dos
+    // lados de la recta por la que has llegado y, al fondo, la ciudad en la bruma (en Berlín, la Puerta de Brandeburgo).
+    // Después un travelling lento (10 s) se acerca e inclina la cámara, y se queda con un vaivén lentísimo. Si acabas a
+    // media calle (clase más larga que el tramo), la grúa corta de siempre (no se mete en las esquinas).
+    finale: (p, portrait) => {
+      if (atMeta) {
+        const k = heroK;
+        const mx = (a, b) => a + (b - a) * k;
+        p.y = mx(1.5, 1.8) + heroSway; p.z = mx(portrait ? 31 : 22, portrait ? 21 : 13);
+        // (lookZ fijo a −60: la inclinación sale de lookY. Vertical: +9° → +13°, el horizonte baja al 70 % de la pantalla
+        // y el letrero queda en el centro, con cielo arriba y poca calzada; horizontal: +4° → +8°)
+        p.lookY = p.y + (p.z + 60) * (portrait ? mx(0.16, 0.235) : mx(0.07, 0.14)); p.lookZ = -60; p.fov = portrait ? 54 : 46;
+      } else { p.y = portrait ? 14 : 10; p.z = 10; p.lookY = 4; p.lookZ = -60; p.fov = portrait ? 58 : 56; }
+    },
   });
+  let reverse = false;
+  let heroK = 0; let heroSway = 0; let heroT0 = -1;   // avance de la grúa del final (0..1), vaivén y su arranque
+  let atMeta = false;   // la clase acaba en la meta (lo fija locate)
 
   // ── cielo de mañana despejada, entorno, sol bajo y bruma que esconde el borde de los datos (~420 m) ──
   const sky = skyDome(ctx, skyTex, skyMeta, { gain: 0.95, grad: 0.25, gradEl: 0.5, tint: new THREE.Color(0.92, 0.97, 1.06) });
@@ -140,14 +158,20 @@ async function createCity(ctx, C) {
   planOffset();
   const where = { s: 0, phi: 0, back: false };
   function locate(S) {
-    const q = S + offset;
+    // dónde ACABA la clase sobre el recorrido: si es en la meta (lo normal: la clase cabe en el tramo), no hay media
+    // vuelta — antes la cámara giraba 90° en los últimos 14 m y cruzabas la meta mirando a un lateral (un poste, una
+    // fachada o las copas de los árboles en el plano final)
+    const endQ = offset + runner.sigAt(ctx.timeline.totalSec);
+    let q = S + offset;
+    atMeta = endQ <= L + 1 && endQ > L - 1;
+    if (endQ <= L + 1) q = Math.min(q, L - 0.01);
     const leg = Math.floor(q / L);
     const r = q - leg * L;
     const back = leg % 2 === 1;
     const s = back ? L - r : r;
     let phi = headingAt(s) + (back ? Math.PI : 0);
-    // media vuelta suave al final de cada ida o vuelta
-    if (L - r < TURN) phi += (Math.PI / 2) * smoothstep(0, 1, 1 - (L - r) / TURN);
+    // media vuelta suave al final de cada ida o vuelta (solo si después sigues corriendo)
+    if (L - r < TURN && endQ > (leg + 1) * L + 1) phi += (Math.PI / 2) * smoothstep(0, 1, 1 - (L - r) / TURN);
     if (leg > 0 && r < TURN) phi -= (Math.PI / 2) * smoothstep(0, 1, 1 - r / TURN);
     where.s = s; where.phi = phi; where.back = back;
     return where;
@@ -235,7 +259,13 @@ float gWin; float gGlass;`)
   diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.55, glass * (1.0 - pane));
   gWin = min(1.0, gW + gGlass);
   diffuseColor.rgb = mix(diffuseColor.rgb, inside, gW);
-  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.065, 0.08) * (0.8 + 0.4 * bh(floor(vec2(vFac.x / 1.5, vFac.y / 3.6)) + sd)), gGlass);`)
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.065, 0.08) * (0.8 + 0.4 * bh(floor(vec2(vFac.x / 1.5, vFac.y / 3.6)) + sd)), gGlass);
+  // oclusión falsa del cañón de la calle (sin sombras ni pasadas): la base de cada edificio se oscurece hacia la acera
+  // —el suelo le tapa el cielo— y la fachada se aclara hacia la cornisa. Es lo que quita el aire de maqueta: los
+  // edificios «pesan» sobre el suelo. Solo muros (vFac.y = altura en m); las piezas elevadas no se tocan.
+  float aoBase = mix(0.55, 1.0, smoothstep(0.0, 5.0, vFac.y));
+  float aoSky = 0.84 + 0.16 * smoothstep(3.0, 24.0, vFac.y);
+  diffuseColor.rgb *= mix(1.0, aoBase * aoSky, wall);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   // ≥ 0,1: con menos, el brillo del sol en el cristal pasa de 65.504 (máximo del búfer de media precisión del post) →
   // infinito → el bloom lo extiende y la imagen entera se queda NEGRA mientras ese reflejo está a la vista
@@ -320,6 +350,15 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
     return gg;
   })();
   const leafMat = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.85, envMapIntensity: 0.5 });
+  // volumen sin geometría nueva: la mitad baja de la copa queda en sombra propia y la alta coge el sol (degradado por
+  // la altura LOCAL de cada tarjeta): la copa deja de ser un recorte plano de un solo tono
+  leafMat.onBeforeCompile = (sh) => {
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vLeafY;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vLeafY = position.y;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vLeafY;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\n  diffuseColor.rgb *= mix(0.42, 1.14, smoothstep(-0.62, 0.7, vLeafY));');
+  };
+  leafMat.customProgramCacheKey = () => 'ciudad-leaf';
   const trunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 1, 6).translate(0, 0.5, 0);
   // farolas reales: mástil oscuro y una luz baja del color del tramo (es de día: discreta)
   const poleMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.06, 0.07, 0.07), roughness: 0.5, metalness: 0.6 });
@@ -523,7 +562,9 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
   const lineGeo = new THREE.BufferGeometry();
   lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(lPos, 3));
   lineGeo.setIndex(lIdx);
-  const lineMat = glowMaterial(ctx, runner, { tint: C.line, mix: 0.6, power: 1.15, fogK: 0.6 });
+  // mix 0,9: la línea lleva el color del TRAMO (el mismo de la etiqueta del HUD). Con 0,6 el tinte de la ciudad lo
+  // ensuciaba: «rápido» (naranja) salía rosa en Berlín y «trotar» (verde) salía amarillo en Madrid
+  const lineMat = glowMaterial(ctx, runner, { tint: C.line, mix: 0.9, power: 1.15, fogK: 0.6 });
   lineMat.polygonOffset = true; lineMat.polygonOffsetFactor = -2; lineMat.polygonOffsetUnits = -4;
   const line = new THREE.Mesh(lineGeo, lineMat);
   line.renderOrder = 2;
@@ -532,6 +573,10 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
 
   // ── pórticos: cada kilómetro real del maratón y la META (perpendiculares al recorrido) ──
   const gantryMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.85, 0.86, 0.88), roughness: 0.4, metalness: 0.5 });
+  // el travesaño, en antracita: cuando el letrero se funde al pasar por detrás de tu número, lo que queda detrás de la
+  // cifra blanca es oscuro (antes, una viga gris clara: el número perdía contraste justo al cruzar cada km y la meta)
+  const beamMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.035, 0.045, 0.07), roughness: 0.55, metalness: 0.3 });
+  let finishSign = null;   // letrero de la META (en el contraplano del final se pasa a la otra cara del travesaño)
   const gantries = [];   // { g, y, mats, a }: el letrero se funde cuando pasa por detrás del número de velocidad del HUD
   const pa = [0, 0];
   function gantry(s, label, finish) {
@@ -544,7 +589,7 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
     const postGeo = new THREE.BoxGeometry(0.35, H, 0.35).translate(0, H / 2, 0);
     for (const x of [-half, half]) { const m = new THREE.Mesh(postGeo, gantryMat); m.position.x = x; g.add(m); }
     const beamH = finish ? 1.6 : 1.0;
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.35, beamH, 0.3), gantryMat);
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.35, beamH, 0.3), beamMat);
     beam.position.y = H - beamH / 2;
     g.add(beam);
     const tex = ctx.textTexture(label, { size: 96, weight: 700, tracking: 0.2, color: '#ffffff', pad: 0.25 });
@@ -557,6 +602,7 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
     const back = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, beamH * 0.92), backMat);
     back.position.set(0, H - beamH / 2, 0.155);
     g.add(back, panel);
+    if (finish) finishSign = { panel, back };
     if (finish) {   // la línea de meta en el suelo: franja blanca de lado a lado
       const fl = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, 0.5).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.5 }));
       fl.position.y = 0.05;
@@ -671,10 +717,12 @@ float tn(vec3 x){ vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 *
 attribute vec4 aWho;
 uniform float uTime;
 varying vec2 vUv;
+varying vec3 vSh;
 #include <fog_pars_vertex>
 void main() {
   float up = step(0.5, aWho.y) * step(0.35, sin(uTime * aWho.y * 3.0 + aWho.z));
   vUv = vec2((uv.x + aWho.x * 2.0 + up) / ${(PEOPLE * 2).toFixed(1)}, uv.y);
+  vSh = vec3(uv, 0.8 + 0.28 * fract(aWho.z * 3.7));
   vec4 o = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   vec3 toCam = cameraPosition - o.xyz; toCam.y = 0.0;
   vec3 right = normalize(vec3(toCam.z, 0.0, -toCam.x) + 1e-5);
@@ -688,12 +736,17 @@ void main() {
 uniform sampler2D uTex;
 uniform float uLight;
 varying vec2 vUv;
+varying vec3 vSh;
 #include <common>
 #include <fog_pars_fragment>
 void main() {
   vec4 c = texture2D(uTex, vUv);
   if (c.a < 0.5) discard;
-  gl_FragColor = vec4(c.rgb * uLight, 1.0);
+  // volumen sin geometría: luz cenital (cabeza y hombros claros, piernas en la sombra de la valla y de los demás),
+  // costados que se oscurecen como un cilindro y un tono distinto por persona (la multitud deja de ser una pegatina)
+  float top = mix(0.5, 1.08, smoothstep(0.05, 0.8, vSh.y));
+  float round = 0.74 + 0.26 * cos((vSh.x - 0.5) * 3.1416);
+  gl_FragColor = vec4(c.rgb * uLight * top * round * vSh.z, 1.0);
   #include <colorspace_fragment>
   #include <fog_fragment>
 }`,
@@ -711,6 +764,160 @@ void main() {
   });
   crowd.frustumCulled = false;
   cityG.add(crowd);
+
+  // ── los otros corredores del maratón: el mismo maniquí articulado de «Carrera», aquí a la luz del día. Van por el
+  //    recorrido real (giran en las esquinas contigo), cada uno un poco más rápido o más lento que tú: les ganas y te
+  //    ganan de verdad, en función pura de tus metros (capturas deterministas). Nunca por tu trazada. Sombra alargada
+  //    hacia donde la echa el sol de la ciudad. En el contraplano del final siguen llegando a la meta hacia la cámara. ──
+  const NRUN = 40; const RUN_WIN = 150; const RUN_BACK = 25;
+  const runParts = runnerParts(THREE);
+  const runGeo = new THREE.BufferGeometry();
+  runGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(runParts.P), 3));
+  runGeo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(runParts.N), 3));
+  runGeo.setAttribute('aJ', new THREE.BufferAttribute(new Float32Array(runParts.J), 4));
+  runGeo.setIndex(runParts.I);
+  const runList = [];
+  {
+    const r = ctx.rng(913);
+    const aV = new Float32Array(NRUN * 4); const aV2 = new Float32Array(NRUN * 4);
+    for (let i = 0; i < NRUN; i++) {
+      let x; do { x = (r() * 2 - 1) * 2.7; } while (Math.abs(x) < 1.2);   // dentro de la calzada también en las calles estrechas
+      const d = (r() - 0.5) * 0.16 + (r() < 0.12 ? 0.05 : 0);
+      runList.push({ x, off: (i + 0.5 * r()) * (RUN_WIN / NRUN), d, sc: 0.93 + 0.14 * r() });
+      aV.set([r(), r(), r() < 0.3 ? 1 : 0, r()], i * 4);     // fase, camiseta, mallas, piel
+      aV2.set([r(), d, 0, 0], i * 4);
+    }
+    runGeo.setAttribute('aV', new THREE.InstancedBufferAttribute(aV, 4));
+    runGeo.setAttribute('aV2', new THREE.InstancedBufferAttribute(aV2, 4));
+  }
+  const lin3 = (r, g, b) => new THREE.Color().setRGB(r, g, b);
+  const runU = {
+    ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uStride: { value: 0 }, uAmp: { value: 1 }, uSun: { value: new THREE.Vector3(0, 1, 0) },
+    uShirt: { value: [lin3(0.72, 0.72, 0.7), lin3(0.58, 0.05, 0.04), lin3(0.05, 0.2, 0.58), lin3(0.78, 0.58, 0.05), lin3(0.1, 0.48, 0.15),
+      lin3(0.78, 0.24, 0.03), lin3(0.03, 0.03, 0.035), lin3(0.68, 0.14, 0.34), lin3(0.55, 0.62, 0.1)] },
+  };
+  const runMat = new THREE.ShaderMaterial({
+    uniforms: runU,
+    vertexShader: `
+attribute vec4 aJ;
+attribute vec4 aV;
+attribute vec4 aV2;
+uniform float uStride, uAmp;
+uniform vec3 uSun;
+varying vec3 vLight;
+varying vec3 vP;
+varying vec4 vInfo;
+varying vec2 vRnd;
+#include <fog_pars_vertex>
+${RUN_POSE}
+void main() {
+  float A = uAmp * (0.85 + 0.3 * fract(aV.x * 7.3));
+  float ph = (uStride * (1.0 + 0.5 * aV2.y) + aV.x) * 6.28318;
+  vec3 p = position;
+  vec3 n = normal;
+  vP = position;
+  runnerPose(p, n, aJ, A, ph);
+  mat4 M = modelMatrix * instanceMatrix;
+  vec4 wp = M * vec4(p, 1.0);
+  vec3 N = normalize(mat3(M) * n);
+  // luz de día: cielo arriba, rebote del asfalto abajo, sol bajo y un filo claro que los separa del fondo
+  float occ = 0.72 + 0.28 * smoothstep(0.0, 0.16, abs(position.x));
+  vec3 amb = mix(vec3(0.075, 0.068, 0.058), vec3(0.24, 0.27, 0.32), N.y * 0.5 + 0.5) * 1.5;
+  vec3 V = normalize(cameraPosition - wp.xyz);
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * 0.1;
+  vLight = amb * occ + vec3(1.0, 0.9, 0.78) * 0.66 * max(dot(N, uSun), 0.0) + rim;
+  vInfo = vec4(aJ.w, aV.y, aV.z, aV.w);
+  vRnd = vec2(aV.x, aV2.x);
+  vec4 mvPosition = viewMatrix * wp;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`,
+    fragmentShader: `
+uniform vec3 uShirt[9];
+varying vec3 vLight;
+varying vec3 vP;
+varying vec4 vInfo;
+varying vec2 vRnd;
+#include <common>
+#include <fog_pars_fragment>
+${RUN_ALBEDO}
+void main() {
+  int si = int(floor(clamp(vInfo.y, 0.0, 0.999) * 9.0));
+  vec3 skin = mix(vec3(0.5, 0.33, 0.24), vec3(0.13, 0.08, 0.055), vInfo.w);
+  vec3 c = runnerAlbedo(vInfo.x, vP, uShirt[si], uShirt[int(floor(vRnd.y * 8.99))] * 1.15 + 0.04, skin, vInfo.z, vRnd);
+  gl_FragColor = vec4(c * vLight, 1.0);
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`,
+    fog: true,
+  });
+  const runMesh = new THREE.InstancedMesh(runGeo, runMat, NRUN);
+  runMesh.frustumCulled = false;
+  cityG.add(runMesh);
+  // sombra de cada uno: una mancha blanda que nace en sus pies y se alarga al lado contrario del sol
+  const runShTex = (() => {
+    const c = document.createElement('canvas'); c.width = 32; c.height = 96;
+    const g = c.getContext('2d');
+    const img = g.createImageData(32, 96);
+    for (let yy = 0; yy < 96; yy++) for (let xx = 0; xx < 32; xx++) {
+      const u = Math.abs((xx + 0.5) / 32 - 0.5) * 2; const v = (yy + 0.5) / 96;       // v = 0 en los pies
+      const a = Math.max(0, 1 - u * u * (1.2 + 1.6 * v)) * Math.pow(Math.max(0, 1 - v), 0.8) * Math.min(1, v * 14);
+      const o = (yy * 32 + xx) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = 0; img.data[o + 3] = Math.round(255 * 0.5 * a);
+    }
+    g.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c); t.flipY = false;
+    return t;
+  })();
+  texts.push(runShTex);
+  const runShGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2).translate(0, 0, 0.5);
+  { const uvA = runShGeo.attributes.uv; const pA = runShGeo.attributes.position; for (let i = 0; i < uvA.count; i++) uvA.setXY(i, pA.getX(i) + 0.5, pA.getZ(i)); }
+  const runShMesh = new THREE.InstancedMesh(runShGeo, new THREE.MeshBasicMaterial({
+    map: runShTex, color: 0x000000, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6,
+  }), NRUN);
+  runShMesh.frustumCulled = false;
+  runShMesh.renderOrder = 3;
+  cityG.add(runShMesh);
+  const sunL = sun.position.clone().normalize();                              // hacia el sol, en el marco de la ciudad
+  const shRot = Math.atan2(-sunL.x, -sunL.z);
+  const shLen = clamp(1.7 / Math.max(0.2, Math.tan(Math.asin(clamp(sunL.y, 0.05, 1)))), 1.2, 4.2);
+  const rq = [0, 0];
+  const rM = new THREE.Matrix4(); const rP = new THREE.Vector3(); const rQ = new THREE.Quaternion(); const rS = new THREE.Vector3();
+  const rE = new THREE.Euler(); const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+  let runStride = 0; let runAdv = 0;
+  function updateRunners(f, st, w, phiC, finaleNow) {
+    const dt = clamp(f.dt, 0, 0.1);
+    const kmh = finaleNow ? 11 : Math.max(0, kmhOfVis(Math.max(0, f.visualSpeed)));
+    const running = finaleNow ? 1 : clamp(kmh / 4, 0, 1);
+    runStride += dt * (clamp(150 + 2.3 * kmh, 150, 185) / 120) * running;
+    runAdv = finaleNow ? runAdv + dt * 3.1 : 0;
+    runU.uStride.value = runStride;
+    runU.uAmp.value = finaleNow ? 0.9 : clamp((kmh - 3) / 8, 0.12, 1) * running;
+    const cs = Math.cos(phiC); const sn = Math.sin(phiC);
+    runU.uSun.value.set(sunL.x * cs + sunL.z * sn, sunL.y, -sunL.x * sn + sunL.z * cs);
+    const n = st.lvl >= 2 ? NRUN : st.lvl === 1 ? 28 : 18;
+    // en el plano final la ventana se echa atrás: llegan desde lejos (120 m) y cruzan la meta hacia la cámara
+    const back = finaleNow ? 120 : RUN_BACK;
+    const dir = w.back ? -1 : 1;
+    for (let i = 0; i < n; i++) {
+      const r = runList[i];
+      const rel = ((((r.off + r.d * st.S + runAdv * (1 + r.d)) % RUN_WIN) + RUN_WIN) % RUN_WIN) - back;
+      const si = w.s + dir * rel;
+      if (si < 1 || si > L - 0.4) { runMesh.setMatrixAt(i, ZERO); runShMesh.setMatrixAt(i, ZERO); continue; }
+      const phi = headingAt(si);
+      posAt(si, rq);
+      rP.set(rq[0] + Math.cos(phi) * r.x, 0, rq[1] + Math.sin(phi) * r.x);
+      rQ.setFromEuler(rE.set(0, -(phi + (w.back ? Math.PI : 0)), 0));
+      rM.compose(rP, rQ, rS.set(r.sc, r.sc, r.sc));
+      runMesh.setMatrixAt(i, rM);
+      rP.y = 0.02;
+      rQ.setFromEuler(rE.set(0, shRot, 0));
+      rM.compose(rP, rQ, rS.set(0.78 * r.sc, 1, shLen * r.sc));
+      runShMesh.setMatrixAt(i, rM);
+    }
+    runMesh.count = n; runShMesh.count = n;
+    runMesh.instanceMatrix.needsUpdate = true; runShMesh.instanceMatrix.needsUpdate = true;
+  }
 
   // ── atribución de OpenStreetMap (obligatoria por la ODbL): esquina inferior, pequeña y fija ──
   const credTex = ctx.textTexture('© OpenStreetMap', { size: 40, weight: 500, tracking: 0.05, color: '#ffffff', pad: 0.2 });
@@ -746,6 +953,7 @@ void main() {
           if (y > sp.y - 10 && y < sp.y + sp.h + 10 && x + halfW > sp.x && x - halfW < sp.x + sp.w) over = 1;
         }
       }
+      if (reverse) over = 0;   // plano final: sin HUD, el letrero entero
       gt.a += ((over ? 0.15 : 1) - gt.a) * (1 - Math.exp(-dt * 6));
       for (const m of gt.mats) m.opacity = gt.a;
     }
@@ -758,15 +966,37 @@ void main() {
     director: { scale: 1, maxDown: 0.15, orbit: true },
     resize(s) { runner.resize(s); },
     update(f) {
+      // final: avance de la grúa (10 s) y, al arrancar, CORTE de cámara (sin viajar desde tus ojos hasta 44 m atrás)
+      if (f.finale > 0) {
+        const first = heroT0 < 0;
+        if (first) heroT0 = f.time;
+        const u = f.reducedMotion ? 1 : clamp((f.time - heroT0) / 10, 0, 1);
+        heroK = u * u * (3 - 2 * u);
+        heroSway = f.reducedMotion ? 0 : 0.18 * heroK * Math.sin((f.time - heroT0) * 0.19);
+        if (first && atMeta) ctx.rig.snap();
+      } else heroT0 = -1;
       const st = runner.update(f);
       if (f.status === 'ready' || f.t < 0.5) planOffset();
       const w = locate(st.S);
       pumpChunks(w.s);
       crowdMat.uniforms.uTime.value = st.rm ? 0 : f.time;
       posAt(w.s, pa);
-      const c = Math.cos(w.phi); const s = Math.sin(w.phi);
-      cityG.rotation.y = w.phi;
+      // contraplano del final: la ciudad gira 180° alrededor de tu punto (la cámara del kit siempre mira a −z), el letrero
+      // de la meta pasa a la cara que ahora ve la cámara y la bruma se aclara un poco (la recta se lee hasta el fondo)
+      const rev = f.finale > 0 && atMeta;
+      if (rev !== reverse) {
+        reverse = rev;
+        if (finishSign) {
+          finishSign.panel.rotation.y = rev ? Math.PI : 0; finishSign.panel.position.z = rev ? -0.16 : 0.16;
+          finishSign.back.rotation.y = rev ? Math.PI : 0; finishSign.back.position.z = rev ? -0.155 : 0.155;
+        }
+      }
+      scene.fog.density = 0.0034 - (rev ? 0.0011 * heroK : 0);
+      const phiC = w.phi + (rev ? Math.PI : 0);
+      const c = Math.cos(phiC); const s = Math.sin(phiC);
+      cityG.rotation.y = phiC;
       cityG.position.set(-(pa[0] * c + pa[1] * s), 0, -(-pa[0] * s + pa[1] * c));
+      updateRunners(f, st, w, phiC, f.finale > 0);
       placeCredit();
       fadeGantries(f.dt);
     },
@@ -779,7 +1009,7 @@ void main() {
       return { ...runner.debug(), sigAt: runner.sigAt, route: { s: where.s, offset, L, back: where.back, km: R.kmAtEnd - (L - where.s) / 1000 },
         chunks: chunks.map((c) => (c.built ? 'listo' : c.gen ? 'construyendo' : '—')).join(' '), tris: chunks.reduce((a, c) => a + (c.built ? c.built.tris : 0), 0) };
     },
-    dispose() { for (const t of texts) t.dispose(); credTex.dispose(); },
+    dispose() { for (const t of texts) t.dispose(); credTex.dispose(); runGeo.dispose(); runMat.dispose(); runShGeo.dispose(); runShMesh.material.dispose(); },
   };
   return inst;
 }

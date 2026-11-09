@@ -94,6 +94,10 @@ uniform vec3 uHorizon, uTint;
 uniform float uGain, uBelow;
 uniform float uBlack;    // punto negro (lineal): el velo del panorama fuera, las estrellas destacan
 uniform vec2 uGrad;      // filtro degradado (ND): x oscurecimiento arriba (0..1), y elevación donde ya es pleno (rad)
+#ifdef SKY_METEOR
+uniform vec3 uMetA, uMetB;   // estrella fugaz: extremos del trazo (direcciones unitarias)
+uniform vec3 uMetK;          // x cabeza (0..1 a lo largo del trazo), y brillo, z grosor (rad)
+#endif
 varying vec3 vDir;
 void main() {
   vec3 d = normalize(vDir);
@@ -104,14 +108,25 @@ void main() {
   c = mix(c, uHorizon, smoothstep(0.0, -uBelow, el - uCrop.z));   // bajo el recorte: el color del horizonte
   c = max(c - uBlack, 0.0) / (1.0 - uBlack);
   c *= 1.0 - uGrad.x * smoothstep(0.0, uGrad.y, el);
-  gl_FragColor = vec4(c * uTint * uGain, 1.0);
+  c *= uTint * uGain;
+#ifdef SKY_METEOR
+  if (uMetK.y > 0.0) {
+    // un trazo fino que se recorre una vez: cabeza en uMetK.x y una cola corta que se apaga detrás
+    vec3 ab = uMetB - uMetA;
+    float h = clamp(dot(d - uMetA, ab) / dot(ab, ab), 0.0, 1.0);
+    float dd = length(d - (uMetA + ab * h));
+    float tail = smoothstep(uMetK.x - 0.4, uMetK.x, h) * step(h, uMetK.x);
+    c += vec3(0.82, 0.9, 1.0) * uMetK.y * tail * exp(-dd * dd / (uMetK.z * uMetK.z));
+  }
+#endif
+  gl_FragColor = vec4(c, 1.0);
 }`;
 
 /**
  * Cúpula con el cielo de foto recortado. meta = sky.json { az: [mín, máx] (°), el: [mín, máx] (°), horizon: [r,g,b] (lineal) }.
  * El azimut 0 es «al frente» (−z) y crece hacia la derecha.
  */
-export function skyDome(ctx, tex, meta, { gain = 1, tint = null, grad = 0, gradEl = 0.35, black = 0 } = {}) {
+export function skyDome(ctx, tex, meta, { gain = 1, tint = null, grad = 0, gradEl = 0.35, black = 0, meteor = false } = {}) {
   const { THREE } = ctx;
   const r = (v) => (v * Math.PI) / 180;
   const u = {
@@ -126,6 +141,14 @@ export function skyDome(ctx, tex, meta, { gain = 1, tint = null, grad = 0, gradE
   };
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: SKY_VERT, fragmentShader: SKY_FRAG, depthWrite: false, side: THREE.BackSide });
+  if (meteor) {
+    // opcional (desierto): una estrella fugaz en el propio cielo, sin llamada de dibujo aparte. El escenario mueve
+    // uMetA/uMetB (extremos) y uMetK (cabeza, brillo, grosor); con brillo 0 no se evalúa
+    u.uMetA = { value: new THREE.Vector3(0, 0.4, -1).normalize() };
+    u.uMetB = { value: new THREE.Vector3(0.1, 0.3, -1).normalize() };
+    u.uMetK = { value: new THREE.Vector3(0, 0, 0.0012) };
+    mat.defines = { SKY_METEOR: 1 };
+  }
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), mat);
   mesh.frustumCulled = false;
   mesh.renderOrder = -100;
@@ -315,6 +338,105 @@ ${WAVE_GLSL}`)
 #include <lights_fragment_end>`);
   };
   mat.customProgramCacheKey = () => `lamps${n}`;
+  mat.needsUpdate = true;
+  return uni;
+}
+
+/* ─────────────────────── reflejos alargados en el suelo mojado ─────────────────────── */
+
+/**
+ * La estela que deja una luz en el suelo mojado: su reflejo, estirado hacia ti. Inyecta en un MeshStandardMaterial de
+ * suelo horizontal las mismas HILERAS periódicas de addLamps (vec4(x, y, D, zOff)); para cada píxel busca las dos luces
+ * de cada hilera cuya imagen especular cae en su misma dirección (por eso también salen las lejanas, que addLamps no
+ * evalúa) y pinta una mancha estrecha en horizontal y larga en vertical alrededor del punto de espejo. Sin pasadas ni
+ * texturas: unas pocas operaciones por hilera. Lo modula la rugosidad del material (los charcos brillan más) y, si se
+ * pide, el mapa de normales rompe el reflejo en grano. LLAMAR DESPUÉS de addLamps (comparte WAVE_GLSL y amplía la
+ * clave del programa). Devuelve los uniformes: uStreakPower.value se puede animar.
+ *   power: brillo · width: semiancho de la luz (m) · blur: desenfoque mínimo (rad) · near / far: cuánto se estira hacia
+ *   ti / hacia la luz (en fracción de la pendiente del punto de espejo) · jitter: cuánto lo rompe el relieve ·
+ *   dry: fracción que queda donde el suelo es rugoso (0 = solo en lo pulido) · groundY: cota del suelo ·
+ *   reach: distancia (m) a la que el reflejo de una luz ya se ha perdido en el aire (las lejanas no se suman en blanco)
+ *   Brillo por hilera: uStreakRowK.value[i] (1 por defecto), p. ej. para apagar las farolas y dejar las balizas.
+ */
+export function addStreaks(mat, ctx, runner, rows, { tint = '#ffd9a8', mix = 0.6, power = 1, width = 0.4, blur = 0.004, near = 1.4, far = 0.4, jitter = 0, dry = 0.3, groundY = 0, reach = 200 } = {}) {
+  const { THREE } = ctx;
+  const n = rows.length;
+  const uni = {
+    uStreakRows: { value: rows },
+    uStreakTint: { value: new THREE.Color(tint) },
+    uStreakMix: { value: mix },
+    uStreakPower: { value: power },
+    uStreakShape: { value: new THREE.Vector4(width, blur, far, near) },
+    uStreakK: { value: new THREE.Vector4(jitter, dry, groundY, reach) },
+    uStreakRowK: { value: rows.map(() => 1) },
+  };
+  mat.userData.streaks = uni;
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    Object.assign(sh.uniforms, uni, runner.u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vStreakW;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+  {
+    vec4 sw = vec4(transformed, 1.0);
+    #ifdef USE_INSTANCING
+    sw = instanceMatrix * sw;
+    #endif
+    vStreakW = (modelMatrix * sw).xyz;
+  }`);
+    const wave = sh.fragmentShader.includes('vec3 waveColor(') ? '' : WAVE_GLSL;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vStreakW;
+uniform vec4 uStreakRows[${n}];
+uniform vec3 uStreakTint;
+uniform float uStreakMix, uStreakPower;
+uniform vec4 uStreakShape;
+uniform vec4 uStreakK;
+uniform float uStreakRowK[${n}];
+${wave}`)
+      .replace('#include <lights_fragment_end>', `
+  {
+    vec3 sP = vStreakW - cameraPosition;
+    float sH = max(length(sP.xz), 1e-3);
+    vec2 sDir = sP.xz / sH;
+    vec3 sN = inverseTransformDirection(normal, viewMatrix);
+    // el relieve desvía el reflejo: de lado (acimut) y a lo largo (pendiente)
+    float sAzJ = sN.x * uStreakK.x;
+    float sSlope = (-sP.y / sH) * (1.0 + sN.z * uStreakK.x * 4.0);
+    float sFres = 0.02 + 0.98 * pow(1.0 - clamp(-sP.y / length(sP), 0.0, 1.0), 5.0);
+    float sGloss = mix(uStreakK.y, 1.0, 1.0 - smoothstep(0.08, 0.6, material.roughness));
+    vec3 sAcc = vec3(0.0);
+    for (int r = 0; r < ${n}; r++) {
+      vec4 R = uStreakRows[r];
+      float lx = R.x - cameraPosition.x;
+      float zs = cameraPosition.z + lx * sDir.y / (abs(sDir.x) > 1e-4 ? sDir.x : 1e-4);
+      float kf = floor((R.w - zs) / R.z);
+      float lyy = R.y + cameraPosition.y - 2.0 * uStreakK.z;
+      for (int j = 0; j < 2; j++) {
+        float zk = R.w - (kf + float(j)) * R.z;
+        vec2 dl = vec2(lx, zk - cameraPosition.z);
+        float lh = max(length(dl), 1e-3);
+        vec2 lDir = dl / lh;
+        float az = sDir.x * lDir.y - sDir.y * lDir.x + sAzJ;
+        float w = uStreakShape.x / lh + uStreakShape.y;
+        // el desenfoque ensancha la mancha pero no añade luz: lo que se ensancha, se atenúa
+        float hh = exp(-az * az / (w * w)) * step(0.0, dot(sDir, lDir)) * (uStreakShape.x / (lh * w));
+        float lSlope = lyy / lh;
+        float ds = (sSlope - lSlope) / lSlope;
+        float e = ds > 0.0 ? uStreakShape.w : uStreakShape.z;
+        float vv = exp(-ds * ds / (e * e)) * (1.0 - smoothstep(0.82 * lh, lh, sH)) * exp(-lh * lh / (uStreakK.w * uStreakK.w));
+        float lbr; vec3 lzc = waveColor(-zk, lbr);
+        sAcc += mix(uStreakTint, lzc, uStreakMix) * (lbr * hh * vv * uStreakRowK[r]);
+      }
+    }
+    reflectedLight.directSpecular += sAcc * (uStreakPower * sFres * sGloss);
+  }
+#include <lights_fragment_end>`);
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ''}|streaks${n}`;
   mat.needsUpdate = true;
   return uni;
 }

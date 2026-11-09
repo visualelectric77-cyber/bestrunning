@@ -35,6 +35,7 @@ varying float vRow;
 varying float vSecs;
 varying float vBan;
 varying float vAv;
+varying float vSign;
 void main() {
   vec4 A = uArch[gl_InstanceID];
   vec4 B = uArchB[gl_InstanceID];
@@ -58,6 +59,26 @@ void main() {
   float inside = smoothstep(uAvoid.x - 0.08, uAvoid.x + 0.04, nd.x) * (1.0 - smoothstep(uAvoid.z - 0.04, uAvoid.z + 0.08, nd.x))
     * smoothstep(uAvoid.y - 0.1, uAvoid.y + 0.04, nd.y) * (1.0 - smoothstep(uAvoid.w - 0.04, uAvoid.w + 0.1, nd.y));
   vAv = 1.0 - 0.6 * inside;
+  // pancarta y reloj: se atenúan ENTEROS (un solo factor por pieza, calculado en su centro: sin recortes ni degradados
+  // sobre el rótulo) mientras cruzan por detrás del número — «META» en blanco tras la cifra blanca la dejaba sin leer
+  // los ~10 s de la llegada. Fundido continuo con la distancia (sin saltos); en el plano final uAvoid = 2: no actúa.
+  vSign = 1.0;
+  bool isBan = aA.x > 0.5 && aA.x < 1.5;
+  bool isClk = aA.x > 2.5 && aA.x < 3.5;
+  if ((isBan || isClk) && uAvoid.x < 1.5) {
+    bool gp = aA.y > 0.5;
+    vec3 sz = isBan ? (gp ? vec3(${(BEAM.w / 2).toFixed(2)}, ${(BEAM.h / 2).toFixed(2)}, ${BEAM.y.toFixed(2)}) : vec3(${(BAN_I.w / 2).toFixed(2)}, ${(BAN_I.h / 2).toFixed(2)}, ${BAN_I.y.toFixed(2)}))
+                    : (gp ? vec3(${(CLK_G.w / 2).toFixed(2)}, ${(CLK_G.h / 2).toFixed(2)}, ${CLK_G.y.toFixed(2)}) : vec3(${(CLK_I.w / 2).toFixed(2)}, ${(CLK_I.h / 2).toFixed(2)}, ${CLK_I.y.toFixed(2)}));
+    vec4 cc = projectionMatrix * viewMatrix * vec4(bendW(vec3(0.0, sz.z, A.x)), 1.0);
+    if (cc.w > 0.5) {
+      vec2 cn = cc.xy / cc.w;
+      float hw = sz.x * projectionMatrix[0][0] / cc.w;
+      float hh = sz.y * projectionMatrix[1][1] / cc.w;
+      float ox = smoothstep(uAvoid.x - hw - 0.06, uAvoid.x - hw + 0.06, cn.x) * (1.0 - smoothstep(uAvoid.z + hw - 0.06, uAvoid.z + hw + 0.06, cn.x));
+      float oy = smoothstep(uAvoid.y - hh - 0.07, uAvoid.y - hh + 0.03, cn.y) * (1.0 - smoothstep(uAvoid.w + hh - 0.03, uAvoid.w + hh + 0.07, cn.y));
+      vSign = 1.0 - 0.74 * ox * oy;
+    }
+  }
   gl_Position = on ? cl : vec4(2.0, 2.0, 2.0, 1.0);
 }`;
 
@@ -77,6 +98,7 @@ varying float vRow;
 varying float vSecs;
 varying float vBan;
 varying float vAv;
+varying float vSign;
 
 // ── reloj de siete segmentos ──
 float segBox(vec2 p, vec2 c, vec2 h, float fw) {
@@ -161,14 +183,14 @@ void main() {
     // pancarta (atlas): iluminada por sus propios focos, sin llegar al umbral del bloom
     vec2 uv = vec2(vA.z, 1.0 - (vRow + 1.0 - vA.w) / uRows);
     vec3 tex = texture2D(uAtlas, uv).rgb;
-    col = tex * (vBan + 0.25 * min(E, 1.5) * uLampCol);
+    col = tex * (vBan + 0.25 * min(E, 1.5) * uLampCol) * vSign;
   } else if (part < 2.5) {
     col = vec3(0.01, 0.01, 0.012) * (0.3 + E * uLampCol);
   } else if (part < 3.5) {
     // reloj de cronometraje
     float asp = kind < 0.5 ? uAspect.x : uAspect.y;
     vec2 r = clockFace(vA.zw, asp, vSecs);
-    col = vec3(0.004, 0.003, 0.003) + uLed * (r.x * 3.2 * exp(-dist * 0.0016) + r.y * 0.012);
+    col = vec3(0.004, 0.003, 0.003) + uLed * (r.x * 3.2 * exp(-dist * 0.0016) * vSign + r.y * 0.012);
     gl_FragColor = vec4(mix(col, uFogCol, fogK(dist) * 0.6), 1.0);
     return;
   } else if (part < 4.5) {

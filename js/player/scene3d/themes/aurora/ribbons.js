@@ -80,7 +80,7 @@ void main() {
   env *= 1.0 + uWave * exp(-(u - uWaveU) * (u - uWaveU) * 40.0);
   float hgt = mix(0.6, 0.44, ten);
   float reach = exp(-max(v - edge, 0.0) / hgt * 1.6);
-  if (env * reach < 0.0005) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  if (env * reach < 0.0012) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
   // rayos con separación irregular (dominio deformado por vértice): nada de "valla" regular
   float x = u * mix(52.0, 88.0, ten) + vEnv.y;
   float n1 = vnoise(vec2(x, ri * 17.0 + ph));

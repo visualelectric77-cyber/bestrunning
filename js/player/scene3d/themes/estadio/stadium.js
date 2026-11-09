@@ -65,6 +65,7 @@ export function buildGround(THREE, noiseChunk) {
     uEnv: { value: lin(THREE, 0.03, 0.03, 0.032) },
     uSigCam: { value: 0 }, uFogD: { value: 0.0042 }, uLight: { value: 1 }, uSpec: { value: 0.22 }, uMotion: { value: 0 },
     uRailBase: { value: 0.06 }, uApproach: { value: 0 }, uGoldK: { value: 0 }, uDetail: { value: 1 }, uPaintK: { value: 0.82 },
+    uDArea: { value: 0.35 }, uHdr: { value: 2.6 }, uRing: { value: new THREE.Vector4(0, 1e6, 0, 1) },
     uGate: { value: gateArr }, uGateCol: { value: gateCol },
     uPacer: { value: new THREE.Vector4(10, 6, 0, 0) },
     uGhost: { value: new THREE.Vector4(-100, 5, 0, 0) },
@@ -141,6 +142,8 @@ export function buildStands(THREE, noiseChunk, specTex) {
     uRim: { value: lin(THREE, 0.058, 0.058, 0.064) },
     uFogD: { value: 0.0042 }, uLight: { value: 1 }, uEq: { value: 1 }, uBoardK: { value: 0.35 }, uDetail: { value: 1 },
     uSweepB: { value: new THREE.Vector4(0, 0, 10, ref[n - 1].u) },
+    uSweepBCol: { value: new THREE.Color(0.9, 0.93, 1.0) },
+    uCrowd: { value: new THREE.Vector4(0, 0, 0, 0) }, uCrowdK: { value: new THREE.Vector2(0.55, 1) },
     uSpecTex: { value: specTex },
   };
   const mat = new THREE.ShaderMaterial({
@@ -202,11 +205,13 @@ export function buildLights(THREE, rand) {
   geo.instanceCount = count;
   const u = {
     uSize: { value: new THREE.Vector2(2.4, 0.6) },
-    uMargin: { value: 2.2 },
+    uMargin: { value: 7.5 },
     uCell: { value: 0.8 },
     uHalo: { value: 1.3 },
-    uDim: { value: new THREE.Vector4(1, 1, 0, 0) },
+    uDim: { value: new THREE.Vector4(1, 1, 1, 0) },
     uAvoid: { value: new THREE.Vector4(2, 2, 2, 2) },
+    uAvoid2: { value: new THREE.Vector4(2, 2, 2, 2) },
+    uAir: { value: new THREE.Vector2(3.4, 0.014) },
     uWarm: { value: new THREE.Color(1.0, 0.9, 0.78) },
     uCool: { value: new THREE.Color(0.86, 0.92, 1.0) },
   };

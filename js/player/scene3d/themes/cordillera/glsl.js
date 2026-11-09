@@ -159,7 +159,7 @@ uniform vec4 uFog;      // densidad base, densidad de la bruma de valle, techo d
 uniform vec4 uMisc;     // final 0..1, oro 0..1, pulso de ritmo, calidad (0 = ahorro)
 uniform vec4 uBack2;    // (frag) z: longitud de la maqueta
 uniform vec4 uLines;    // separación de curvas, radio del acento cercano, intensidad del acento, intensidad gris
-uniform vec2 uRoute;    // maqueta final: tramo de la ruta dibujado (s rel. al ancla: salida, meta)
+uniform vec3 uRoute;    // maqueta final: tramo de la ruta dibujado (s rel. al ancla: salida, hasta dónde) y brillo de la cabeza
 uniform vec2 uFeel;     // sensación de velocidad: contraste de las señales cercanas, densidad
 uniform float uAnchor, uFrac;
 uniform sampler2D uRockT, uSnowT;   // web 1.14: roca y nieve de foto (CC0)
@@ -202,7 +202,9 @@ void main() {
     vec2 uvR = vec2(vX, sAbs);
     float farK = smoothstep(220.0, 900.0, dist);
     vec3 rock = texture2D(uRockT, uvR / 9.0).rgb * 0.6 + texture2D(uRockT, uvR / 53.0 + 0.31).rgb * 0.4;
-    vec3 snow = texture2D(uSnowT, uvR / 6.0).rgb;
+    // (suelo en 0,32 lineal ≈ percentil 6 de la foto: sus garabatos oscuros —suciedad— se repetían cada 6 u por la
+    // cresta, justo delante de la cámara, y se leían como vetas de mármol; el grano fino de la nieve se conserva)
+    vec3 snow = max(texture2D(uSnowT, uvR / 6.0).rgb, vec3(0.32));
     float snowK = smoothstep(0.62, 0.9, n.y + 0.25 * (m2 - 0.5)) * smoothstep(uLines.x * 2.0, uLines.x * 9.0, vH + 30.0 * (m1 - 0.5));
     vec3 mat_ = mix(rock * vec3(0.78, 0.8, 0.86), snow * vec3(0.85, 0.9, 1.05) * 1.6, snowK);
     col = mix(col, uAlb * 3.2 * mix(mat_, vec3(dot(mat_, vec3(0.33))), farK), uPhoto);
@@ -250,6 +252,8 @@ void main() {
   // en la maqueta final, la ruta empieza en la salida y acaba en la meta (fuera de ella, la cresta sin luz)
   float route = mix(1.0, step(uRoute.x, vS) * step(vS, uRoute.y), finale);
   vec3 pathC = hue * (core * coreK + halo) * pk * uPath.w * route;
+  // (plano final: la ruta se dibuja de la salida a la meta; su cabeza, un punto de luz algo más vivo que la estela)
+  pathC *= 1.0 + uRoute.z * finale * exp(-max(uRoute.y - vS, 0.0) / 26.0);
   // marcas de distancia cada 4 u a ambos lados del camino (pasan a tu velocidad real) y mojones bajos en el borde de
   // la senda cada 8 u: el flujo cercano que da la sensación de velocidad (contraste y densidad: uFeel). Sin brillo:
   // gris claro por debajo del umbral del bloom; de lejos se apagan (thin conserva la energía, sin centelleo)
@@ -269,7 +273,7 @@ void main() {
   // y una curva de nivel del acento nuevo que baja por las laderas desde tu cota
   if (uSweep.y > 0.002) {
     float fwH = max(fwidth(vH), 1e-5);
-    col += uSweepCol * (1.0 - smoothstep(fwH * 0.8, fwH * 1.9, abs(vH - uSweep.x))) * uSweep.y * exp(-dist / 600.0) * 1.5 * min(offPath, 1.0);
+    col += uSweepCol * (1.0 - smoothstep(fwH * 0.45, fwH * 1.3, abs(vH - uSweep.x))) * uSweep.y * exp(-dist / 600.0) * 1.5 * min(offPath, 1.0);
   }
   // hito (KM n · MITAD · META): filete corto a través de la cresta
   col += uMarkCol * thin(abs(vS - uMark.x), 0.035, fwS) * (1.0 - smoothstep(1.4, 3.4, ax)) * uMark.y;
@@ -354,7 +358,9 @@ void main() {
   // aurora sobria y alta: cortina de cuerpo neutro con rayos verticales finos; el borde inferior toma el color de la
   // zona (lo ata a la escena: nada de verde fijo). Muy tenue, siempre en la banda alta del encuadre.
   if (uAur.x > 0.0005) {
-    float az = atan(dir.x, -dir.z);
+    // (acimut continuo alrededor del centro de la ventana: la costura de atan queda siempre a espaldas de la cámara,
+    // también en el plano final, que mira hacia atrás)
+    float az = uStars.z + mod(atan(dir.x, -dir.z) - uStars.z + 3.14159265, 6.2831853) - 3.14159265;
     float T = uAur.z;
     float base = uAur.y + 0.05 * sin(az * 1.3 + T * 0.03) + 0.025 * sin(az * 3.4 - T * 0.05 + 1.0);
     float hh = el - base;

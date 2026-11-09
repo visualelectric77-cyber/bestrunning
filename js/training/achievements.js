@@ -1,12 +1,13 @@
 // BestRunning · logros (sin DOM). Cada logro tiene check(state) → bool; evaluateAchievements devuelve los nuevos.
 import { mondayOf, daysBetween } from '../core/utils.js';
-import { totals, streakWeeks, weekProgress, sessionDay, sessionCounts } from './stats.js';
+import { totals, streakWeeks, weekProgress, sessionDay, sessionCounts, sessionCompleted } from './stats.js';
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const hist = (st) => (Array.isArray(st?.history) ? st.history.filter((s) => s && typeof s === 'object') : []);
-const valid = (st) => hist(st).filter((s) => num(s.elapsedSec) >= 60);
+// «Sesión» es siempre la regla única (planner.countsAsSession): no hay otra definición en los logros
 const done = (st) => hist(st).filter(sessionCounts);
-const finished = (st, id) => hist(st).some((s) => s.templateId === id && num(s.completionPct) >= 0.95);
+// «Completar» una clase concreta es lo mismo que el ✓ «completado» del resumen (stats.sessionCompleted)
+const finished = (st, id) => hist(st).some((s) => s.templateId === id && sessionCompleted(s));
 const startHour = (s) => {
   const d = s?.startedAt ? new Date(s.startedAt) : null;
   return d && !Number.isNaN(d.getTime()) ? d.getHours() : null;
@@ -31,10 +32,10 @@ function hadFullWeek(st) {
     if (d) perWeek[mondayOf(d)] = (perWeek[mondayOf(d)] || 0) + 1;
   }
   return Object.entries(perWeek).some(([monday, n]) => {
-    if (n < 4) return false;
+    if (n < 1) return false;
     try {
       const wp = weekProgress(st, monday);
-      return wp.plannedSessions >= 4 && wp.doneSessions >= wp.plannedSessions;
+      return wp.plannedSessions >= 1 && wp.doneSessions >= wp.plannedSessions;
     } catch { return false; }
   });
 }
@@ -88,7 +89,7 @@ export const ACHIEVEMENTS = [
   A('month-20', 'Mes de récord', 'Completa 20 sesiones en un mismo mes.', 'calendar', 'gold', (s) => sessionsInMonthMax(s) >= 20),
   A('comeback', 'Vuelta a la carga', 'Vuelve a entrenar tras dos semanas o más de parón.', 'refresh', 'bronze', hadComeback),
   // Sesiones especiales
-  A('hour-session', 'Una hora de cinta', 'Completa tu primera sesión de 60 minutos.', 'clock', 'bronze', (s) => hist(s).some((x) => num(x.elapsedSec) >= 3540 && num(x.completionPct) >= 0.9)),
+  A('hour-session', 'Una hora de cinta', 'Completa tu primera sesión de 60 minutos.', 'clock', 'bronze', (s) => hist(s).some((x) => num(x.elapsedSec) >= 3540 && sessionCompleted(x))),
   A('ten-k', 'Diez kilómetros', 'Corre 10 km en una sola sesión.', 'target', 'silver', (s) => hist(s).some((x) => num(x.distanceKm) >= 10)),
   A('early-bird', 'Madrugador', 'Entrena antes de las 7:00.', 'sun', 'bronze', (s) => done(s).some((x) => { const h = startHour(x); return h != null && h < 7; })),
   A('night-owl', 'Búho nocturno', 'Entrena a partir de las 22:00.', 'moon', 'bronze', (s) => done(s).some((x) => { const h = startHour(x); return h != null && h >= 22; })),
@@ -117,7 +118,7 @@ export const ACHIEVEMENTS = [
     return false;
   }),
   // Hábitos
-  A('feedback-10', 'Escucha tu cuerpo', 'Anota cómo te has sentido en 10 sesiones.', 'heart', 'bronze', (s) => hist(s).filter((x) => x.feeling).length >= 10),
+  A('feedback-10', 'Escucha tu cuerpo', 'Anota cómo te has sentido en 10 sesiones.', 'heart', 'bronze', (s) => done(s).filter((x) => x.feeling).length >= 10),
   A('watch-hr', 'Corazón conectado', 'Anota por primera vez el pulso de tu Apple Watch.', 'watch', 'bronze', (s) => hist(s).some((x) => num(x.hrAvg) > 0 || num(x.hrMax) > 0)),
 ];
 

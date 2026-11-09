@@ -18,7 +18,7 @@ const pctTxt = (v) => `${Math.round(v)}${NB}%`;
 const clases = (n) => `${n} ${n === 1 ? 'clase' : 'clases'}`;
 const WD_PLURAL = { 1: 'los lunes', 2: 'los martes', 3: 'los miércoles', 4: 'los jueves', 5: 'los viernes', 6: 'los sábados', 7: 'los domingos' };
 const weekdayOf = (key) => { const d = parseKey(key).getDay(); return d === 0 ? 7 : d; };
-const HARD_FEEL = new Set(['hard', 'max', 'fail']);
+const HARD_FEEL = new Set(['max', 'fail']);   // la misma regla que el plan y el Resumen: «Exigente» no es mala señal
 const EASY_CATS = new Set(['recovery', 'endurance']);
 const LEARNING = 'learning';
 
@@ -32,10 +32,12 @@ function vamChange(state, today) {
   const cut = addDays(today, -28);
   const before = hist.filter((e) => e.date <= cut);
   const ref = before.length ? before[before.length - 1] : hist[0];
-  if (daysBetween(ref.date, today) < 7) return null;
+  const days = before.length ? 28 : daysBetween(ref.date, today);
+  if (days < 7) return null;
   const a = num(vamFromLevels(ref.levels));
   const b = num(vamFromLevels(state.levels));
-  return a > 0 && b > 0 ? Math.round((b - a) * 10) / 10 : null;
+  // days: de cuándo es la referencia (28 = un mes; menos si tu historial de velocidades es más corto), para decirlo
+  return a > 0 && b > 0 ? { d: Math.round((b - a) * 10) / 10, days } : null;
 }
 
 function formPillar(state, sessions, now, today) {
@@ -48,9 +50,13 @@ function formPillar(state, sessions, now, today) {
     n = offs.length;
     if (n >= 3) ppm = Math.round(mean(offs.map((o) => o.ppm)));
   } catch { ppm = null; }
-  const vam = vamChange(state, today);
+  const change = vamChange(state, today);
+  const vam = change ? change.d : null;
+  // El periodo que se dice es el que se mide: «en un mes» solo si hay velocidades de hace un mes
+  const recent = !!change && change.days < 28;
+  const span = !recent ? 'en un mes' : change.days < 14 ? `en ${change.days} días` : `en ${Math.round(change.days / 7)} semanas`;
   const pieces = [];
-  if (vam != null && Math.abs(vam) >= 0.1) pieces.push(vam > 0 ? `Tus velocidades han subido ${fmt.speed(vam)} km/h en un mes.` : `Tus velocidades han bajado ${fmt.speed(-vam)} km/h en un mes.`);
+  if (vam != null && Math.abs(vam) >= 0.1) pieces.push(vam > 0 ? `Tus velocidades han subido ${fmt.speed(vam)} km/h ${span}.` : `Tus velocidades han bajado ${fmt.speed(-vam)} km/h ${span}.`);
   if (ppm != null && Math.abs(ppm) >= 3) pieces.push(ppm < 0 ? `A la misma velocidad, tu pulso va ${-ppm} ppm más bajo que hace un mes.` : `A la misma velocidad, tu pulso va ${ppm} ppm más alto que hace un mes.`);
   if (ppm == null && vam == null) {
     return { key: 'form', label: 'Forma', icon: 'heart', status: LEARNING, value: 'Sin datos aún', short: '', body: 'Con el pulso de tres clases más y un mes de historia te diré si tu corazón trabaja más cómodo.' };
@@ -58,8 +64,8 @@ function formPillar(state, sessions, now, today) {
   const good = (ppm != null && ppm <= -3) || (vam != null && vam >= 0.2);
   const bad = !good && ((ppm != null && ppm >= 4) || (vam != null && vam <= -0.2));
   const value = ppm != null && Math.abs(ppm) >= 3 ? `${ppm > 0 ? '+' : '−'}${Math.abs(ppm)} ppm` : vam != null && Math.abs(vam) >= 0.1 ? `${vam > 0 ? '+' : '−'}${fmt.speed(Math.abs(vam))} km/h` : 'Estable';
-  if (!pieces.length) pieces.push('Tu pulso y tus velocidades se mantienen como hace un mes.');
-  return { key: 'form', label: 'Forma', icon: 'heart', status: good ? 'good' : bad ? 'warn' : 'neutral', value, ppm, vam, short: pieces[0], body: pieces.join(' ') };
+  if (!pieces.length) pieces.push(recent && ppm == null ? `Tus velocidades no han cambiado ${span}.` : 'Tu pulso y tus velocidades se mantienen como hace un mes.');
+  return { key: 'form', label: 'Forma', icon: 'heart', status: good ? 'good' : bad ? 'warn' : 'neutral', value, ppm, vam, sinceDays: recent && ppm == null ? change.days : 28, short: pieces[0], body: pieces.join(' ') };
 }
 
 function consistencyPillar(state, sessions, today) {
@@ -211,6 +217,7 @@ function scoreTrend(items) {
   return {
     avg: Math.round(mean(list.map((it) => it.ex.score))),
     delta: list.length >= 6 ? Math.round(newer - older) : null,
+    half, // el delta compara tus últimas `half` clases con las `half` primeras de la lista
     points: list.map((it) => ({ id: it.s.id, day: sessionDay(it.s), score: it.ex.score, title: it.s.title || 'Clase' })),
   };
 }
@@ -225,7 +232,7 @@ function verdictOf(p, n, idle) {
   if (p.feel.status === 'warn' && p.form.status !== 'good') return { tone: 'warn', title: 'Te está costando asimilar', body: join(p.feel.short, p.form.status === 'warn' ? p.form.short : '') };
   if (p.constancy.status === 'warn') return { tone: 'warn', title: 'La constancia es tu freno', body: join(p.constancy.short, p.form.status === 'good' ? `Y aun así: ${p.form.short.charAt(0).toLowerCase()}${p.form.short.slice(1)}` : 'Con tu plan cumplido, la mejora viene sola.') };
   if (p.form.status === 'good') return { tone: 'good', title: 'Vas a mejor', body: join(p.form.short, p.constancy.status !== LEARNING ? p.constancy.short : '') };
-  if (p.form.status === 'warn') return { tone: 'warn', title: 'Algo más cargado que hace un mes', body: join(p.form.short, 'Revisa sueño y descanso antes de sumar más.') };
+  if (p.form.status === 'warn') return { tone: 'warn', title: p.form.sinceDays < 28 ? 'Algo más cargado que al empezar' : 'Algo más cargado que hace un mes', body: join(p.form.short, 'Revisa sueño y descanso antes de sumar más.') };
   if (p.constancy.status === 'good') return { tone: 'good', title: 'Constante y sin altibajos', body: join(p.constancy.short, p.form.status === LEARNING ? 'Con el pulso del reloj podré decirte además si estás mejorando por dentro.' : p.form.short) };
   return { tone: 'neutral', title: 'En tu línea', body: join(p.constancy.short, p.feel.short) };
 }

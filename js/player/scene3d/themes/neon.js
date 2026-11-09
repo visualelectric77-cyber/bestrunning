@@ -6,7 +6,7 @@
 // A VELOCIDAD REAL: asfalto, aceras, edificios, rótulos y farolas avanzan a km/h ÷ 3,6 m/s.
 // Coste: ~20 llamadas de dibujo, edificios instanciados con un solo material PBR parcheado (ventanas procedurales).
 import { createRunner, scrollZ } from './kit/runner.js';
-import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, setInstances } from './kit/world.js';
+import { worldUrl, loadTex, loadJson, loadSet, pbr, skyDome, envFrom, glowMaterial, halos, addLamps, addStreaks, setInstances } from './kit/world.js';
 import { createRain, weatherWave, liveWeather, startLiveWeather } from './kit/weather.js';
 
 export const meta = {
@@ -102,6 +102,15 @@ export async function createTheme(ctx) {
   const runner = createRunner(ctx, {
     exposure: 0.95,
     finale: (p, portrait) => { p.y = portrait ? 12 : 9; p.z = portrait ? 8 : 6; p.lookY = 2; p.lookZ = -60; p.fov = portrait ? 58 : 56; },
+    // PLANO FINAL: corte a ras del asfalto mojado, con la avenida entera reflejada; la cámara avanza y sube muy
+    // despacio (se va frenando) y, ya asentada, un vaivén lento. Con movimiento reducido, plano fijo.
+    finaleShot: (T, { clock, portrait, still }) => {
+      const e = still ? 0 : 1 - Math.exp(-Math.min(clock, 60) / 10);
+      const sway = still ? 0 : Math.min(1, Math.max(0, (clock - 4) / 4)) * Math.sin((clock - 4) * 0.19);
+      T.position.set(-1.7 + 0.6 * e + 0.35 * sway, 0.4 + 0.85 * e, 3 - 8 * e);
+      T.lookAt.set(0.5, 4.2 + 1.2 * e, -80);
+      T.fov = portrait ? 66 : 46;
+    },
   });
 
   // ── cielo (skyline real al fondo), entorno y niebla ──
@@ -115,7 +124,7 @@ export async function createTheme(ctx) {
 
   // ── calzada mojada: charcos casi espejo y el resto satinado ──
   const roadMat = pbr(ctx, road, { roughness: 0.55, color: new THREE.Color(0.5, 0.5, 0.55), env: 1.6, normalScale: 0.7 });
-  roadMat.onBeforeCompile = (sh) => {
+  const wet = (sh) => {
     sh.fragmentShader = sh.fragmentShader.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
   {
     float pm = texture2D(roughnessMap, vRoughnessMapUv * 0.11 + 0.37).g * 0.6 + texture2D(roughnessMap, vRoughnessMapUv * 0.031).g * 0.6;
@@ -136,23 +145,29 @@ export async function createTheme(ctx) {
     root.add(m);
     return m;
   };
+  roadMat.onBeforeCompile = wet;
   strip(-ROAD, ROAD, 0, roadMat);
   const walkMat = pbr(ctx, walk, { roughness: 0.5, color: new THREE.Color(0.55, 0.55, 0.6), env: 1.2 });
+  // las aceras comparten programa con la calzada (misma clave «lamps2» del kit): que lleven el mismo parche de charcos
+  // de forma explícita, y no según cuál de los dos materiales se compile antes
+  walkMat.onBeforeCompile = wet;
   strip(-WALK - 2, -ROAD - 0.25, 0.15, walkMat);
   strip(ROAD + 0.25, WALK + 2, 0.15, walkMat);
   // bordillos y tira LED del color del tramo
   const curbMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.22, 0.22, 0.24), roughness: 0.6 });
-  const led = glowMaterial(ctx, runner, { tint: '#ffffff', mix: 1, power: 5, fogK: 0.25 });
+  const led = glowMaterial(ctx, runner, { tint: '#ffffff', mix: 1, power: 3, fogK: 0.25 });
   for (const s of [-1, 1]) {
     const c = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 900), curbMat);
     c.position.set(s * (ROAD + 0.125), 0.075, -440);
-    const l = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.025, 900), led);
-    l.position.set(s * (ROAD + 0.02), 0.12, -440);
+    // la tira sobresale 2,5 cm de la cara del bordillo: antes su cara coincidía con la del bordillo (x = ±ROAD) y se
+    // peleaban en el búfer de profundidad (línea a puntos que hormigueaba); al verse entera, potencia 5 → 3
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 900), led);
+    l.position.set(s * (ROAD - 0.005), 0.115, -440);
     root.add(c, l);
   }
 
   // marcas viales
-  const paint = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.55, 0.55, 0.55), roughness: 0.35, env: 1 });
+  const paint = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.55, 0.55, 0.55), roughness: 0.35 });
   for (const x of [-ROAD + 0.4, ROAD - 0.4]) {
     const l = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 800).rotateX(-Math.PI / 2), paint);
     l.position.set(x, 0.005, -390);
@@ -290,16 +305,104 @@ float gWin; float gLit; vec3 gWinCol; float gShop;`)
   const rowL = new THREE.Vector4(-LX + 2.4, 7.7, LAMP_D, 0);
   const rowR = new THREE.Vector4(LX - 2.4, 7.7, LAMP_D, 0);
   const lampOpts = { tint: '#e8f0ff', mix: 0.45, power: 70, range: 30 };
-  addLamps(roadMat, ctx, runner, [rowL, rowR], lampOpts);
+  // el asfalto es muy oscuro (albedo ~0,03): con la potencia de las aceras la calzada quedaba negra, sin textura ni
+  // referencia de velocidad en media pantalla; ×3 deja ver el asfalto bajo las farolas (sin brillos: es rugoso)
+  addLamps(roadMat, ctx, runner, [rowL, rowR], { ...lampOpts, power: 210 });
   addLamps(walkMat, ctx, runner, [rowL, rowR], lampOpts);
+  // la pintura también recibe las farolas: las discontinuas se leen y marcan el ritmo de avance (mismas llamadas)
+  addLamps(paint, ctx, runner, [rowL, rowR], lampOpts);
+
+  // ── LA CIUDAD REFLEJADA EN EL ASFALTO MOJADO (solo la calzada; calidad media o alta) ──
+  // 1) farolas: su estela alargada hacia ti (kit). 2) rótulos de neón, escaparates y la tira LED del bordillo: el rayo
+  // reflejado de cada píxel se corta con sus planos (los rótulos, desde una tabla de 256 tramos por acera con el
+  // primer rótulo por delante). Todo analítico: sin pasadas de reflejo y sin llamadas de dibujo nuevas.
+  const reflK = new THREE.Vector4(0, 1, 0, 0);   // x desplazamiento de los edificios (m), y potencia
+  let streakU = null;
+  if (ctx.qualityLevel >= 2) {
+    streakU = addStreaks(roadMat, ctx, runner, [rowL, rowR], { tint: '#e8f0ff', mix: 0.45, power: 3.2, width: 0.45, blur: 0.004, near: 1.5, far: 0.3, jitter: 0.14, dry: 0.4, reach: 150 });
+    const BINS = 256;
+    const tab = new Float32Array(BINS * 4 * 4);   // filas: izq. color+altura, izq. posición, dcha. color+altura, dcha. posición
+    for (const side of [-1, 1]) {
+      const list = signs.filter((g) => Math.sign(g.x) === side)
+        .map((g) => ({ zeta: (((6 - g.z) % BLD_P) + BLD_P) % BLD_P, g })).sort((a, b) => a.zeta - b.zeta);
+      const row = side < 0 ? 0 : 2;
+      for (let i = 0; i < BINS && list.length; i++) {
+        const hit = list.find((e) => e.zeta >= (i * BLD_P) / BINS) || list[0];
+        const o0 = (row * BINS + i) * 4; const o1 = ((row + 1) * BINS + i) * 4;
+        tab[o0] = hit.g.c.r; tab[o0 + 1] = hit.g.c.g; tab[o0 + 2] = hit.g.c.b; tab[o0 + 3] = hit.g.y;
+        tab[o1] = hit.zeta; tab[o1 + 1] = 1;
+      }
+    }
+    const reflTex = new THREE.DataTexture(tab, BINS, 4, THREE.RGBAFormat, THREE.FloatType);
+    reflTex.minFilter = THREE.NearestFilter; reflTex.magFilter = THREE.NearestFilter;
+    reflTex.wrapS = THREE.RepeatWrapping; reflTex.needsUpdate = true;
+    const prevC = roadMat.onBeforeCompile;
+    const prevK = roadMat.customProgramCacheKey;
+    roadMat.onBeforeCompile = (sh, r) => {
+      prevC.call(roadMat, sh, r);
+      sh.uniforms.uReflTex = { value: reflTex };
+      sh.uniforms.uReflK = { value: reflK };
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uReflTex;\nuniform vec4 uReflK;')
+        .replace('#include <lights_fragment_end>', `
+  {
+    vec3 rI = normalize(vStreakW - cameraPosition);
+    vec3 rNw = inverseTransformDirection(normal, viewMatrix);
+    vec3 rR = reflect(rI, normalize(vec3(rNw.x * 0.11, 1.0, rNw.z * 0.11)));
+    rR.y = max(rR.y, 0.004);
+    rR.z = min(rR.z, -1e-4);
+    float rF = 0.02 + 0.98 * pow(1.0 - clamp(-rI.y, 0.0, 1.0), 5.0);
+    float rGloss = mix(0.45, 1.0, 1.0 - smoothstep(0.08, 0.6, material.roughness));
+    float rSide = rR.x >= 0.0 ? 1.0 : -1.0;
+    float rAx = max(abs(rR.x), 1e-4);
+    float px = rSide * vStreakW.x;
+    vec3 rAcc = vec3(0.0);
+    // rótulos en bandera: plano z del rótulo, 1,6 m de ancho y 6 m de alto; el reflejo se estira hacia ti
+    float tIn = (${(WALK - 0.95 - 0.8).toFixed(2)} - px) / rAx;
+    float za = vStreakW.z + rR.z * tIn;
+    float zeta = mod(6.0 - (za - uReflK.x), ${BLD_P.toFixed(1)});
+    float bu = (floor(zeta * ${(BINS / BLD_P).toFixed(6)}) + 0.5) / ${BINS.toFixed(1)};
+    float rv = rSide < 0.0 ? 0.125 : 0.625;
+    vec4 g0 = texture2D(uReflTex, vec2(bu, rv));
+    vec4 g1 = texture2D(uReflTex, vec2(bu, rv + 0.25));
+    float ts = (za - mod(g1.x - zeta, ${BLD_P.toFixed(1)}) - vStreakW.z) / rR.z;
+    float xh = abs(px + rAx * ts - ${(WALK - 0.95).toFixed(2)});
+    float yh = rR.y * ts;
+    float sx = 0.2 + 0.012 * ts;
+    float sy = 0.5 + 0.03 * ts;
+    rAcc += g0.rgb * (g1.y * 1.5 * exp(-ts * ts / 32400.0) * (1.0 - smoothstep(0.8 - sx, 0.8 + sx, xh))
+      * smoothstep(g0.a - sy, g0.a + sy, yh) * (1.0 - smoothstep(g0.a + 5.0, g0.a + 9.0 + 0.3 * ts, yh)));
+    // escaparates: banda cálida a pie de fachada, con sus huecos de 9 m
+    float tw = (${WALK.toFixed(2)} - px) / rAx;
+    float yw = rR.y * tw;
+    float fb = fract((vStreakW.z + rR.z * tw - uReflK.x) / 9.0);
+    rAcc += vec3(0.95, 0.8, 0.6) * (0.16 * smoothstep(0.04, 0.14, fb) * (1.0 - smoothstep(0.86, 0.96, fb))
+      * smoothstep(0.0, 0.9, yw) * (1.0 - smoothstep(3.8, 5.5 + 0.12 * tw, yw)));
+    // tira LED del bordillo: una franja del color del tramo junto al borde de la calzada
+    float tl = max(${ROAD.toFixed(2)} - px, 0.0) / rAx;
+    float yl = rR.y * tl - 0.115;
+    float sl = yl > 0.0 ? 0.1 + 0.018 * tl : 0.05 + 0.006 * tl;
+    float lbr2; vec3 lc2 = waveColor(-(vStreakW.z + rR.z * tl), lbr2);
+    rAcc += lc2 * (lbr2 * 0.9 * exp(-yl * yl / (sl * sl)) * exp(-tl * tl / 8100.0));
+    reflectedLight.directSpecular += rAcc * (rF * rGloss * uReflK.y);
+  }
+#include <lights_fragment_end>`);
+    };
+    roadMat.customProgramCacheKey = () => `${prevK.call(roadMat)}|neonrefl`;
+    roadMat.needsUpdate = true;
+  }
 
   // ── escenario vivo (web 1.15): lluvia fina que va y viene (ratos secos y chaparrones de ~5 min); con lluvia el aire
   //    se carga un poco y las aceras brillan más ──
   startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
-  const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 2000 : 1100 });
+  // rayas un 20 % más tenues que las del kit: sobre el fondo oscuro la lluvia fuerte competía con el número
+  const rain = createRain(ctx, { count: ctx.qualityLevel >= 2 ? 2000 : 1100, color: [0.25, 0.28, 0.35] });
   root.add(rain.mesh);
   const fog0 = scene.fog.density;
   let rainK = -1;
+  let push = 0;       // 0..1: cuánto aprieta el tramo (rápido 0,5 · sprint 1), suavizado
+  const rainLen0 = rain.u.uLen.value;
+  const rainWind0 = rain.u.uWind.value;
 
   const inst = {
     director: { scale: 1.2, maxDown: 0.2, orbit: true },
@@ -318,8 +421,20 @@ float gWin; float gLit; vec3 gWinCol; float gShop;`)
       // lluvia: onda lenta del reloj de la clase (determinista); arranca ya lloviznando
       // con «Tiempo real», la lluvia de verdad del sitio elegido (y su niebla); si no, la del escenario vivo
       const lw = liveWeather();
-      const want = lw ? Math.max(lw.rain, lw.mist * 0.2) : 0.15 + 0.85 * weatherWave(f.t, 620, 1.1, 2.2);
+      // en los tramos fuertes la lluvia aprieta contigo: cae más, más tendida y con rayas más largas (corres contra
+      // ella); entra y sale despacio. Con «Tiempo real» manda el tiempo de verdad: solo cambia la inclinación.
+      const pushT = f.finale > 0 ? 0 : f.zone === 'sprint' ? 1 : f.zone === 'fast' ? 0.5 : 0;
+      push += (pushT - push) * (1 - Math.exp(-f.dt * 0.5));
+      const base = lw ? Math.max(lw.rain, lw.mist * 0.2) : 0.15 + 0.85 * weatherWave(f.t, 620, 1.1, 2.2);
+      const want = lw ? base : Math.max(base, 0.85 * push);
       rainK = rainK < 0 ? want : rainK + (want - rainK) * (1 - Math.exp(-f.dt * 0.25));
+      rain.u.uLen.value = rainLen0 * (1 + 0.7 * push);
+      rain.u.uWind.value = rainWind0 + 1.6 * push;
+      reflK.x = bldGroup.position.z;
+      // en horizontal la calzada cercana queda bajo los paneles del HUD: reflejo algo más contenido
+      const wetK = (0.8 + 0.2 * rainK) * (runner.portrait || f.finale > 0 ? 1 : 0.65);
+      reflK.y = wetK;
+      if (streakU) streakU.uStreakPower.value = 3.2 * wetK;
       rain.update(f, S, rainK);
       scene.fog.density = fog0 * (1 + 0.35 * rainK + (lw ? 0.5 * lw.cloud + 2 * lw.mist : 0));
       walkMat.roughness = 0.5 - 0.25 * rainK;

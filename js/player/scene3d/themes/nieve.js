@@ -21,11 +21,24 @@ const LANT_D = 8;
 const SNOW_TILE = 3.5;
 const PATH_W = 1.5;
 const WARM = '#ffc27a';
+// Pasillo libre de ramas: la rama más baja de un abeto del kit llega a 0,36 × su escala radial y cuelga hasta la
+// altura de los ojos. Dos de los 110 abetos (13–14 m, a 4 m del eje) metían ramas hasta 0,8–1,0 m del eje, y el
+// director mueve la cámara ±0,55 m: pasaban rozándola. Los pocos abetos cuya copa entraría a menos de CLEAR m del eje
+// la llevan más estrecha (y su guirnalda con ella); el resto no cambia.
+const CLEAR = 1.5;
+const REACH = 0.36;
 
 const FLAKE_VERT = /* glsl */ `
 attribute vec3 aSeed;
 uniform float uTime, uS, uSize, uFall, uDrift, uDens;
+uniform vec4 uRowL, uRowR;     // hileras de farolillos (x, y, separación, zOff): las mismas que alumbran la nieve
 varying float vA;
+varying float vL;
+float lampGlow(vec3 p, vec4 R) {
+  float zk = R.w - floor((R.w - p.z) / R.z + 0.5) * R.z;
+  vec3 dv = p - vec3(R.x, R.y, zk);
+  return 1.0 / (1.0 + dot(dv, dv) * 0.5);
+}
 void main() {
   // copos en una caja de 24 × 10 × 60 m delante de la cámara; caen, derivan con el viento y avanzan con el mundo.
   // uFall y uDrift son fases ACUMULADAS (en JS): la nevada puede acelerar sin que los copos salten
@@ -35,6 +48,7 @@ void main() {
   p.x += sin(uTime * 0.5 + aSeed.z * 30.0) * 0.4 + mod(uDrift * (0.7 + 0.6 * aSeed.y) + aSeed.x * b.x, b.x) - aSeed.x * b.x;
   p.z = -mod(aSeed.z * b.z - uS, b.z) + 2.0;
   p.x -= b.x * 0.5;
+  vL = lampGlow(p, uRowL) + lampGlow(p, uRowR);
   vec4 mv = viewMatrix * vec4(p, 1.0);
   float d = -mv.z;
   vA = smoothstep(0.5, 2.0, d) * (1.0 - smoothstep(30.0, 58.0, d)) * step(fract(aSeed.x * 5.17 + aSeed.y * 2.31), uDens);
@@ -42,12 +56,28 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 const FLAKE_FRAG = /* glsl */ `
+uniform vec3 uLampCol;
 varying float vA;
+varying float vL;
 void main() {
   vec2 q = gl_PointCoord - 0.5;
   float a = smoothstep(0.5, 0.1, length(q)) * vA;
-  gl_FragColor = vec4(vec3(0.75, 0.8, 0.9) * a * 0.6, 1.0);
+  gl_FragColor = vec4((vec3(0.75, 0.8, 0.9) * 0.6 + uLampCol * vL) * a, 1.0);
 }`;
+
+/** Une geometrías sueltas en una sola (sin índices): el farol entero sigue siendo UNA malla por material. */
+function mergeGeo(THREE, list) {
+  const pos = []; const nor = []; const uv = [];
+  for (const g0 of list) {
+    const g = g0.index ? g0.toNonIndexed() : g0;
+    pos.push(...g.attributes.position.array); nor.push(...g.attributes.normal.array); uv.push(...g.attributes.uv.array);
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  return out;
+}
 
 export async function createTheme(ctx) {
   const { THREE, root, camera, scene, renderer } = ctx;
@@ -69,8 +99,7 @@ export async function createTheme(ctx) {
     exposure: 0.95,
     title: ctx.workout?.event === 'navidad' ? 'Navidad' : null,
     titleColor: '#fff1dc',
-    finale: (p, portrait) => { p.y = portrait ? 6.5 : 5.5; p.z = 5; p.lookY = 0.5; p.lookZ = -40; p.fov = portrait ? 58 : 56; },
-  });
+  });   // el plano final lo compone este escenario (abajo, en update)
 
   // ── noche de luna entre nubes (azul frío), entorno y niebla ──
   const sky = skyDome(ctx, skyTex, skyMeta, { gain: 0.22, grad: 0.35, gradEl: 0.5, tint: new THREE.Color(0.62, 0.74, 1.15) });
@@ -111,13 +140,15 @@ export async function createTheme(ctx) {
   for (let i = 0; i < 110; i++) {
     const side = i % 2 ? 1 : -1;
     const x = side * (PATH_W + 2.4 + Math.pow(rnd(), 1.4) * 45);
-    trees.push({ x, z: -rnd() * TREE_P, h: 6 + rnd() * 9, r: rnd() * 6.28, lights: Math.abs(x) < 12 && rnd() < 0.5 });
+    const tr = { x, z: -rnd() * TREE_P, h: 6 + rnd() * 9, r: rnd() * 6.28, lights: Math.abs(x) < 12 && rnd() < 0.5, w: 0 };
+    tr.w = Math.min(tr.h * 0.8, (Math.abs(x) - CLEAR) / REACH);   // escala radial de la copa (y de su guirnalda)
+    trees.push(tr);
   }
   trees.sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
   const nT = trees.length;
   const firs = createFirs(ctx, {
     branchTex, barkTex, count: nT * 2, snow: 1, seed: 9,
-    place: (i, t) => { const tr = trees[i >> 1]; t.p.set(tr.x, 0, tr.z - (i & 1 ? TREE_P : 0) + 8); t.s.set(tr.h * 0.8, tr.h, tr.h * 0.8); t.e.set(0, tr.r, 0); },
+    place: (i, t) => { const tr = trees[i >> 1]; t.p.set(tr.x, 0, tr.z - (i & 1 ? TREE_P : 0) + 8); t.s.set(tr.w, tr.h, tr.w); t.e.set(0, tr.r, 0); },
     tint: new THREE.Color(0.55, 0.65, 0.62),
   });
   const treeGroup = firs.group;
@@ -131,13 +162,14 @@ export async function createTheme(ctx) {
     for (let k = 0; k < n; k++) {
       const u = k / n;
       const y = 0.18 + 0.75 * u;
-      const r = (0.03 + 0.25 * Math.pow(1 - u, 0.95)) * 0.8 * 0.92;
+      const r = (0.03 + 0.25 * Math.pow(1 - u, 0.95)) * 0.92;
       const a = u * Math.PI * 2 * 4.5 + tr.r;
-      bulbs.push([tr.x + Math.cos(a) * r * tr.h, y * tr.h, tr.z + 8 + Math.sin(a) * r * tr.h]);
+      bulbs.push([tr.x + Math.cos(a) * r * tr.w, y * tr.h, tr.z + 8 + Math.sin(a) * r * tr.w]);
     }
   });
   const nBulb = bulbs.length;
-  const bulbMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 6, 4), glowMaterial(ctx, runner, { tint: WARM, mix: 0.25, power: 6, fogK: 0.15 }), nBulb * 2);
+  const bulbMat = glowMaterial(ctx, runner, { tint: WARM, mix: 0.25, power: 6, fogK: 0.15 });
+  const bulbMesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.045, 6, 4), bulbMat, nBulb * 2);
   const bulbHalo = halos(ctx, runner, nBulb * 2, { tint: WARM, mix: 0.25, size: 0.16, grow: 0.004, power: 0.4, fogD: 0.01 });
   for (const m of [bulbMesh, bulbHalo]) setInstances(ctx, m, nBulb * 2, (i, t) => { const b = bulbs[i % nBulb]; t.p.set(b[0], b[1], b[2] - (i >= nBulb ? TREE_P : 0)); });
   for (const m of [bulbMesh, bulbHalo]) { m.frustumCulled = false; treeGroup.add(m); }
@@ -175,19 +207,35 @@ export async function createTheme(ctx) {
   const nL = (Math.ceil(300 / LANT_D) + 2) * 2;
   const LX = PATH_W + 0.5;
   const ironMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.05, 0.05, 0.06), roughness: 0.5, metalness: 0.7 });
-  const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.04, 1.2, 8).translate(0, 0.6, 0), ironMat, nL);
-  const cage = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.28, 0.2).translate(0, 1.36, 0), glowMaterial(ctx, runner, { tint: WARM, mix: 0.5, power: 3.2, fogK: 0.12 }), nL);
-  const cap = new THREE.InstancedMesh(new THREE.ConeGeometry(0.17, 0.12, 4).rotateY(Math.PI / 4).translate(0, 1.56, 0), roofMat, nL);
+  // FAROL de verdad (antes: un poste con un cubo luminoso): pie, poste, bandeja, cuatro montantes de hierro por fuera
+  // del cristal (se recortan a contraluz), tapa, tejadillo nevado y remate. Todo el hierro va unido en UNA geometría
+  // (misma malla y mismo material que el poste: ni una llamada de dibujo más); el cristal baja de potencia para que
+  // se vea cálido y con el color del tramo en vez de un bloque quemado a blanco.
+  const box = (w, h, d, x, y, z) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+  const ironGeo = mergeGeo(THREE, [
+    new THREE.CylinderGeometry(0.028, 0.04, 1.16, 8).translate(0, 0.6, 0),          // poste
+    new THREE.CylinderGeometry(0.06, 0.085, 0.05, 8).translate(0, 0.025, 0),        // pie
+    new THREE.CylinderGeometry(0.075, 0.03, 0.05, 8).translate(0, 1.185, 0),        // cuello
+    box(0.25, 0.018, 0.25, 0, 1.215, 0),                                            // bandeja
+    box(0.26, 0.02, 0.26, 0, 1.515, 0),                                             // tapa
+    ...[[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, c]) => box(0.02, 0.29, 0.02, a * 0.108, 1.365, c * 0.108)),   // montantes
+    new THREE.CylinderGeometry(0.008, 0.012, 0.09, 6).translate(0, 1.7, 0),         // remate
+  ]);
+  const post = new THREE.InstancedMesh(ironGeo, ironMat, nL);
+  const cageMat = glowMaterial(ctx, runner, { tint: WARM, mix: 0.5, power: 2.5, fogK: 0.12 });
+  const cage = new THREE.InstancedMesh(new THREE.BoxGeometry(0.2, 0.28, 0.2).translate(0, 1.365, 0), cageMat, nL);
+  const cap = new THREE.InstancedMesh(new THREE.ConeGeometry(0.21, 0.14, 4).rotateY(Math.PI / 4).translate(0, 1.595, 0), roofMat, nL);
   const lHalo = halos(ctx, runner, nL, { tint: WARM, mix: 0.5, size: 0.42, grow: 0.008, power: 0.55, fogD: 0.01 });
   const lPos = (i, t) => { const side = i % 2 ? 1 : -1; const k = Math.floor(i / 2); t.p.set(side * LX, 0, 6 - k * LANT_D - (side > 0 ? LANT_D / 2 : 0)); };
   for (const m of [post, cage, cap]) setInstances(ctx, m, nL, lPos);
-  setInstances(ctx, lHalo, nL, (i, t) => { lPos(i, t); t.p.y = 1.36; });
+  setInstances(ctx, lHalo, nL, (i, t) => { lPos(i, t); t.p.y = 1.365; });
   const lGroup = new THREE.Group();
   for (const m of [post, cage, cap, lHalo]) { m.frustumCulled = false; lGroup.add(m); }
   root.add(lGroup);
   const rowL = new THREE.Vector4(-LX, 1.36, LANT_D, 0);
   const rowR = new THREE.Vector4(LX, 1.36, LANT_D, 0);
   addLamps(snowMat, ctx, runner, [rowL, rowR], { tint: WARM, mix: 0.5, power: 3.2, range: 9 });
+  snowMat.customProgramCacheKey = () => 'nieve-suelo';
 
   // ── nieve que cae ──
   const nF = ctx.qualityLevel >= 2 ? 2200 : 1100;
@@ -198,7 +246,11 @@ export async function createTheme(ctx) {
   fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(nF * 3), 3));
   fg.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 3));
   startLiveWeather();   // «Tiempo real» (Ajustes): la hora y el tiempo del sitio elegido
-  const flakeU = { uTime: { value: 0 }, uS: { value: 0 }, uSize: { value: 40 }, uFall: { value: 0 }, uDrift: { value: 0 }, uDens: { value: 0.5 } };
+  const flakeU = {
+    uTime: { value: 0 }, uS: { value: 0 }, uSize: { value: 40 }, uFall: { value: 0 }, uDrift: { value: 0 }, uDens: { value: 0.5 },
+    uRowL: { value: rowL }, uRowR: { value: rowR }, uLampCol: { value: new THREE.Color() },
+  };
+  const warmCol = new THREE.Color(WARM);
   // escenario vivo (web 1.15): la nevada sigue la intensidad del tramo (suave al trote, ventisca ligera en los sprints)
   const SNOW_E = { walk: 0.35, warmup: 0.4, cooldown: 0.35, jog: 0.5, run: 0.65, fast: 0.85, sprint: 1 };
   let snowE = -1;
@@ -216,6 +268,10 @@ export async function createTheme(ctx) {
   }
   applyQuality();
 
+  const { smoothstep } = ctx.util;
+  let finClock = 0;
+  let wasFinale = false;
+
   const inst = {
     director: { scale: 0.85, maxDown: 0.12, orbit: true },
     resize(s) {
@@ -225,6 +281,26 @@ export async function createTheme(ctx) {
     update(f) {
       const st = runner.update(f);
       const S = st.S;
+      // plano final: corte bajo entre los farolillos y grúa lenta hasta ver el camino de luces, las guirnaldas y la luna
+      const finale = f.finale > 0;
+      if (finale) {
+        finClock = wasFinale ? finClock + f.dt : 0;
+        const p = st.rm ? 1 : smoothstep(0, 10, finClock);
+        const sway = st.rm ? 0 : smoothstep(9, 13, finClock);
+        const Tg = ctx.rig.target;
+        Tg.position.set(sway * 0.6 * Math.sin((finClock - 9) * 0.2), 1.05 + (st.portrait ? 6.6 : 4.6) * p + sway * 0.3 * Math.sin((finClock - 9) * 0.15), 2.5 + 3.5 * p);
+        Tg.lookAt.set(0, 2.2 - 0.9 * p, -40);
+        Tg.fov = st.portrait ? 70 - 10 * p : 56 - 2 * p;
+        Tg.shift.set(0, 0);
+        ctx.rig.settle.position = 1.4; ctx.rig.settle.lookAt = 1.4; ctx.rig.settle.fov = 2;
+        if (!wasFinale) ctx.rig.snap();
+      }
+      wasFinale = finale;
+      // las guirnaldas laten con la música (envolvente del compás: ±20 %, sin destellos); quietas con movimiento reducido
+      const beat = st.rm ? 0.4 : f.beat;
+      bulbMat.uniforms.uPower.value = 6 * (0.8 + 0.4 * beat);
+      bulbHalo.material.uniforms.uPower.value = 0.4 * (0.7 + 0.75 * beat);
+      flakeU.uLampCol.value.copy(warmCol).lerp(runner.u.uColNew.value, 0.5).multiplyScalar(1.8 * runner.u.uWave.value.z);
       snowSet.offset.y = (S / SNOW_TILE) % 1;
       treeGroup.position.z = scrollZ(S, TREE_P);
       lGroup.position.z = scrollZ(S, LANT_D);

@@ -169,7 +169,7 @@ export function mount(el) {
     const n = Number(b?.sessions) || 0;
     const when = Number(b?.savedAt) > 0 ? fmt.dateShort(todayKey(new Date(Number(b.savedAt)))) : '';
     const restore = empty && n > 0
-      ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span class="ob-native__txt"><span>Recuperar tus datos de este iPhone</span><small>${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'sesión' : 'sesiones'}</small></span></button>`
+      ? `<button type="button" class="btn btn--secondary btn--block ob-native__btn" data-ob-restore>${icon('refresh', 18)}<span class="ob-native__txt"><span>Recuperar tus datos de este iPhone</span><small>${esc(when ? `${when} · ` : '')}${n} ${n === 1 ? 'entreno guardado' : 'entrenos guardados'}</small></span></button>`
       : '';
     return `${restore}
       <label class="btn btn--ghost btn--block ob-native__btn ob-native__btn--import" for="ob-import"><span class="ob-native__txt"><small>¿Ya usabas RITMUP o BestRunning?</small><span class="ob-native__link">${icon('download', 18)}Importar tu copia</span></span>
