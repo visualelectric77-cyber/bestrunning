@@ -1,6 +1,7 @@
 // BestRunning · estadísticas del historial (sin DOM).
 import { todayKey, addDays, mondayOf, weekDates } from '../core/utils.js';
 import { planWeek, countsAsSession } from './planner.js';
+import { weekShape } from './week-shape.js';
 
 const round1 = (v) => Math.round(v * 10) / 10;
 const round2 = (v) => Math.round(v * 100) / 100;
@@ -54,20 +55,26 @@ export function weeklyBuckets(history, weeks = 12, endKey = todayKey()) {
   return buckets;
 }
 
-/** Semanas seguidas con ≥ 4 sesiones válidas. La semana en curso suma si ya llega; si no, no rompe la racha. */
+/** Clases que pide la racha cada semana: las de tu semana y, si entrenas más de 4 días, con 4 basta. */
+export function streakGoal(state) {
+  return Math.max(1, Math.min(4, weekShape(state?.schedule).trainDays.length));
+}
+
+/** Semanas seguidas cumpliendo streakGoal. La semana en curso suma si ya llega; si no, no rompe la racha. */
 export function streakWeeks(state, now = new Date()) {
+  const goal = streakGoal(state);
   const per = new Map();
   for (const s of list(state?.history)) {
     if (!sessionCounts(s)) continue;
-    const d = sessionDay(s);
+    const d = weekKeyOf(s); // una clase adelantada cuenta en su semana del plan, como en el resto de pantallas
     if (!d) continue;
     const m = mondayOf(d);
     per.set(m, (per.get(m) || 0) + 1);
   }
   let mon = mondayOf(todayKey(now));
-  let streak = (per.get(mon) || 0) >= 4 ? 1 : 0;
+  let streak = (per.get(mon) || 0) >= goal ? 1 : 0;
   mon = addDays(mon, -7);
-  while ((per.get(mon) || 0) >= 4) {
+  while ((per.get(mon) || 0) >= goal) {
     streak++;
     mon = addDays(mon, -7);
   }

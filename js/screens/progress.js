@@ -3,7 +3,7 @@ import { getState, setState, subscribe } from '../core/store.js';
 import { icon, listIcon, navBar, enableCollapsingHeader, segmented, sectionHeader, ring, openSheet, photo } from '../ui/components.js';
 import { lineChart, barChart, heatmapCalendar, gauge } from '../ui/charts.js';
 import { haptic } from '../core/haptics.js';
-import { totals, weeklyBuckets, streakWeeks, dayValues, records, weekProgress } from '../training/stats.js';
+import { totals, weeklyBuckets, streakWeeks, streakGoal, dayValues, records, weekProgress } from '../training/stats.js';
 import { ACHIEVEMENTS } from '../training/achievements.js';
 import { coachInsight } from '../training/progression.js';
 import { ZONES, LEVEL_KEYS, vamFromLevels, estimateVo2max, vo2Category } from '../training/levels.js';
@@ -196,14 +196,15 @@ function countUp(root) {
 
 /* ───────────── bloques de la pantalla ───────────── */
 
-function emptyHero() {
+function emptyHero(s) {
+  const goal = streakGoal(s);
   return `<section class="pg-empty">
     <div class="empty-photo" aria-hidden="true">${photo('empty', { cls: 'empty-photo__img' })}</div>
     <div class="eyebrow">Tu progreso</div>
     <h2 class="pg-empty__title">Tu historia empieza hoy</h2>
     <p class="pg-empty__text">Cada sesión suma: aquí verás tus kilómetros, tus rachas, cómo suben tus velocidades y las medallas que vas ganando.</p>
     <button type="button" class="btn btn--primary btn--lg btn--block" data-href="#/today">${icon('play', 20)}<span>Empezar la sesión de hoy</span></button>
-    <p class="pg-empty__hint">Completa 4 sesiones en una semana y estrenarás tu primera racha.</p>
+    <p class="pg-empty__hint">Completa ${goal} ${goal === 1 ? 'clase' : 'clases'} en una semana y estrenarás tu primera racha.</p>
   </section>`;
 }
 
@@ -753,7 +754,7 @@ function view(s, animate, wr = null) {
     }
   }
   if (!history.length) {
-    parts.push(emptyHero());
+    parts.push(emptyHero(s));
   } else {
     parts.push(weekCard(s, today));
     parts.push(safe(() => reviewTeaserHtml(reviewOf(s)), ''));

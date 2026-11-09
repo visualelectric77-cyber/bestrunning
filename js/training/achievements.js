@@ -81,10 +81,10 @@ export const ACHIEVEMENTS = [
   A('kcal-10000', 'Horno a tope', 'Quema 10.000 kcal en total.', 'flame', 'silver', (s) => totals(hist(s)).kcal >= 10000),
   // Constancia
   A('full-week', 'Semana perfecta', 'Completa todas las sesiones de una semana del plan.', 'calendar', 'silver', hadFullWeek),
-  A('streak-2', 'Dos semanas seguidas', 'Cumple 2 semanas seguidas con al menos 4 sesiones.', 'flame', 'bronze', (s) => streakWeeks(s, new Date()) >= 2),
-  A('streak-4', 'Un mes imparable', 'Cumple 4 semanas seguidas con al menos 4 sesiones.', 'flame', 'silver', (s) => streakWeeks(s, new Date()) >= 4),
-  A('streak-8', 'Dos meses de fuego', 'Cumple 8 semanas seguidas con al menos 4 sesiones.', 'flame', 'gold', (s) => streakWeeks(s, new Date()) >= 8),
-  A('streak-12', 'Trimestre de hierro', 'Cumple 12 semanas seguidas con al menos 4 sesiones.', 'crown', 'gold', (s) => streakWeeks(s, new Date()) >= 12),
+  A('streak-2', 'Dos semanas seguidas', 'Haz las clases de tu semana 2 semanas seguidas (con 4 basta).', 'flame', 'bronze', (s) => streakWeeks(s, new Date()) >= 2),
+  A('streak-4', 'Un mes imparable', 'Haz las clases de tu semana 4 semanas seguidas (con 4 basta).', 'flame', 'silver', (s) => streakWeeks(s, new Date()) >= 4),
+  A('streak-8', 'Dos meses de fuego', 'Haz las clases de tu semana 8 semanas seguidas (con 4 basta).', 'flame', 'gold', (s) => streakWeeks(s, new Date()) >= 8),
+  A('streak-12', 'Trimestre de hierro', 'Haz las clases de tu semana 12 semanas seguidas (con 4 basta).', 'crown', 'gold', (s) => streakWeeks(s, new Date()) >= 12),
   A('month-20', 'Mes de récord', 'Completa 20 sesiones en un mismo mes.', 'calendar', 'gold', (s) => sessionsInMonthMax(s) >= 20),
   A('comeback', 'Vuelta a la carga', 'Vuelve a entrenar tras dos semanas o más de parón.', 'refresh', 'bronze', hadComeback),
   // Sesiones especiales

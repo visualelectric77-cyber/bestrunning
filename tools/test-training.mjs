@@ -8,7 +8,7 @@ import {
 import { templateMeta } from '../js/training/season.js';
 import { applyFeedback, evaluateTest, feelingToRpe, FEELINGS, coachInsight } from '../js/training/progression.js';
 import { ACHIEVEMENTS, evaluateAchievements } from '../js/training/achievements.js';
-import { totals, weeklyBuckets, streakWeeks, dayValues, records, weekProgress } from '../js/training/stats.js';
+import { totals, weeklyBuckets, streakWeeks, streakGoal, dayValues, records, weekProgress } from '../js/training/stats.js';
 import { ZONES, DEFAULT_LEVELS, levelsFromVam, vamFromLevels } from '../js/training/levels.js';
 import { addDays, mondayOf, weekdayOf, fmt, deepClone, parseKey } from '../js/core/utils.js';
 
@@ -532,6 +532,27 @@ const synth = makeState({ plan: { startDate: synthStart }, schedule: { thursdayM
   ok(wb.slice(0, 11).every((b) => b.sessions >= 4 && b.km > 0), 'weeklyBuckets con datos');
   const sw = streakWeeks(synth, new Date());
   ok(sw >= 20, `streakWeeks (${sw})`);
+
+  // La racha sigue la semana de cada usuario
+  {
+    const nowW = new Date('2026-11-11T12:00:00'); // miércoles; la semana en curso empieza el 9
+    const clase = (dayKey, extra = {}) => ({ dayKey, completionPct: 1, elapsedSec: 1800, ...extra });
+    const semana = (monday, n) => Array.from({ length: n }, (_, i) => clase(addDays(monday, i)));
+    const racha = (schedule, history) => streakWeeks(makeState({ schedule, history }), nowW);
+    const tres = { days: { 1: 30, 2: 0, 3: 30, 4: 0, 5: 30, 6: 0, 7: 0 } };
+    const seis = { days: { 1: 30, 2: 30, 3: 30, 4: 30, 5: 30, 6: 30, 7: 0 } };
+    const cerradas = (n) => ['2026-10-19', '2026-10-26', '2026-11-02'].flatMap((m) => semana(m, n));
+    ok(streakGoal(makeState({ schedule: tres })) === 3 && streakGoal(makeState({ schedule: seis })) === 4 && streakGoal(makeState()) === 4, 'racha: objetivo 3 con 3 días, 4 con 6 y con la semana antigua');
+    ok(racha(tres, cerradas(3)) === 3, 'racha: 3 días por semana ya hace racha');
+    ok(racha(tres, [...cerradas(3), ...semana('2026-11-09', 1)]) === 3, 'racha: la semana en curso a medias no la rompe');
+    ok(racha(tres, [...cerradas(3), ...semana('2026-11-09', 3)]) === 4, 'racha: la semana en curso suma al llegar');
+    ok(racha(tres, [...semana('2026-10-19', 3), ...semana('2026-10-26', 2), ...semana('2026-11-02', 3)]) === 1, 'racha: una semana incompleta la corta');
+    ok(racha(seis, cerradas(4)) === 3 && racha(undefined, cerradas(4)) === 3, 'racha: con más de 4 días, con 4 basta (nadie la pierde)');
+    ok(racha(seis, cerradas(3)) === 0, 'racha: con 6 días no basta con 3');
+    ok(racha({ days: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 } }, cerradas(1)) === 3 && racha({ days: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0 } }, []) === 0, 'racha: semana sin días no se cuelga');
+    ok(racha(tres, [...semana('2026-11-02', 2), clase('2026-11-01', { planDate: '2026-11-06' })]) === 1, 'racha: una clase adelantada cuenta en su semana del plan');
+    ok(racha(tres, [...cerradas(3).slice(0, 2), ...semana('2026-10-26', 3), ...semana('2026-11-02', 3), clase('2026-10-21', { completionPct: 0.1, elapsedSec: 120 })]) === 2, 'racha: una clase que no cuenta no completa la semana');
+  }
   const dv = dayValues(h);
   ok(Object.keys(dv).length === new Set(h.map((s) => s.dayKey)).size && Object.values(dv).every((m) => m > 0), 'dayValues');
   const rec = records(h);
