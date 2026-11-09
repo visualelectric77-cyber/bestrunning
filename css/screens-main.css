@@ -904,6 +904,7 @@
   padding: var(--s-5) var(--s-5) 0;
   aspect-ratio: 16 / 10;
   min-height: 210px;
+  overflow: hidden; /* el zoom lento de la foto no debe asomar por debajo del velo */
 }
 .td-hero__media > .photo {
   position: absolute;

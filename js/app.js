@@ -2,6 +2,7 @@
 import { registerRoute, startRouter, navigate, currentRoute } from './core/router.js';
 import { loadActiveSession, saveActiveSession, activeSessionSavedAt } from './core/store.js';
 import { icon, toast, openSheet } from './ui/components.js';
+import { initLiquid } from './ui/liquid.js';
 import { esc, fmt } from './core/utils.js';
 import { APP_VERSION } from './version.js';
 import { playIntro, introOnResume } from './ui/intro.js';
@@ -74,7 +75,7 @@ const TABS = [
 function renderTabbar() {
   const nav = document.getElementById('tabbar');
   if (!nav) return;
-  nav.innerHTML = `<div class="tabbar__inner">${TABS.map(
+  nav.innerHTML = `<div class="tabbar__inner"><span class="tabbar__lens" aria-hidden="true"></span>${TABS.map(
     (t) =>
       `<button type="button" class="tabbar__item" data-tab="${t.tab}" data-href="${t.href}" aria-label="${t.label}"><span class="tabbar__icon">${tabGlyph(t.icon)}</span><span class="tabbar__label">${t.label}</span></button>`,
   ).join('')}</div>`;
@@ -329,6 +330,7 @@ function boot() {
   renderTabbar();
   routes();
   startRouter(document.getElementById('view'));
+  initLiquid();
   setupServiceWorker();
 
   requestAnimationFrame(() => {

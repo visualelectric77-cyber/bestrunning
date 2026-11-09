@@ -1,0 +1,387 @@
+/* RITMUP · Liquid Glass (iOS 26): el cristal es la capa de navegación y controles que flota sobre el contenido.
+   El contenido (tarjetas, listas, fotos) sigue opaco, como pide Apple: cristal sobre cristal no se lee.
+   Va antes de player.css y music.css a propósito: el reproductor conserva sus reglas sin desenfoque sobre la escena (§15.3). */
+
+:root {
+  --lg-bg: rgba(40, 40, 44, 0.5);
+  --lg-bg-heavy: rgba(30, 30, 33, 0.72);
+  /* brightness: lo blanco que pasa por debajo (el botón Empezar) no debe comerse las etiquetas */
+  --lg-filter: blur(24px) saturate(190%) brightness(0.72);
+  --lg-filter-heavy: blur(44px) saturate(180%);
+  --lg-edge:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.08),
+    inset 0 10px 16px -14px rgba(255, 255, 255, 0.28);
+  --lg-lift: 0 14px 34px -12px rgba(0, 0, 0, 0.62), 0 2px 8px rgba(0, 0, 0, 0.22);
+  --lg-ink: rgba(255, 255, 255, 0.86);
+  /* Respaldo para WebKit anterior a 17.2; abajo, muelles de verdad */
+  --spring-smooth: cubic-bezier(0.25, 1, 0.5, 1);
+  --spring-glass: cubic-bezier(0.3, 1.25, 0.5, 1);
+  --spring-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-glass-t: 420ms;
+  --spring-sheet-t: 460ms;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-smooth: linear(0,0.048,0.155,0.282,0.407,0.521,0.619,0.701,0.768,0.821,0.863,0.896,0.921,0.941,0.956,0.967,0.975,0.982,0.986,0.99,0.993,0.995,0.996,0.997,1);
+    --spring-glass: linear(0,0.024,0.087,0.174,0.274,0.379,0.483,0.581,0.67,0.749,0.817,0.874,0.921,0.958,0.986,1.007,1.021,1.031,1.036,1.038,1.038,1.036,1.033,1.029,1.025,1.021,1.017,1.014,1.011,1.008,1.006,1.004,1);
+    --spring-sheet: linear(0,0.032,0.109,0.21,0.318,0.426,0.526,0.617,0.695,0.761,0.816,0.861,0.897,0.926,0.947,0.964,0.976,0.985,0.992,0.996,0.999,1.001,1.002,1.003,1.003,1.003,1.003,1.002,1);
+  }
+}
+
+/* Canto de luz: más brillante arriba a la izquierda y abajo a la derecha, como un vidrio de verdad */
+.tabbar__inner::before,
+.sheet::before,
+.dialog::before,
+.toast::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  padding: 0.75px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(128deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.08) 32%, rgba(255, 255, 255, 0.03) 64%, rgba(255, 255, 255, 0.28));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+/* ───── Barra de pestañas: una gota de cristal que viaja entre pestañas y se puede arrastrar ───── */
+.tabbar__inner {
+  position: relative;
+  background: var(--lg-bg);
+  -webkit-backdrop-filter: var(--lg-filter);
+  backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-edge), var(--lg-lift);
+  touch-action: none;
+}
+
+.tabbar__lens {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: var(--lw, 20%);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.13);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.1),
+    0 3px 10px -3px rgba(0, 0, 0, 0.36);
+  translate: var(--lx, 0) 0;
+  scale: var(--lsx, 1) var(--lsy, 1);
+  transition:
+    translate var(--spring-glass-t) var(--spring-glass),
+    scale var(--spring-glass-t) var(--spring-glass),
+    background-color 180ms ease,
+    opacity 180ms ease;
+  will-change: translate, scale;
+}
+
+.tabbar__lens.is-off { opacity: 0; }
+.tabbar__lens.is-instant { transition: none; }
+.tabbar__inner.is-moving .tabbar__lens { --lsx: 1.16; --lsy: 0.9; }
+.tabbar__inner.is-pressed .tabbar__lens { --lsx: 1.1; --lsy: 1.13; background: rgba(255, 255, 255, 0.2); }
+.tabbar__inner.is-dragging .tabbar__lens {
+  --lsx: 1.14;
+  --lsy: 1.16;
+  background: rgba(255, 255, 255, 0.2);
+  transition:
+    translate 0s linear,
+    scale var(--spring-glass-t) var(--spring-glass),
+    background-color 180ms ease;
+}
+
+.tabbar__item {
+  z-index: 1;
+  color: var(--lg-ink);
+}
+
+.tabbar__item.is-active {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Mientras arrastras, el color y el icono relleno siguen a la gota */
+.tabbar__inner.is-dragging .tabbar__item.is-active:not(.is-over) { color: var(--lg-ink); }
+.tabbar__inner.is-dragging .tabbar__item.is-active:not(.is-over) .tabbar__glyph--fill { display: none; }
+.tabbar__inner.is-dragging .tabbar__item.is-active:not(.is-over) .tabbar__glyph--line { display: block; }
+.tabbar__inner.is-dragging .tabbar__item.is-over { color: var(--accent); }
+.tabbar__inner.is-dragging .tabbar__item.is-over .tabbar__glyph--fill { display: block; }
+.tabbar__inner.is-dragging .tabbar__item.is-over .tabbar__glyph--line { display: none; }
+
+.tabbar__item:active .tabbar__icon { transform: scale(1.06); }
+
+/* La cápsula se mueve con su estado real: sin el fantasma de la gota en la posición anterior */
+::view-transition-old(tabbar) { display: none; }
+::view-transition-new(tabbar) { animation: none; opacity: 1; }
+
+/* ───── Cabecera: borde de desplazamiento en lugar de barra con línea ───── */
+.navbar--inline.is-scrolled .navbar__compact,
+.navbar--large.is-collapsed .navbar__compact {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.navbar__compact::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 -24px;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.56) 58%, rgba(0, 0, 0, 0));
+  -webkit-backdrop-filter: blur(12px) saturate(170%);
+  backdrop-filter: blur(12px) saturate(170%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent);
+  mask-image: linear-gradient(to bottom, #000 62%, transparent);
+  transition: opacity var(--dur) ease;
+}
+
+.navbar--inline.is-scrolled .navbar__compact::before,
+.navbar--large.is-collapsed .navbar__compact::before {
+  opacity: 1;
+}
+
+/* Botones de la barra y «Atrás»: círculos de cristal; al pulsar crecen y la luz nace bajo el dedo */
+.navbar__btn,
+.navbar .btn-icon,
+.navbar__back,
+.sheet__close {
+  background-color: var(--lg-bg);
+  background-image: radial-gradient(circle at var(--px, 50%) var(--py, 50%), rgba(255, 255, 255, var(--lit, 0)), rgba(255, 255, 255, 0) 70%);
+  -webkit-backdrop-filter: var(--lg-filter);
+  backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-edge), 0 4px 12px -4px rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  transition: transform var(--spring-glass-t) var(--spring-glass);
+}
+
+.navbar__btn,
+.navbar .btn-icon,
+.navbar__back {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.navbar__back {
+  position: relative;
+  justify-content: center;
+  min-width: 40px;
+  padding: 0;
+  margin-left: 0;
+}
+
+.navbar__back::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+.navbar__back svg { width: 24px; height: 24px; margin-left: -2px; }
+
+/* El nombre sigue en aria-label; en iOS 26 «Atrás» es solo el chevrón */
+.navbar__back span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.navbar__btn:active,
+.navbar .btn-icon:active,
+.navbar__back:active,
+.sheet__close:active {
+  --lit: 0.3;
+  opacity: 1;
+  transform: scale(1.12);
+  transition-duration: 110ms;
+}
+
+/* ───── Control segmentado: pulgar de cristal con muelle ───── */
+.segmented__thumb {
+  background: rgba(255, 255, 255, 0.17);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.32),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.08),
+    0 3px 8px -3px rgba(0, 0, 0, 0.4);
+  transform: translateX(calc(var(--index, 0) * 100%)) scale(var(--sx, 1), var(--sy, 1));
+  transition: transform var(--spring-glass-t) var(--spring-glass);
+}
+
+.segmented.is-moving { --sx: 1.1; --sy: 0.92; }
+.segmented:has(.segmented__opt.is-active:active) { --sx: 1.05; --sy: 1.12; }
+
+/* ───── Interruptor de iOS 26: pastilla que al pulsar se vuelve cristal ───── */
+.toggle {
+  flex: 0 0 63px;
+  width: 63px;
+  height: 28px;
+}
+
+.toggle__thumb {
+  width: 39px;
+  height: 24px;
+  transition:
+    transform var(--spring-glass-t) var(--spring-glass),
+    width 200ms ease,
+    height 200ms ease,
+    top 200ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.toggle input:active + .toggle__track .toggle__thumb {
+  top: -3px;
+  width: 46px;
+  height: 34px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
+.toggle input:checked + .toggle__track .toggle__thumb { transform: translateX(20px); }
+.toggle input:checked:active + .toggle__track .toggle__thumb { transform: translateX(15px); }
+
+/* ───── Hojas, alertas y avisos ───── */
+.sheet {
+  background: var(--lg-bg-heavy);
+  -webkit-backdrop-filter: var(--lg-filter-heavy);
+  backdrop-filter: var(--lg-filter-heavy);
+  box-shadow: var(--lg-edge), 0 24px 60px -16px rgba(0, 0, 0, 0.7);
+  transition: transform var(--spring-sheet-t) var(--spring-sheet);
+}
+
+.sheet__close {
+  width: 34px;
+  height: 34px;
+}
+
+.sheet__grabber { background: rgba(255, 255, 255, 0.34); }
+
+/* La hoja grande empuja la pantalla hacia atrás */
+#view {
+  transform-origin: 50% 0;
+  transition: transform var(--spring-sheet-t) var(--spring-sheet), border-radius var(--spring-sheet-t) ease;
+}
+
+body:not(.is-fullscreen):has(.sheet--large.is-open:not(.is-closing)) #view {
+  transform: translateY(calc(var(--safe-t) + 4px)) scale(0.93);
+  border-radius: 24px;
+}
+
+.dialog {
+  background: var(--lg-bg-heavy);
+  -webkit-backdrop-filter: var(--lg-filter-heavy);
+  backdrop-filter: var(--lg-filter-heavy);
+  box-shadow: var(--lg-edge), 0 24px 60px -16px rgba(0, 0, 0, 0.7);
+}
+
+.asheet__group,
+.asheet__cancel {
+  background: var(--lg-bg-heavy);
+  -webkit-backdrop-filter: var(--lg-filter-heavy);
+  backdrop-filter: var(--lg-filter-heavy);
+  box-shadow: var(--lg-edge);
+}
+
+.toast {
+  position: relative;
+  background: var(--lg-bg-heavy);
+  -webkit-backdrop-filter: var(--lg-filter);
+  backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-edge), var(--lg-lift);
+  transition:
+    transform var(--spring-glass-t) var(--spring-glass),
+    opacity 200ms ease;
+}
+
+.wsync {
+  background: var(--lg-bg-heavy);
+  -webkit-backdrop-filter: var(--lg-filter);
+  backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-edge), var(--lg-lift);
+}
+
+/* ───── Pulsaciones con muelle: al soltar, vuelven como un objeto físico ───── */
+.btn,
+.card--pressable,
+[data-href].card,
+.wcard[data-href],
+button.chip {
+  transition:
+    transform var(--spring-glass-t) var(--spring-glass),
+    opacity var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+
+.btn:active:not(:disabled) { transform: scale(0.97); }
+
+/* ───── En clase, nada de desenfoque encima de la escena 3D ───── */
+.is-fullscreen .sheet,
+.is-fullscreen .dialog,
+.is-fullscreen .asheet__group,
+.is-fullscreen .asheet__cancel,
+.is-fullscreen .toast {
+  background: #1c1c1e;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.is-fullscreen .navbar__btn,
+.is-fullscreen .navbar .btn-icon,
+.is-fullscreen .navbar__back {
+  background-color: rgba(44, 44, 48, 0.86);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ───── Accesibilidad: los tres ajustes de iOS ───── */
+@media (prefers-reduced-motion: reduce) {
+  .tabbar__lens,
+  .segmented__thumb,
+  .toggle__thumb,
+  .sheet,
+  #view {
+    transition-duration: 0ms;
+  }
+  .tabbar__inner.is-moving .tabbar__lens,
+  .segmented.is-moving { --lsx: 1; --lsy: 1; --sx: 1; --sy: 1; }
+  body:not(.is-fullscreen):has(.sheet--large.is-open:not(.is-closing)) #view { transform: none; border-radius: 0; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --lg-bg: #2c2c2e;
+    --lg-bg-heavy: #1c1c1e;
+    --lg-filter: none;
+    --lg-filter-heavy: none;
+  }
+  .navbar__compact::before {
+    background: #000;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    bottom: 0;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --lg-bg: #2c2c2e;
+    --lg-bg-heavy: #1c1c1e;
+    --lg-filter: none;
+    --lg-filter-heavy: none;
+    --lg-edge: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+    --lg-ink: #fff;
+  }
+  .tabbar__lens,
+  .segmented__thumb { background: rgba(255, 255, 255, 0.3); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8); }
+}
