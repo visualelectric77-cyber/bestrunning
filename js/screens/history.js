@@ -1,6 +1,9 @@
 // BestRunning · Historial: lista por meses (buscar, filtrar, deslizar para borrar) y detalle de sesión.
 // El detalle incluye el pulso del Apple Watch (importación vía Atajo, línea sobre el perfil, zonas de FC y
 // pulso por velocidad) y la música que sonó en la sesión.
+import { classAnalysis } from '../training/class-analysis.js';
+import { classDebrief } from '../training/class-debrief.js';
+import { classAnalysisHtml } from '../ui/analysis-view.js';
 import { getState, setState, subscribe } from '../core/store.js';
 import { navigate, back } from '../core/router.js';
 import { icon, navBar, enableCollapsingHeader, chip, stat, profileChart, zoneBar, zoneRibbon, effortBars, photo, openSheet, toast, confirmDialog, actionSheet, celebrate } from '../ui/components.js';
@@ -584,6 +587,13 @@ function detailHtml(ses, s, segments) {
       ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)) })}
     </div>
   </section>`);
+
+  // El mismo análisis que al terminar la clase, comparado solo con las clases anteriores a esta
+  const analysis = safe(() => classAnalysis(ses, {
+    state: s, segments: segments || null,
+    debrief: ses.debrief || classDebrief(ses, { segments: segments || null, model: null, profile: s.profile }),
+  }), null);
+  if (analysis) parts.push(classAnalysisHtml(analysis));
 
   const trace = Array.isArray(ses.speedTrace) && ses.speedTrace.length ? ses.speedTrace : null;
   const segs = segments && segments.length ? segments : traceSegments(ses, levels);

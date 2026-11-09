@@ -14,6 +14,8 @@ import { workoutFromId } from '../training/generator.js';
 import { applyFeedback, evaluateTest, FEELINGS, hrLevelTrends, sessionReachedEnd } from '../training/progression.js';
 import { vamValidity, vamHoldsLevels } from '../training/vam-assist.js';
 import { classDebrief, wantsEasierNext } from '../training/class-debrief.js';
+import { classAnalysis } from '../training/class-analysis.js';
+import { classAnalysisHtml } from '../ui/analysis-view.js';
 import { dynModelFrom } from '../training/hr-control.js';
 import { easierNext, setDayOverride } from '../training/planner.js';
 import { evaluateAchievements } from '../training/achievements.js';
@@ -93,6 +95,7 @@ export function mount(el, { params = {} } = {}) {
   // resumen salía «No hemos podido abrir esta pantalla» en el iPhone con Apple Intelligence)
   let aiAsked = false;
   let debriefAsked = false;
+  let analysisMemo = { key: '', a: null };
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); if (!disposed) fn(); }, ms);
@@ -271,6 +274,8 @@ export function mount(el, { params = {} } = {}) {
 
             ${s.isTest ? testCard(s, st) : ''}
 
+            ${analysisCards(s, st)}
+
             <section class="card sm-card" style="--i:3">
               <div class="sm-card__head"><span class="sm-card__title">Plan vs real</span>
                 <span class="sm-legend"><i class="sm-legend__bar"></i>Plan <i class="sm-legend__line"></i>Real${hasHrSeries(s) ? hrLegendHtml() : ''}</span></div>
@@ -420,15 +425,7 @@ export function mount(el, { params = {} } = {}) {
       if (!debriefAsked) { debriefAsked = true; later(() => makeDebrief(s), 300); }
     }
     const db = s.debrief;
-    if (db && (db.kind !== 'nohr' || !aiAvailable())) {
-      return `<section class="card sm-card sm-coach" style="--i:4">
-        <div class="sm-card__head"><span class="sm-card__title">Tu clase</span></div>
-        <p class="sm-coach__head">${esc(db.headline)}</p>
-        <p class="sm-coach__body">${esc(db.body)}</p>
-        ${db.tip ? `<p class="sm-coach__tip">${icon('info', 15)}<span>${esc(db.tip)}</span></p>` : ''}
-        ${planSuggestHtml(db)}
-      </section>`;
-    }
+    if (db && (db.kind !== 'nohr' || !aiAvailable())) return ''; // lo cuenta el análisis de la clase
     const n = s.aiNote;
     if (n && n.body) {
       return `<section class="card sm-card sm-coach" style="--i:4">
@@ -446,17 +443,36 @@ export function mount(el, { params = {} } = {}) {
       </section>`;
   }
 
+  /** Titular de la clase (class-debrief.js) con tu modelo de pulso. */
+  function debriefNow(s, st) {
+    const segmentsOf = (h) => workoutFromId(h.workoutId, { ...st, levels: h.levelsAtStart || st.levels })?.segments;
+    let model = null;
+    try { model = dynModelFrom((st.history || []).filter((h) => h.id !== s.id), segmentsOf, { profile: st.profile }); } catch { model = null; }
+    try { return classDebrief(s, { segments: workout?.segments || null, model, profile: st.profile }); } catch { return null; }
+  }
+
+  /** Análisis de la clase: se ve nada más terminar, sin esperar a valorarla, y se rehace si llega el pulso. */
+  function analysisCards(s, st) {
+    if (s.isTest) return '';
+    const hrN = Array.isArray(s.hrSeries) ? s.hrSeries.length : 0;
+    const key = `${s.id}|${s.feeling || ''}|${s.rpe || ''}|${hrN}|${s.debrief?.hrN ?? ''}|${(s.levelChanges || []).length}|${s.debrief?.planChoice || ''}`;
+    if (analysisMemo.key !== key) {
+      const debrief = s.debrief && s.debrief.hrN === hrN ? s.debrief : debriefNow(s, st);
+      let a = null;
+      try { a = classAnalysis(s, { state: st, debrief, segments: workout?.segments || null, showNext: s.dayKey === todayKey() }); } catch { a = null; }
+      analysisMemo = { key, a };
+    }
+    if (!analysisMemo.a) return '';
+    return classAnalysisHtml(analysisMemo.a, { planHtml: s.debrief ? planSuggestHtml(s.debrief) : '' });
+  }
+
   /** «Tu clase» (class-debrief.js): se calcula una vez y se guarda; se rehace si llega el pulso después. */
   function makeDebrief(s0) {
     debriefAsked = false;
     const s = findSession() || s0;
     if (disposed || !s || s.isTest) return;
     const st = getState();
-    const segmentsOf = (h) => workoutFromId(h.workoutId, { ...st, levels: h.levelsAtStart || st.levels })?.segments;
-    let model = null;
-    try { model = dynModelFrom((st.history || []).filter((h) => h.id !== s.id), segmentsOf, { profile: st.profile }); } catch { model = null; }
-    let db = null;
-    try { db = classDebrief(s, { segments: workout?.segments || null, model, profile: st.profile }); } catch { db = null; }
+    const db = debriefNow(s, st);
     if (!db) return;
     let suggest = s.debrief?.suggest || null;
     if (!suggest && wantsEasierNext(db, s) && !s.debrief?.planChoice) {

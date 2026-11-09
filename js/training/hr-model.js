@@ -37,8 +37,8 @@ export function steadyPoints(session) {
 /**
  * Modelo con las sesiones de las últimas 8 semanas (menos `exceptId`). → null o { a, b, n, sessions, at(kmh) }.
  */
-export function buildHrModel(history, { now = Date.now(), exceptId = null } = {}) {
-  const since = now - WINDOW_DAYS * 86400000;
+export function buildHrModel(history, { now = Date.now(), exceptId = null, windowDays = WINDOW_DAYS } = {}) {
+  const since = now - windowDays * 86400000;
   let pts = [];
   let sessions = 0;
   for (const h of Array.isArray(history) ? history : []) {

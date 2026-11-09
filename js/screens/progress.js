@@ -16,6 +16,8 @@ import { readiness } from '../training/readiness.js';
 import { vo2Trend } from '../training/health-analysis.js';
 import { isHills } from '../training/hr-model.js';
 import { weekReportInput } from '../training/week-report.js';
+import { trainingReview } from '../training/training-review.js';
+import { reviewTabHtml, reviewTeaserHtml } from '../ui/analysis-view.js';
 import { healthTab } from './health.js';
 
 /* ───────────── utilidades privadas ───────────── */
@@ -726,14 +728,25 @@ function historyLink(count) {
 }
 
 /** Pestañas «Entrenos | Salud» (solo con clases hechas). */
-const progressTab = (s) => (s.ui?.progressTab === 'health' ? 'health' : 'train');
+const progressTab = (s) => (s.ui?.progressTab === 'health' || s.ui?.progressTab === 'review' ? s.ui.progressTab : 'train');
+
+/** Balance de tus entrenos (una vez por estado: la pantalla se repinta a menudo). */
+let reviewMemo = { state: null, value: null };
+function reviewOf(s) {
+  if (reviewMemo.state !== s) reviewMemo = { state: s, value: safe(() => trainingReview(s, new Date()), null) };
+  return reviewMemo.value;
+}
 
 function view(s, animate, wr = null) {
   const history = Array.isArray(s.history) ? s.history.filter(Boolean) : [];
   const today = todayKey();
   const parts = [];
   if (history.length) {
-    parts.push(`<div class="pg-tabs">${segmented({ name: 'pg-tab', options: [{ value: 'train', label: 'Entrenos' }, { value: 'health', label: 'Salud' }], value: progressTab(s) })}</div>`);
+    parts.push(`<div class="pg-tabs">${segmented({ name: 'pg-tab', options: [{ value: 'train', label: 'Entrenos' }, { value: 'review', label: 'Análisis' }, { value: 'health', label: 'Salud' }], value: progressTab(s) })}</div>`);
+    if (progressTab(s) === 'review') {
+      parts.push(safe(() => reviewTabHtml(reviewOf(s)), ''));
+      return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
+    }
     if (progressTab(s) === 'health') {
       parts.push(safe(() => healthTab(s, today), ''));
       return parts.filter(Boolean).map((p, i) => `<div class="pg-part" style="--i:${i}">${p}</div>`).join('');
@@ -743,6 +756,7 @@ function view(s, animate, wr = null) {
     parts.push(emptyHero());
   } else {
     parts.push(weekCard(s, today));
+    parts.push(safe(() => reviewTeaserHtml(reviewOf(s)), ''));
     parts.push(weekReportCard(wr));
     parts.push(kpiGrid(s, history, animate));
     // La tarjeta de semana de arriba ya dice «X de Y sesiones»: el coach no lo repite
@@ -908,7 +922,41 @@ export function mount(el) {
     if (e.target.closest('[data-pg="vo2"]')) {
       haptic('light');
       openVo2Sheet();
+      return;
     }
+    if (e.target.closest('[data-pg="review"]')) {
+      haptic('light');
+      setTab('review');
+      return;
+    }
+    const tag = e.target.closest('[data-week-tag]');
+    if (tag) {
+      haptic('selection');
+      const { weekTag: key, weekMonday: monday } = tag.dataset;
+      selfAt = Date.now();
+      selfState = setState((draft) => {
+        draft.ui = draft.ui || {};
+        draft.ui.weekTags = draft.ui.weekTags || {};
+        if (draft.ui.weekTags[monday] === key) delete draft.ui.weekTags[monday];
+        else draft.ui.weekTags[monday] = key;
+      });
+      const open = tag.closest('details')?.dataset.monday;
+      render();
+      if (open) body.querySelector(`details[data-monday="${open}"]`)?.setAttribute('open', '');
+    }
+  };
+
+  const setTab = (value) => {
+    const tab = value === 'health' || value === 'review' ? value : 'train';
+    if (progressTab(getState()) === tab) return;
+    selfAt = Date.now();
+    selfState = setState((draft) => {
+      draft.ui = draft.ui || {};
+      draft.ui.progressTab = tab;
+    });
+    render();
+    el.querySelector('.screen-scroll, .pg-screen')?.scrollTo?.({ top: 0 });
+    if (tab === 'health') askMetrics();
   };
 
   const onChange = (e) => {
@@ -920,15 +968,7 @@ export function mount(el) {
       value = e.target.value;
     }
     if (name === 'pg-tab') {
-      const tab = value === 'health' ? 'health' : 'train';
-      if (progressTab(getState()) === tab) return;
-      selfAt = Date.now();
-      selfState = setState((draft) => {
-        draft.ui = draft.ui || {};
-        draft.ui.progressTab = tab;
-      });
-      render();
-      if (tab === 'health') askMetrics();
+      setTab(value);
       return;
     }
     if (name !== 'pg-metric') return;
