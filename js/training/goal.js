@@ -159,10 +159,24 @@ export function goalIntro(gw, weekLine = '') {
 /** «4:58» */
 export const paceText = (sec) => `${Math.floor(sec / 60)}:${String(Math.round(sec) % 60).padStart(2, '0')}`;
 
-/** «50:00» / «1:45:00» → segundos (o null). Acepta «50», «50:30», «1:45», «1:45:00» y «1h45». */
+/**
+ * Lo que se va tecleando en «Tiempo objetivo», con los dos puntos puestos solos: el teclado numérico del iPhone no
+ * tiene «:», así que se escriben solo las cifras y se reparten de derecha a izquierda («2730» → «27:30»,
+ * «14500» → «1:45:00»). Cualquier otro carácter se ignora; como mucho 6 cifras.
+ */
+export function typedGoalTime(text) {
+  const d = String(text ?? '').replace(/\D/g, '').slice(0, 6);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return `${d.slice(0, -2)}:${d.slice(-2)}`;
+  return `${d.slice(0, -4)}:${d.slice(-4, -2)}:${d.slice(-2)}`;
+}
+
+/** «50:00» / «1:45:00» → segundos (o null). Acepta «50», «50:30», «1:45», «1:45:00», «1h45» y solo cifras («2730»). */
 export function parseGoalTime(text, distanceKey = '10k') {
-  const s = String(text ?? '').trim().replace(/\s+/g, '').replace(/[hH]/, ':').replace(/[′'´]/g, ':').replace(/[″"]/g, '').replace(/[.,]/g, ':');
+  let s = String(text ?? '').trim().replace(/\s+/g, '').replace(/[hH]/, ':').replace(/[′'´]/g, ':').replace(/[″"]/g, '').replace(/[.,]/g, ':');
   if (!s) return null;
+  // solo cifras, de 4 a 6: «2730» = 27:30, «14500» = 1:45:00 (con 1–3 cifras siguen siendo minutos u horas, como siempre)
+  if (/^\d{4,6}$/.test(s)) s = typedGoalTime(s);
   if (!/^\d{1,3}(:\d{1,2}){0,2}:?$/.test(s)) return null;
   const parts = s.replace(/:$/, '').split(':').map(Number);
   const d = goalDistance(distanceKey) || goalDistance('10k');
@@ -244,12 +258,16 @@ export function goalDateRange(today) {
   return { min: addDays(today, 1), max: addDays(today, 364) };
 }
 
-/** Objetivo nuevo listo para guardar (o null si los datos no valen). */
-export function makeGoal({ distance, date, targetSec = null, where = 'calle' }, today) {
+/**
+ * Objetivo nuevo listo para guardar (o null si los datos no valen). `keep`: la fecha del objetivo que ya tenías; esa
+ * vale aunque sea HOY (el día de la carrera aún puedes cambiar el tiempo objetivo o dónde la corres).
+ */
+export function makeGoal({ distance, date, targetSec = null, where = 'calle' }, today, { keep = null } = {}) {
   const g = normalizeGoal({ distance, date, targetSec, setOn: today, where });
   if (!g || !isKey(today)) return null;
   const { min, max } = goalDateRange(today);
-  return g.date >= min && g.date <= max ? g : null;
+  if (g.date >= min && g.date <= max) return g;
+  return keep && g.date === keep && g.date >= today && g.date <= max ? g : null;
 }
 
 /* ───────────── Mutadores (sobre el borrador de setState) ───────────── */
@@ -261,7 +279,7 @@ export function makeGoal({ distance, date, targetSec = null, where = 'calle' }, 
 export function setGoal(draft, { distance, date, targetSec = null, where = 'calle' }, today) {
   if (!draft.plan || typeof draft.plan !== 'object') draft.plan = { startDate: null, overrides: {} };
   const prev = normalizeGoal(draft.plan.goal);
-  const next = makeGoal({ distance, date, targetSec, where }, today);
+  const next = makeGoal({ distance, date, targetSec, where }, today, { keep: prev?.date || null });
   if (!next) return false;
   if (prev && prev.distance === next.distance && prev.date === next.date && prev.setOn) next.setOn = prev.setOn;
   draft.plan.goal = next;

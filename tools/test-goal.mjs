@@ -2,7 +2,7 @@
 // RITMUP · pruebas del objetivo con fecha de carrera (js/training/goal.js + planificador + store).
 // Uso: node tools/test-goal.mjs [--verbose]
 import {
-  normalizeGoal, goalWeekInfo, goalBlock, goalStatus, goalLongMinutes, parseGoalTime, fmtGoalTime, goalVerdict, countdownText,
+  normalizeGoal, goalWeekInfo, goalBlock, goalStatus, goalLongMinutes, parseGoalTime, typedGoalTime, fmtGoalTime, goalVerdict, countdownText,
   makeGoal, setGoal, clearGoal, goalSig, GOAL_DISTANCES,
 } from '../js/training/goal.js';
 import { planWeek, cycleInfo, seasonInfo, seasonWeek, setPlannerToday, nextTestDate } from '../js/training/planner.js';
@@ -206,9 +206,44 @@ const G10 = { distance: '10k', date: '2026-12-13', targetSec: 3000, setOn: TODAY
   ok(parseGoalTime('50:00', '10k') === 3000 && parseGoalTime('50', '10k') === 3000 && parseGoalTime('1:45', '21k') === 6300
     && parseGoalTime('1:45:30', '21k') === 6330 && parseGoalTime('1h45', '21k') === 6300 && parseGoalTime('22:30', '5k') === 1350, 'lectura del tiempo objetivo');
   ok(parseGoalTime('5:00', '10k') === null && parseGoalTime('abc', '5k') === null && parseGoalTime('50:75', '10k') === null, 'tiempos imposibles: null');
+  // Teclado numérico del iPhone (sin «:»): solo cifras
+  ok(parseGoalTime('2730', '5k') === 1650 && parseGoalTime('5030', '10k') === 3030 && parseGoalTime('14500', '21k') === 6300
+    && parseGoalTime('011500', '15k') === 4500 && parseGoalTime('9930', '21k') === 5970, 'solo cifras: 2730 = 27:30, 14500 = 1:45:00');
+  ok(parseGoalTime('2775', '5k') === null && parseGoalTime('0500', '10k') === null && parseGoalTime('1234567', '21k') === null, 'solo cifras imposibles: null');
+  ok(parseGoalTime('27', '5k') === 1620 && parseGoalTime('2', '21k') === 7200 && parseGoalTime('120', '21k') === 7200, 'con 1–3 cifras, como siempre (minutos u horas)');
+  ok(typedGoalTime('') === '' && typedGoalTime('2') === '2' && typedGoalTime('27') === '27' && typedGoalTime('273') === '2:73'
+    && typedGoalTime('2730') === '27:30' && typedGoalTime('14500') === '1:45:00' && typedGoalTime('014500') === '01:45:00', 'al teclear, los dos puntos se ponen solos');
+  ok(typedGoalTime('27:30') === '27:30' && typedGoalTime('27:3') === '2:73' && typedGoalTime('27,30') === '27:30' && typedGoalTime('1h45') === '1:45'
+    && typedGoalTime('12345678') === '12:34:56' && typedGoalTime('ab') === '', 'lo tecleado se limpia: solo cifras, 6 como mucho');
+  {
+    // tecla a tecla, como en el iPhone: lo que queda escrito se lee como lo que se quería
+    let v = '';
+    for (const k of '2730') v = typedGoalTime(v + k);
+    ok(v === '27:30' && parseGoalTime(v, '5k') === 1650, 'tecleando 2-7-3-0 queda 27:30');
+    v = typedGoalTime(v.slice(0, -1));
+    ok(v === '2:73' && parseGoalTime(v, '5k') === null, 'al borrar una cifra, a medias no vale');
+    v = typedGoalTime(v.slice(0, -1));
+    ok(v === '27' && parseGoalTime(v, '5k') === 1620, 'y con 27 son 27 minutos');
+    let h = '';
+    for (const k of '14500') h = typedGoalTime(h + k);
+    ok(h === '1:45:00' && parseGoalTime(h, '21k') === 6300, 'tecleando 1-4-5-0-0 queda 1:45:00');
+    let m = '';
+    for (const k of '145') m = typedGoalTime(m + k);
+    ok(m === '1:45' && parseGoalTime(m, '21k') === 6300 && parseGoalTime(m, '5k') === null, '1-4-5 en la media es 1 h 45');
+  }
   ok(fmtGoalTime(3000) === '50:00' && fmtGoalTime(6330) === '1:45:30', 'formato del tiempo');
 
   ok(makeGoal({ distance: '10k', date: TODAY }, TODAY) === null && makeGoal({ distance: '10k', date: '2028-01-01' }, TODAY) === null, 'fecha fuera de rango (hoy o > 1 año): no vale');
+  // El día de la carrera: la fecha que ya tenías vale aunque sea hoy (para cambiar el tiempo objetivo), una nueva no
+  ok(makeGoal({ distance: '5k', date: TODAY, targetSec: 1650, where: 'cinta' }, TODAY, { keep: TODAY })?.targetSec === 1650, 'el día de la carrera se puede guardar con la fecha que ya tenía');
+  ok(makeGoal({ distance: '5k', date: TODAY }, TODAY, { keep: '2026-12-13' }) === null && makeGoal({ distance: '5k', date: '2020-01-01' }, TODAY, { keep: '2020-01-01' }) === null, 'pero no una fecha nueva de hoy ni una pasada');
+  {
+    const r = deepClone(defaultState());
+    ok(setGoal(r, { distance: '5k', date: TODAY, targetSec: 1500, where: 'cinta' }, '2026-10-25') || true, 'preparación');
+    r.plan.goal = { v: 1, distance: '5k', date: TODAY, targetSec: 1500, setOn: '2026-10-25', where: 'cinta' };
+    ok(setGoal(r, { distance: '5k', date: TODAY, targetSec: 1650, where: 'cinta' }, TODAY) === true && r.plan.goal.targetSec === 1650 && r.plan.goal.setOn === '2026-10-25',
+      'setGoal el día de la carrera: cambia el tiempo y el bloque no se mueve');
+  }
   const d = owner(null);
   ok(setGoal(d, { distance: '10k', date: '2026-12-13', targetSec: null }, '2026-10-20') && d.plan.goal.setOn === '2026-10-20', 'setGoal guarda el día en que se fija');
   setGoal(d, { distance: '10k', date: '2026-12-13', targetSec: 2900 }, TODAY);

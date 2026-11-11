@@ -19,7 +19,7 @@ import { aiAvailable, aiRequest } from '../integrations/ai.js';
 import { planChanges } from '../training/plan-intent.js';
 import {
   goalStatus, goalOf, goalIntro, goalBlock, makeGoal, setGoal, clearGoal, GOAL_DISTANCES, GOAL_STAGES, goalDistance,
-  parseGoalTime, fmtGoalTime, paceText, predictedFor, goalDateRange, raceDateText,
+  parseGoalTime, typedGoalTime, fmtGoalTime, paceText, predictedFor, goalDateRange, raceDateText,
 } from '../training/goal.js';
 import { vamNow } from '../training/levels.js';
 import {
@@ -526,7 +526,10 @@ export function openGoalSheet() {
   const today = todayKey();
   const cur = goalOf(state);
   const live = cur && cur.date >= today ? cur : null;
-  const { min, max } = goalDateRange(today);
+  const { min: minNew, max } = goalDateRange(today);
+  // El día de la carrera aún puedes cambiar el tiempo objetivo: la fecha que ya tenías vale aunque sea hoy
+  const keep = live?.date || null;
+  const min = keep && keep < minNew ? keep : minNew;
   let dist = live?.distance || cur?.distance || '10k';
   let date = live?.date || addDays(mondayOf(addDays(today, 56)), 6);
   let timeRaw = live?.targetSec ? fmtGoalTime(live.targetSec) : '';
@@ -543,13 +546,13 @@ export function openGoalSheet() {
     if (pred) out.push(`Previsión hoy: <b class="num">${fmtGoalTime(pred.fastSec)}–${fmtGoalTime(pred.slowSec)}</b>.`);
     return out.join(' ');
   };
-  const planText = () => esc(goalPlanText(state, makeGoal({ distance: dist, date }, today), today));
+  const planText = () => esc(goalPlanText(state, makeGoal({ distance: dist, date }, today, { keep }), today));
   const refresh = () => {
     if (!sheetEl) return;
     const h = sheetEl.querySelector('[data-goal-hint]');
     if (h) h.innerHTML = hint();
     const p = sheetEl.querySelector('[data-goal-plan]');
-    if (p) p.textContent = goalPlanText(state, makeGoal({ distance: dist, date }, today), today);
+    if (p) p.textContent = goalPlanText(state, makeGoal({ distance: dist, date }, today, { keep }), today);
     const t = sheetEl.querySelector('#pn-goal-time');
     if (t) t.placeholder = `Opcional · ${placeholder(dist)}`;
   };
@@ -565,7 +568,7 @@ export function openGoalSheet() {
           toast(`Revisa el tiempo objetivo (por ejemplo, ${placeholder(dist)})`, { icon: 'info', kind: 'warning' });
           return;
         }
-        if (!makeGoal({ distance: dist, date, targetSec: sec, where }, today)) {
+        if (!makeGoal({ distance: dist, date, targetSec: sec, where }, today, { keep })) {
           haptic('warning');
           toast('Elige una fecha entre mañana y dentro de un año', { icon: 'calendar', kind: 'warning' });
           return;
@@ -622,7 +625,13 @@ export function openGoalSheet() {
         if (e.target?.id === 'pn-goal-date' && e.target.value) { date = e.target.value; refresh(); }
       });
       el.addEventListener('input', (e) => {
-        if (e.target?.id === 'pn-goal-time') { timeRaw = String(e.target.value || '').trim(); refresh(); }
+        if (e.target?.id === 'pn-goal-time') {
+          // el teclado numérico del iPhone no tiene «:»: se teclean las cifras y los dos puntos se ponen solos
+          const typed = typedGoalTime(e.target.value);
+          if (e.target.value !== typed) e.target.value = typed;
+          timeRaw = typed;
+          refresh();
+        }
         if (e.target?.id === 'pn-goal-date' && e.target.value) { date = e.target.value; refresh(); }
       });
       el.addEventListener('keydown', (e) => {
