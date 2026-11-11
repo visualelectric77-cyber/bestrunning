@@ -74,7 +74,8 @@ function readRace(wk, totalSec) {
   const s0 = Math.max(0, Math.min(start, totalSec));
   const e0 = Math.max(s0 + 1, Math.min(end, totalSec));
   const label = String(r.label || `${String(km).replace('.', ',')}K`);
-  return { key: String(r.key || ''), km, label, start: s0, end: e0 };
+  // realSec: tiempo real de carrera que va dando el reproductor (vivo: se lee del objeto original en cada fotograma)
+  return { key: String(r.key || ''), km, label, start: s0, end: e0, get realSec() { return r.realSec; } };
 }
 
 const fmtKm = (km) => (Math.round(km * 100) / 100).toString().replace('.', ',');
@@ -335,8 +336,10 @@ export async function createTheme(ctx) {
       // reloj: cuenta atrás hasta la salida; luego tiempo de carrera; tras la meta, TU tiempo
       let secs = 0;
       if (race) {
-        if (a.clock === 1) secs = t < race.start ? race.start - t : Math.min(t, race.end) - race.start;
-        else if (a.clock === 2) secs = clamp(t - race.start, 0, race.end - race.start);
+        // tiempo de carrera REAL si el reproductor lo da (race.realSec): con la velocidad retocada no es el del plan
+        const run = Number.isFinite(race.realSec) && t >= race.start ? race.realSec : clamp(t - race.start, 0, race.end - race.start);
+        if (a.clock === 1) secs = t < race.start ? race.start - t : run;
+        else if (a.clock === 2) secs = run;
       }
       B.set(secs, a.kind === 1 ? 0.52 : a.style === 'orange' ? 0.3 : 0.34, 0, 0);
       // líneas finas en el asfalto bajo los dos próximos arcos de km
@@ -536,7 +539,7 @@ export async function createTheme(ctx) {
     const im = iMeta;
     // la cámara se planta FIN_D m antes de la meta (sin carrera: donde estabas)
     finS = im >= 0 ? ARCHS[im].s - FIN_D : lastSCam;
-    const secs = race ? race.end - race.start : tl.totalSec;
+    const secs = race ? (Number.isFinite(race.realSec) ? race.realSec : race.end - race.start) : tl.totalSec;
     finTime.userData.setText(fmtRace(secs));
     finSub.userData.setText(race ? `Tu tiempo · ${race.label}` : 'Tu tiempo');
     for (let k = 0; k < SLOTS; k++) { slotArch[k] = -1; slotPrevRel[k] = 1e9; }

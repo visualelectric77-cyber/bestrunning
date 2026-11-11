@@ -8,6 +8,10 @@
 // - Opciones extra de createEngine: treadmill (recorte de velocidades), weightKg (kcal), autoTick (false en tests),
 //   tickMs. Métodos extra: tick() (procesa el reloj ya) y getSegments() (segmentos con velocidades efectivas).
 // - onSegment(state, info) con info = { index, prevIndex, reason:'start'|'auto'|'skip'|'restart'|'test', silent }.
+// - Tramo de CARRERA (segment.race, js/training/race.js): su final es una DISTANCIA, no un tiempo. Si la velocidad
+//   cambia a mitad (tú o la guía de pulso), la posición en la clase avanza en proporción a los metros corridos
+//   (velocidad / velocidad del plan), así que el tramo termina justo al pasar su distancia y el resto de la clase
+//   (voz, música, escena 3D, reloj) sigue la misma línea de tiempo de siempre. El tiempo real va en segRealSec.
 import { round1, clamp, uid, todayKey } from '../core/utils.js';
 import { ZONES, kcalPerMinute, clampSpeed } from '../training/levels.js';
 
@@ -34,6 +38,7 @@ function normalizeSegments(workout) {
       speed: round1(Number(s?.speed) || 0),
       incline: Number(s?.incline) || 0,
       sec: Math.max(0, Number(s?.sec) || 0),
+      ...(s?.race ? { planSpeed: round1(Number(s?.speed) || 0) } : {}),
     }))
     .filter((s) => s.sec > 0);
 }
@@ -78,6 +83,10 @@ function makeEngine(workout, opts, snap) {
   let status = 'ready';
   let segIndex = 0;
   let segElapsed = 0;
+  let segReal = 0;      // segundos reales corridos en el tramo actual (≠ segElapsed solo en un tramo de carrera retocado)
+  let segKm = 0;        // km corridos en el tramo actual
+  let prevSegReal = 0;  // lo mismo del último tramo que se dejó atrás (el tiempo de la carrera al cruzar la meta)
+  let prevSegKm = 0;
   let activeSec = 0;
   let distanceKm = 0;
   let kcal = 0;
@@ -107,6 +116,10 @@ function makeEngine(workout, opts, snap) {
     }
     segIndex = clamp(Math.floor(num(snap.segIndex)), 0, Math.max(0, n - 1));
     segElapsed = clamp(num(snap.segElapsed), 0, segs[segIndex]?.sec ?? 0);
+    segReal = Math.max(0, num(snap.segReal, segElapsed));
+    segKm = Math.max(0, num(snap.segKm, ((segs[segIndex]?.speed || 0) * segElapsed) / 3600));
+    prevSegReal = Math.max(0, num(snap.prevSegReal));
+    prevSegKm = Math.max(0, num(snap.prevSegKm));
     activeSec = Math.max(0, num(snap.activeSec));
     distanceKm = Math.max(0, num(snap.distanceKm));
     kcal = Math.max(0, num(snap.kcal));
@@ -154,11 +167,16 @@ function makeEngine(workout, opts, snap) {
     if (last && last[0] < t) speedTrace.push([t, last[1]]);
   }
 
+  /** Segundos de clase que avanza la posición por cada segundo real: 1, salvo en un tramo de carrera retocado. */
+  const rateOf = (seg) => (seg && seg.race && seg.planSpeed > 0 && seg.speed > 0 ? seg.speed / seg.planSpeed : 1);
+
   function integrate(seg, dt) {
     if (!(dt > 0)) return;
     const before = distanceKm;
     const beforeActive = activeSec;
     activeSec += dt;
+    segReal += dt;
+    segKm += (seg.speed * dt) / 3600;
     distanceKm += (seg.speed * dt) / 3600;
     kcal += (kcalPerMinute(seg.speed, seg.incline, weightKg) * dt) / 60;
     timeInZone[seg.zone] = (timeInZone[seg.zone] || 0) + dt;
@@ -191,8 +209,12 @@ function makeEngine(workout, opts, snap) {
     if (isTest && !testResult && isStage(prevSeg) && i > prevIdx && !isStage(segs[i])) {
       testResult = computeTest(prevIdx, segElapsed);
     }
+    prevSegReal = segReal;
+    prevSegKm = segKm;
     segIndex = i;
     segElapsed = 0;
+    segReal = 0;
+    segKm = 0;
     traceAt(position(), segs[i].speed);
     emit('segment', { index: i, prevIndex: prevIdx, reason, segment: { ...segs[i] } });
     if (i === n - 1 && !lastSegDone) {
@@ -215,10 +237,11 @@ function makeEngine(workout, opts, snap) {
     let guard = 0;
     while (dt > EPS && status === 'running' && guard++ < 100000) {
       const seg = segs[segIndex];
-      const left = seg.sec - segElapsed;
+      const rate = rateOf(seg);
+      const left = (seg.sec - segElapsed) / rate;   // segundos REALES que le quedan al tramo
       if (dt < left - EPS) {
         integrate(seg, dt);
-        segElapsed += dt;
+        segElapsed += dt * rate;
         dt = 0;
       } else {
         integrate(seg, left);
@@ -367,6 +390,8 @@ function makeEngine(workout, opts, snap) {
     } else if (segElapsed > 3 || segIndex === 0) {
       // Reinicia el segmento actual
       segElapsed = 0;
+      segReal = 0;
+      segKm = 0;
       traceAt(position(), segs[segIndex].speed);
       emit('segment', { index: segIndex, prevIndex: segIndex, reason: 'restart', segment: { ...segs[segIndex] } });
     } else {
@@ -459,15 +484,25 @@ function makeEngine(workout, opts, snap) {
     const seg = segs[segIndex] || null;
     const next = segs[segIndex + 1] || null;
     const pos = position();
+    const rate = rateOf(seg);
+    const segLeft = seg ? Math.max(0, seg.sec - segElapsed) : 0;
     return {
       status,
       segIndex,
       segment: seg ? { ...seg } : null,
       nextSegment: next ? { ...next } : null,
       segElapsed,
-      segRemaining: seg ? Math.max(0, seg.sec - segElapsed) : 0,
+      segRemaining: segLeft,
       totalElapsed: pos,
       totalRemaining: Math.max(0, totalSec - pos),
+      // En segundos de reloj (iguales a los de arriba salvo en un tramo de carrera con la velocidad retocada)
+      rate,
+      segRemainingReal: segLeft / rate,
+      totalRemainingReal: Math.max(0, totalSec - pos - segLeft + segLeft / rate),
+      segRealSec: segReal,
+      segKm,
+      prevSegRealSec: prevSegReal,
+      prevSegKm,
       distanceKm,
       kcal,
       currentSpeed: status === 'finished' || !seg ? 0 : seg.speed,
@@ -504,6 +539,10 @@ function makeEngine(workout, opts, snap) {
       status,
       segIndex,
       segElapsed,
+      segReal,
+      segKm,
+      prevSegReal,
+      prevSegKm,
       activeSec,
       distanceKm,
       kcal,
@@ -544,7 +583,10 @@ export function buildSession(workout, engineState, { levels = null, planDate = n
   const totalSec = Number(workout?.totalSec) || Number(es.totalSec) || 0;
   const plannedEffective = Math.max(1, (Number(es.totalSec) || totalSec) - (Number(es.testSkippedSec) || 0));
   const elapsed = Math.max(0, Number(es.activeSec ?? es.totalElapsed) || 0);
-  const pct = clamp(elapsed / plannedEffective, 0, 1);
+  // Lo completado se mide en segundos de CLASE recorridos: en una carrera más rápida que el plan se corre menos tiempo
+  // del previsto y la clase está igual de completa (fuera de la carrera, coincide con lo corrido).
+  const covered = Math.max(0, (Number(es.totalElapsed) || 0) - (Number(es.skippedSec) || 0) - (Number(es.testSkippedSec) || 0));
+  const pct = clamp(Math.max(elapsed, Number.isFinite(Number(es.activeSec)) ? covered : 0) / plannedEffective, 0, 1);
   const start = startedAt || es.startedAt || new Date().toISOString();
   let startDate = new Date(start);
   if (Number.isNaN(startDate.getTime())) startDate = new Date();

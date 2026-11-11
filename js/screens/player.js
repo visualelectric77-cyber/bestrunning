@@ -31,6 +31,7 @@ import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from
 import { diagMark, diagWatch } from '../core/diag.js';
 import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
+import { createRaceGuide } from '../training/race-guide.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -285,6 +286,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   // Lo que ha movido el modo pulso en esta clase, por zona (se guarda como hrCoachAdj: no cuenta como ajuste tuyo)
   const hrCoachAdj = {};
   let vamView = null;         // test VAM: { st, pct } para el bloque de pulso
+  let raceView = null;         // guía de carrera: { pred, hrMax } mientras corres el tramo de carrera (pulso previsto en meta)
   let vamDayHigh = false;
   const cache = {};
   let muted = false;
@@ -475,7 +477,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
      calentamiento; avisos de salida, mitad, último km y meta con el tiempo de carrera. ── */
   const race = workout.race && Number(workout.race.km) > 0 ? workout.race : null;
   const raceIdx = race ? workout.segments.findIndex((x) => x.race) : -1;
-  const raceRun = race ? { startKm: null, startT: null, nextKm: 1, half: false, last: false, done: false, said: false } : null;
+  const raceRun = race ? {
+    startKm: null, startT: null, nextKm: 1, half: false, last: false, done: false, said: false,
+    v: 0, markAt: 0, manualAt: null, manualN: 0, guide: null, guideSaid: false,
+  } : null;
+  // Tiempo real de carrera para el reloj de los arcos y de la meta del escenario (carrera.js lo lee de aquí): si subes
+  // o bajas la velocidad, la carrera dura lo que tardes de verdad en hacer la distancia, no lo que decía el plan.
+  if (race) race.realSec = null;
   let raceResult = null;
   const planKmBefore = (i) => workout.segments.slice(0, i).reduce((a, x) => a + (x.speed * x.sec) / 3600, 0);
   // Reloj: estado de la clase en directo, sus órdenes (cmd) y su pulso. Inerte fuera de la app nativa.
@@ -1879,6 +1887,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       segRemaining: s.segRemaining,
       currentSpeed: s.currentSpeed,
       distanceKm: s.distanceKm,
+      rate: Number(s.rate) > 0 ? Number(s.rate) : 1,
     });
   }
 
@@ -2209,13 +2218,26 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
     if (s.segIndex > raceIdx) {
       raceRun.done = true;
-      const sec = Math.max(0, Math.round(s.totalElapsed - raceRun.startT));
+      // Solo es una carrera si cruzaste la meta: saltarse el tramo con ⏭ no deja marca
+      const km = s.segIndex === raceIdx + 1 ? Number(s.prevSegKm) : NaN;
+      if (!(km >= race.km - 0.02)) { race.realSec = null; return; }
+      // Tiempo REAL hasta la distancia exacta (el tramo acaba unos metros después: se descuentan a la velocidad final)
+      const over = raceRun.v > 0 ? (Math.max(0, km - race.km) / raceRun.v) * 3600 : 0;
+      const sec = Math.max(0, Math.round((Number(s.prevSegRealSec) || 0) - over));
+      race.realSec = sec;
       raceResult = { key: race.key, km: race.km, label: race.label, sec };
       coachCall('say', 'raceFinish', {});
       showBug({ lbl: 'Meta', val: fmt.clock(sec), sub: race.label, color: '#ffd60a', kind: 'race' });
       return;
     }
-    const d = s.distanceKm - raceRun.startKm;
+    const d = Number.isFinite(s.segKm) ? s.segKm : s.distanceKm - raceRun.startKm;
+    raceRun.v = s.currentSpeed || raceRun.v;
+    if (Number.isFinite(s.segRealSec)) race.realSec = s.segRealSec;
+    // Con la velocidad retocada la clase no avanza segundo a segundo: se anota a menudo para alinear luego el pulso
+    if (s.status === 'running' && Number(s.rate) !== 1 && Date.now() - raceRun.markAt >= 15000) {
+      raceRun.markAt = Date.now();
+      mark(true, s.totalElapsed);
+    }
     if (!raceRun.last && d >= race.km - 1) {
       raceRun.last = true;
       raceRun.nextKm = Math.max(raceRun.nextKm, Math.ceil(race.km - 1) + 1);
@@ -2747,7 +2769,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
       testEndAt = performance.now();
       sceneEvent('testEnd', { test: d.test || null });
     } else if (type === 'adjust') {
-      sceneEvent('adjust', { speed: d.speed, delta: d.delta });
+      // En el tramo de carrera el mundo ya avanza por metros (el motor mueve la posición a velocidad / plan): si además
+      // se le cambiase la velocidad al escenario, contaría el cambio dos veces y los arcos de km no caerían en su sitio.
+      if (race && d.index === raceIdx) { raceRun.markAt = Date.now(); mark(engine?.getState().status === 'running'); }
+      else sceneEvent('adjust', { speed: d.speed, delta: d.delta });
     }
   }
 
@@ -2952,7 +2977,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         } catch { /* sin predicción */ }
       }
     } else if (bpm) st = 'in';
-    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}|${vamView?.st || ''}|${vamView ? Math.round((vamView.pct || 0) * 100) : ''}`;
+    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}|${vamView?.st || ''}|${vamView ? Math.round((vamView.pct || 0) * 100) : ''}|${raceView ? `${raceView.pred}/${raceView.hrMax}` : ''}`;
     if (cache.pulseKey === key) return;
     cache.pulseKey = key;
     // el escenario (Modo visión) late con tu pulso y se tiñe de la zona si vas en ella
@@ -2976,6 +3001,19 @@ export function mount(el, { params = {}, query = {} } = {}) {
       box.dataset.st = vamView.st === 'margin' ? 'in' : vamView.st === 'wait' ? 'wait' : 'high';
       setText('pulseObj', vamView.pct ? `${Math.round(vamView.pct * 100)} % de tu FC máx.` : '');
       setText('pulseSt', VAM_TEXT[vamView.st] || '');
+    }
+    // Carrera: no hay zona que cumplir. La barra enseña con qué pulso cruzarías la meta a este ritmo frente a tu máxima
+    // (la franja buena va de máxima − 8 a máxima) y si te pasas, vas bien o te queda margen.
+    if (raceView && raceView.hrMax) {
+      const rp = Number.isFinite(raceView.pred) ? raceView.pred : null;
+      const rs = rp == null ? 'wait' : rp > raceView.hrMax ? 'high' : rp < raceView.hrMax - 8 ? 'low' : 'in';
+      box.dataset.st = rs;
+      box.style.setProperty('--tz', zones[4]?.color || '#fff');
+      box.style.setProperty('--b0', pos(raceView.hrMax - 8));
+      box.style.setProperty('--bw', `calc(${pos(raceView.hrMax)} - ${pos(raceView.hrMax - 8)})`);
+      if (rp != null) box.style.setProperty('--m', pos(rp));
+      setText('pulseObj', `Tu máxima · ${raceView.hrMax}`);
+      setText('pulseSt', rp == null ? 'Carrera' : rs === 'high' ? `Te pasas · meta ~${rp}` : rs === 'low' ? `Con margen · meta ~${rp}` : `Vas bien · meta ~${rp}`);
     }
   }
 
@@ -3002,7 +3040,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       cache.inclCur = cur;
     }
     const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
-    const left = Math.ceil(s.segRemaining - 1e-6);
+    const left = Math.ceil((s.segRemainingReal ?? s.segRemaining) - 1e-6);
     const nInc = Number(nx?.incline) || 0;
     let st = 'off';
     let txt = '';
@@ -3073,12 +3111,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // queda de clase desde aquí. La posición en la clase sigue en la línea de progreso y en el cursor del perfil.
     const ran = Number.isFinite(s.activeSec) ? s.activeSec : s.totalElapsed;
     setText('elapsed', fmt.clock(Math.floor(ran + 1e-6)));
-    setText('remaining', `−${fmt.clock(Math.ceil(s.totalRemaining - 1e-6))}`);
+    setText('remaining', `−${fmt.clock(Math.ceil((s.totalRemainingReal ?? s.totalRemaining) - 1e-6))}`);
     setScale('topFill', s.progress);
     const seg = s.segment;
     if (seg) {
       setScale('segFill', seg.sec ? s.segElapsed / seg.sec : 0);
-      const left = Math.ceil(s.segRemaining - 1e-6);
+      const left = Math.ceil((s.segRemainingReal ?? s.segRemaining) - 1e-6);
       setRoll('segLeft', fmt.clock(left));
       const final = s.status === 'running' && left <= 3 && !!s.nextSegment;
       const soon = s.status === 'running' && left <= 10 && !!s.nextSegment;
@@ -3311,26 +3349,78 @@ export function mount(el, { params = {}, query = {} } = {}) {
    * · durante un tramo de trabajo, si con esta velocidad vas a acabar fuera de la zona, la que te deja dentro
    *   (cada ≥ 45 s, ±0,5 como mucho, 10 por clase; los arreones cortos nunca suben).
    */
-  function dynTick(st, s, now) {
+  /** Seguidor de tu pulso de hoy (lo comparten el modo pulso de las clases y la guía de carrera). → tracker o null */
+  function dynTrack(st, s, now) {
     const seg = s.segment;
-    if (!seg || s.status !== 'running') { st.dynPos = s.totalElapsed; return; }
+    if (!seg || s.status !== 'running') { st.dynPos = s.totalElapsed; return null; }
     const live = liveHr();
     if (!st.tracker) { st.tracker = createTracker(dynModel); st.load = 0; st.dynPos = s.totalElapsed; st.dynN = 0; st.dynLast = -Infinity; }
-    const dt = Math.max(0, (s.totalElapsed || 0) - (st.dynPos ?? s.totalElapsed));
+    // segundos de reloj: en el tramo de carrera con la velocidad retocada la posición no va segundo a segundo
+    const dt = Math.max(0, (s.totalElapsed || 0) - (st.dynPos ?? s.totalElapsed)) / (Number(s.rate) > 0 ? Number(s.rate) : 1);
     st.dynPos = s.totalElapsed;
+    st.dynClock = (st.dynClock ?? s.totalElapsed) + dt;
     st.load += (Math.max(0, (s.currentSpeed || 0) - 8.5) * dt) / 60;
     const fresh = live && Number(live.bpm) >= 40 && now - (Number(live.at) || 0) <= 15000 && live.at !== st.dynAt;
-    if (fresh) st.dynAt = live.at;
+    if (fresh) { st.dynAt = live.at; st.dynSeen = now; }
     const incl = Number(seg.incline) || 0;
-    st.tracker.step(s.totalElapsed, s.currentSpeed || seg.speed, incl, st.load, fresh ? Number(live.bpm) : null);
-    const tr = st.tracker;
-    if (tr.hr == null) return;
+    st.tracker.step(st.dynClock, s.currentSpeed || seg.speed, incl, st.load, fresh ? Number(live.bpm) : null);
+    return st.tracker.hr == null ? null : st.tracker;
+  }
+
+  /**
+   * Guía de carrera (js/training/race-guide.js): en el tramo de carrera no se busca una zona, sino llegar a la meta
+   * lo antes posible sin pasarte de tu pulso máximo. Con el modelo de tu pulso calcula cómo cruzarías la meta a este
+   * ritmo y baja o sube la velocidad lo justo. Si la corriges tú dos veces, deja de tocarla y solo te avisa.
+   */
+  function raceGuideTick(st, s, now) {
+    const tr = dynTrack(st, s, now);
+    if (!tr || !(now - (st.dynSeen || 0) <= 15000)) return;
+    const pf = getState().profile || {};
+    if (!raceRun.guide) raceRun.guide = createRaceGuide({ hrMax: pf.hrMax || hrMaxFromAge(pf.age || 40) });
+    const tm = getState().treadmill || {};
+    const done = Number(s.segKm) || 0;
+    const r = raceRun.guide.step({
+      nowMs: now, raceSec: Number(s.segRealSec) || 0, doneKm: done, remKm: Math.max(0, race.km - done),
+      speed: s.currentSpeed || s.segment.speed, hr: tr.hr, model: dynModel, a: tr.a, load: st.load,
+      starter: !!dynModel.starter, minSpeed: tm.minSpeed ?? 1, maxSpeed: tm.maxSpeed ?? 20, manualAtMs: raceRun.manualAt,
+    });
+    raceView = { pred: raceRun.guide.predicted, hrMax: pf.hrMax || hrMaxFromAge(pf.age || 40) };
+    if (!r) return;
+    const delta = fmt.speed(r.tenths / 10);
+    const adviseOnly = raceRun.manualN >= 2 && r.reason !== 'alarm';
+    if (adviseOnly) {
+      diagMark('carrera.aviso', { dir: r.dir, ppm: r.hr, meta: r.predicted });
+      notify(r.dir < 0
+        ? `A este ritmo cruzarías la meta a ${r.predicted} ppm y tu máxima es ${r.hrMax}. Para llegar, baja ${delta} km/h`
+        : `Vas con margen: cruzarías la meta a ${r.predicted} ppm. Puedes subir ${delta} km/h`, { icon: 'heart', duration: 7000 });
+      return;
+    }
+    let applied = 0;
+    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm' })) applied++;
+    if (!applied) return;
+    const zone = s.segment.zone;
+    hrCoachAdj[zone] = Math.round(((hrCoachAdj[zone] || 0) + r.dir * applied / 10) * 10) / 10;
+    diagMark('carrera.guia', { dir: r.dir, kmh: applied / 10, ppm: r.hr, meta: r.predicted, motivo: r.reason });
+    const got = fmt.speed(applied / 10);
+    notify(r.reason === 'alarm'
+      ? `Pulso muy alto (${r.hr}, tu máxima es ${r.hrMax}): bajamos ${got} km/h`
+      : r.dir < 0
+        ? `A este ritmo cruzarías la meta a ${r.predicted} ppm y tu máxima es ${r.hrMax}: bajamos ${got} km/h para llegar`
+        : `Vas con margen (cruzarías la meta a ${r.predicted} ppm): subimos ${got} km/h`, { icon: 'heart', duration: 6500 });
+  }
+
+  function dynTick(st, s, now) {
+    const seg = s.segment;
+    const tr = dynTrack(st, s, now);
+    if (!tr) return;
+    const incl = Number(seg.incline) || 0;
     const tm = getState().treadmill || {};
     const lims = { minSpeed: tm.minSpeed ?? 1, maxSpeed: tm.maxSpeed ?? 20 };
     const lead = clamp(Number(tm.announceLead) || 10, 3, 30);
     // 1 · el tramo que viene
     const nx = s.nextSegment;
-    if (nx && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
+    // (el tramo de carrera sale a tu ritmo objetivo: no se ajusta a una zona de pulso)
+    if (nx && !nx.race && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
       st.recSeg = s.segIndex;
       let target = null;
       try { target = segHrTarget(nx); } catch { target = null; }
@@ -3431,6 +3521,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // Test VAM: asistencia por pulso, pero ninguna velocidad cambia (ni en el calentamiento)
     if (workout.isTest) { if (engine && !countingDown) { try { vamTick(st, s, now); } catch (err) { reportOnce(err); } } return; }
     if (off || !engine || countingDown || s.inTestStage) return;
+    // Tramo de carrera: ni zona ni modo pulso de clase; la guía de carrera (o nada, si aún no hay modelo de tu pulso)
+    if (race && s.segIndex === raceIdx) {
+      if (dynModel) { try { raceGuideTick(st, s, now); } catch (err) { reportOnce(err); } }
+      return;
+    }
+    if (raceView) { raceView = null; cache.pulseKey = ''; }
     if (dynModel) { try { dynTick(st, s, now); } catch (err) { reportOnce(err); } } else {
       try { recoveryCheck(st, s, now); } catch (err) { reportOnce(err); }
     }
@@ -3481,6 +3577,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (s0.inTestStage || (s0.status !== 'running' && s0.status !== 'paused')) return false;
     if (s0.status === 'running') showCtl();
     const changed = engine.adjustSpeed(dir * 0.1);
+    if (changed && sayKind === 'adjust' && raceRun && s0.segIndex === raceIdx) {
+      // dos toques seguidos (0,2) cuentan como un solo cambio tuyo
+      if (!raceRun.manualAt || Date.now() - raceRun.manualAt > 20000) raceRun.manualN++;
+      raceRun.manualAt = Date.now();
+    }
     if (!changed) {
       haptic('warning');
       const n = refs.speed;

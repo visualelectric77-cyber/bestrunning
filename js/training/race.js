@@ -2,6 +2,9 @@
 // la carrera de verdad: calentamiento, unos progresivos, la línea de salida, la carrera medida en KILÓMETROS a tu ritmo
 // objetivo (termina justo al pasar la distancia, no por tiempo) y la vuelta a la calma. El escenario 3D «carrera» lee
 // workout.race = { key, km, label, start, end } (segundos de clase) para poner la salida, los arcos de cada km y la meta.
+// Si subes o bajas la velocidad en carrera, el motor (js/player/engine.js) hace avanzar el tramo por metros y no por
+// segundos: la meta llega siempre al pasar la distancia y el tiempo que se guarda es el real. Con pulso en directo, la
+// guía de carrera (race-guide.js) calcula con qué pulso cruzarías la meta y te sube o te baja lo justo.
 //
 // Id estable (como el resto de clases, para el reproductor, la sesión a medias y el historial):
 //   race-<5k|10k|15k|21k>~<minutos>~<décimas de km/h en base 36>~100   p. ej. race-5k~34~36~100 = 5K a 11,4 km/h

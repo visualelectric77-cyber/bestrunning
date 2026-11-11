@@ -908,7 +908,8 @@ export function createNativeBridge(opts = {}) {
       d.inTestStage = !!s.inTestStage;
       const seg = s.segment;
       if (seg) {
-        const left = Math.max(0, num(s.segRemaining));
+        // segundos de reloj (en el tramo de carrera con la velocidad retocada no coinciden con los de la clase)
+        const left = Math.max(0, num(s.segRemainingReal ?? s.segRemaining));
         d.seg = {
           i: int(s.segIndex), n: int(s.segCount), zone: String(seg.zone), label: zoneLabel(seg), short: zoneShort(seg.zone, seg.label),
           kmh: status === 'finished' ? 0 : round1(num(s.currentSpeed, num(seg.speed))), incline: round1(num(seg.incline)),
@@ -918,15 +919,18 @@ export function createNativeBridge(opts = {}) {
         if (x.sub) d.seg.sub = String(x.sub);
         const nx = s.nextSegment;
         if (nx) d.next = { zone: String(nx.zone), label: zoneLabel(nx), kmh: round1(num(nx.speed)), sec: int(nx.sec), dir: dirOf(seg.speed, nx.speed) };
-        try {
-          const t = dayHrTarget(seg.zone, st.profile || {});
-          d.hrTarget = { z: int(t.zone), min: int(t.min), max: int(t.max) };
-        } catch { /* sin perfil */ }
+        // En el tramo de carrera no hay zona que cumplir (la guía de carrera mira tu pulso en meta): el reloj no la pinta
+        if (!seg.race) {
+          try {
+            const t = dayHrTarget(seg.zone, st.profile || {});
+            d.hrTarget = { z: int(t.zone), min: int(t.min), max: int(t.max) };
+          } catch { /* sin perfil */ }
+        }
         const u = usualFor(seg.zone, s.segIndex, st);
         if (u) d.hrUsual = u;
       }
       d.elapsed = round1(num(s.totalElapsed));
-      d.remaining = round1(num(s.totalRemaining));
+      d.remaining = round1(num(s.totalRemainingReal ?? s.totalRemaining));
       d.total = int(s.totalSec);
       d.km = r3(num(s.distanceKm));
       d.kcal = int(s.kcal);
@@ -1183,7 +1187,7 @@ export function createNativeBridge(opts = {}) {
         if (s.status === 'running') {
           const next = s.nextSegment;
           if (s.segIndex !== cdSeg) { cdSeg = s.segIndex; cdLast = 4; }
-          const left = num(s.segRemaining);
+          const left = num(s.segRemainingReal ?? s.segRemaining);
           const k = Math.ceil(left - 1e-6);
           if (next && k >= 1 && k <= 3 && k < cdLast) {
             cdLast = k;

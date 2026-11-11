@@ -367,5 +367,123 @@ section('Robustez', () => {
   ok(true, 'temporizador real se limpia');
 });
 
+section('Carrera en la cinta: el tramo acaba por distancia', () => {
+  // 1 km a 12,0 km/h = 300 s. Con la velocidad retocada, la posición avanza en proporción a los metros.
+  const RACE = () => mkWorkout([
+    { zone: 'warmup', speed: 6.5, incline: 0, sec: 60, label: 'Calentamiento' },
+    { zone: 'fast', speed: 12.0, incline: 0, sec: 300, label: 'Tu 1K', race: true },
+    { zone: 'cooldown', speed: 6.0, incline: 0, sec: 60, label: 'Vuelta a la calma' },
+  ], { race: { key: '1k', km: 1, label: '1K', start: 60, end: 360, speed: 12 } });
+  const T18 = { treadmill: { minSpeed: 1, maxSpeed: 18 } };
+  // Sin tocar nada: igual que siempre
+  {
+    const h = harness(RACE(), T18);
+    h.engine.start();
+    h.advance(60);
+    for (let i = 0; i < 299; i++) h.advance(1);
+    let s = h.engine.getState();
+    ok(s.segIndex === 1 && near(s.segRemaining, 1, 1e-6) && near(s.segRemainingReal, 1, 1e-6) && s.rate === 1, 'sin ajustes: ritmo 1 y un segundo por segundo');
+    h.advance(1.5);
+    s = h.engine.getState();
+    ok(s.segIndex === 2 && near(s.prevSegRealSec, 300, 1e-6) && near(s.prevSegKm, 1, 1e-6), 'sin ajustes: meta a los 300 s y a 1,000 km');
+  }
+  // Más lento a mitad: llega más tarde, pero a la misma distancia
+  {
+    const h = harness(RACE(), T18);
+    h.engine.start();
+    h.advance(60);
+    h.advance(150);                                   // medio km a 12,0
+    for (let i = 0; i < 20; i++) h.engine.adjustSpeed(-0.1); // 10,0 km/h
+    let s = h.engine.getState();
+    ok(s.currentSpeed === 10 && near(s.rate, 10 / 12, 1e-9), 'más lento: la posición avanza a 10/12');
+    ok(near(s.segKm, 0.5, 1e-6) && near(s.segRemainingReal, 180, 1e-6), 'más lento: quedan 0,5 km = 180 s reales');
+    ok(near(s.segRemaining, 150, 1e-6) && near(s.totalRemaining, 210, 1e-6), 'más lento: la línea de tiempo de la clase no cambia');
+    ok(near(s.totalRemainingReal, 240, 1e-6), 'más lento: el tiempo real que queda de clase, sí');
+    h.advance(179);
+    s = h.engine.getState();
+    ok(s.segIndex === 1 && s.segKm < 1, 'más lento: a los 329 s aún no ha llegado');
+    h.advance(1.25);
+    s = h.engine.getState();
+    ok(s.segIndex === 2, 'más lento: pasa a la vuelta a la calma');
+    ok(near(s.prevSegKm, 1, 1e-6), `más lento: la meta cae a 1,000 km (${s.prevSegKm})`);
+    ok(near(s.prevSegRealSec, 330, 1e-6), `más lento: tiempo real de carrera 330 s (${s.prevSegRealSec})`);
+    ok(near(s.totalElapsed, 360.25, 1e-6) && near(s.activeSec, 390.25, 1e-6), 'más lento: posición de clase 360 s, corridos de verdad 390 s');
+    ok(near(s.segRealSec, 0.25, 1e-6) && near(s.segElapsed, 0.25, 1e-6), 'tras la carrera vuelve a ir segundo a segundo');
+    for (let i = 0; i < 70; i++) h.advance(1);
+    ok(h.engine.getState().status === 'finished', 'más lento: la clase acaba');
+    const ses = buildSession(RACE(), h.engine.getState(), {});
+    ok(near(ses.elapsedSec, 450, 1) && ses.completed && ses.completionPct === 1, `más lento: sesión completa con el tiempo real (${ses.elapsedSec})`);
+  }
+  // Más rápido: llega antes
+  {
+    const h = harness(RACE(), T18);
+    h.engine.start();
+    h.advance(60);
+    h.advance(100);
+    for (let i = 0; i < 30; i++) h.engine.adjustSpeed(0.1); // 15,0 km/h
+    const left = (1 - (12 * 100) / 3600) / 15 * 3600;        // 160 s
+    h.advance(left - 0.5);
+    ok(h.engine.getState().segIndex === 1, 'más rápido: medio segundo antes sigue en carrera');
+    h.advance(1);
+    const s = h.engine.getState();
+    ok(s.segIndex === 2 && near(s.prevSegKm, 1, 1e-6) && near(s.prevSegRealSec, 100 + left, 1e-6), `más rápido: meta a 1,000 km en ${100 + left} s`);
+    for (let i = 0; i < 70; i++) h.advance(1);
+    const ses = buildSession(RACE(), h.engine.getState(), {});
+    ok(ses.completed && ses.completionPct === 1 && near(ses.elapsedSec, 60 + 100 + left + 60, 1), `más rápido: clase completa al 100 % aunque dure menos (${ses.completionPct} %, ${ses.elapsedSec} s)`);
+  }
+  // Ajuste antes de la salida (misma zona en un progresivo): también termina en su distancia
+  {
+    const w = mkWorkout([
+      { zone: 'fast', speed: 12.0, incline: 0, sec: 20, label: 'Progresivo' },
+      { zone: 'fast', speed: 12.0, incline: 0, sec: 300, label: 'Tu 1K', race: true },
+      { zone: 'cooldown', speed: 6.0, incline: 0, sec: 60, label: 'Vuelta a la calma' },
+    ]);
+    const h = harness(w, T18);
+    h.engine.start();
+    h.advance(10);
+    h.engine.adjustSpeed(-0.5);
+    h.engine.adjustSpeed(-0.5);
+    h.advance(10.5);
+    ok(h.engine.getState().segIndex === 1 && h.engine.getState().currentSpeed === 11, 'ajuste en el progresivo: la carrera sale a 11,0');
+    h.advance(3600 / 11 - 0.5 + 0.1);
+    const s = h.engine.getState();
+    ok(s.segIndex === 2 && near(s.prevSegKm, 1, 1e-6), 'ajuste previo: meta a 1,000 km');
+  }
+  // Pausa, guardado y vuelta a mitad de carrera
+  {
+    const h = harness(RACE(), T18);
+    h.engine.start();
+    h.advance(60);
+    h.advance(120);
+    for (let i = 0; i < 10; i++) h.engine.adjustSpeed(-0.1); // 11,0
+    h.advance(60);
+    h.engine.pause();
+    const snap = JSON.parse(JSON.stringify(h.engine.snapshot()));
+    const before = h.engine.getState();
+    const clock = { t: 5_000_000 };
+    const r = restoreEngine(snap, RACE(), { now: () => clock.t, autoTick: false, treadmill: T18.treadmill });
+    const s0 = r.getState();
+    ok(near(s0.segKm, before.segKm, 1e-9) && near(s0.segRealSec, before.segRealSec, 1e-9) && near(s0.rate, 11 / 12, 1e-9), 'restaura km y tiempo real del tramo de carrera');
+    r.resume();
+    const need = (1 - s0.segKm) / 11 * 3600;
+    clock.t += (need + 0.2) * 1000; r.tick();
+    const s1 = r.getState();
+    ok(s1.segIndex === 2 && near(s1.prevSegKm, 1, 1e-6) && near(s1.prevSegRealSec, 180 + need, 1e-6), 'tras restaurar: meta a 1,000 km con su tiempo real');
+    // instantánea antigua (sin los campos nuevos): no rompe
+    const old = { ...snap }; delete old.segReal; delete old.segKm; delete old.prevSegReal; delete old.prevSegKm;
+    const r2 = restoreEngine(old, RACE(), { now: () => clock.t, autoTick: false, treadmill: T18.treadmill });
+    ok(Number.isFinite(r2.getState().segKm) && Number.isFinite(r2.getState().segRealSec), 'instantánea antigua: valores finitos');
+  }
+  // Una clase normal no cambia: ritmo 1 siempre
+  {
+    const h = harness(BASIC);
+    h.engine.start();
+    h.advance(70);
+    h.engine.adjustSpeed(0.3);
+    const s = h.engine.getState();
+    ok(s.rate === 1 && near(s.segRemainingReal, s.segRemaining, 1e-9) && near(s.totalRemainingReal, s.totalRemaining, 1e-9), 'clase normal: tiempos reales = tiempos de clase');
+  }
+});
+
 process.stdout.write(`\n${passes} comprobaciones OK, ${failures} fallos\n`);
 process.exit(failures ? 1 : 0);
