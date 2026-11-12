@@ -97,7 +97,8 @@ const SCHEMA = {
   cmd: { name: 'str', from: 'str', dir: opt('int'), delta: opt('num'), value: opt('num'), on: opt('bool'), save: opt('bool'), classId: opt('str') },
   hr: { run: opt('str'), samples: arr(arr('num')), replay: opt('bool') },
   // build 24 (cap 'live-speed'): lo que el reloj calcula que corres (braceo). Orientativo: nunca cambia la clase
-  speed: { run: opt('str'), kmh: opt('num'), km: 'num', cadence: opt('int'), at: 'int', source: 'str' },
+  // moving (build 25): el reloj ya ha comprobado si te mueves de verdad (parado no hay kmh)
+  speed: { run: opt('str'), kmh: opt('num'), km: 'num', cadence: opt('int'), at: 'int', source: 'str', moving: opt('bool') },
   'workout.summary': {
     run: opt('str'), sessionId: opt('str'), startedAt: 'num', endedAt: 'num', uuid: opt('str'), kcalActive: opt('int'), hrAvg: opt('int'),
     hrMax: opt('int'), hrMin: opt('int'), samples: arr(arr('num')), source: 'str',

@@ -18,7 +18,7 @@ import { createEngine, restoreEngine, buildSession } from '../player/engine.js';
 import { requestWakeLock, releaseWakeLock, isWakeLockSupported } from '../player/wakelock.js';
 import { setNowPlaying, bindMediaControls, clearNowPlaying, setPlaybackState, setPosition } from '../player/media-session.js';
 import { logoDataUrl } from '../integrations/share-card.js';
-import { attachPlayer, isNative, post as nativePost } from '../integrations/native-bridge.js';
+import { attachPlayer, isNative, post as nativePost, nativeStatus } from '../integrations/native-bridge.js';
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
@@ -51,14 +51,17 @@ const DEBUG_HR = /[?&]debug=hr(?:&|$)/.test(globalThis.location?.search || '');
 // el ritmo que calcula el Apple Watch, para ver el chip «≈ 10,3» y el aviso de desvío sin correr. Con &cinta=-0.6 (o
 // 'br.debug.speed' = '-0.6') la cinta simulada va 0,6 km/h por debajo de lo que marca la clase. Se puede juntar con el
 // pulso simulado: ?debug=hr&debug=speed. Lo simulado no se guarda en la sesión ni enseña nada a la corrección personal.
+// Con &cinta=parado (o 'br.debug.speed' = 'parado') el reloj simulado hace de alguien quieto moviendo la mano: manda
+// lecturas de 4,2 km/h con cadencia de braceo y el chip debe quedarse en espera («≈–»), sin cifra y sin aviso.
 const DEBUG_SPEED = (() => {
   try {
     const q = globalThis.location?.search || '';
     const ls = globalThis.localStorage?.getItem('br.debug.speed') || '';
     if (!/[?&]debug=speed(?:&|$)/.test(q) && !ls) return null;
+    if (/[?&]cinta=parado(?:&|$)/.test(q) || ls === 'parado') return { offset: 0, still: true };
     const m = /[?&]cinta=(-?\d+(?:[.,]\d+)?)/.exec(q);
     const off = Number(String(m ? m[1] : ls === '1' ? '0' : ls).replace(',', '.'));
-    return { offset: Number.isFinite(off) && Math.abs(off) <= 5 ? off : 0 };
+    return { offset: Number.isFinite(off) && Math.abs(off) <= 5 ? off : 0, still: false };
   } catch { return null; }
 })();
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -305,7 +308,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
   // Ritmo que calcula el Apple Watch (js/training/watch-speed.js): se enseña y se compara con la clase; NUNCA cambia
   // la velocidad de la clase. Se crea al cargar la clase (más abajo), con tu corrección personal si ya se ha aprendido.
   let speedTrack = null;
-  const speedSim = DEBUG_SPEED ? createSpeedSim({ offset: DEBUG_SPEED.offset }) : null;
+  const speedSim = DEBUG_SPEED ? createSpeedSim({ offset: DEBUG_SPEED.offset, still: DEBUG_SPEED.still }) : null;
   let vamView = null;         // test VAM: { st, pct } para el bloque de pulso
   let raceView = null;         // guía de carrera: { pred, hrMax } mientras corres el tramo de carrera (pulso previsto en meta)
   let vamDayHigh = false;
@@ -2973,31 +2976,45 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /**
    * Chip «⌚ ≈10,3» en la línea del ritmo, junto a la velocidad de la clase: lo que el Watch calcula que corres (ya con
-   * tu corrección). Sin fila nueva: solo aparece si el reloj manda lecturas. Ámbar cuando lleva 20 s desviado.
+   * tu corrección). Sin fila nueva. Sale desde el principio de la clase si la app nativa puede mandarlo (reloj en la
+   * app y build 24 o posterior), en espera («≈–», apagado) hasta que el reloj te ve andar o correr: parado no marca
+   * nada. Ámbar cuando lleva 20 s desviado de lo que marca la clase.
    */
   function renderEst() {
     const box = refs.est;
     if (!box || !speedTrack) return;
     const v = speedTrack.view(Date.now());
-    const show = !!v;
+    const show = !!v || speedExpected();
     if (box.hidden === show) { box.hidden = !show; scheduleHudRects(); }
-    if (!v) return;
-    setText('estV', v.kmh != null ? `≈${fmt.speed(v.kmh)}` : '≈–');
-    const st = v.off ? 'off' : '';
+    if (!show) return;
+    const kmh = v?.kmh ?? null;
+    setText('estV', kmh != null ? `≈${fmt.speed(kmh)}` : '≈–');
+    const st = kmh == null ? 'wait' : v.off ? 'off' : '';
     if (cache.estSt !== st) { cache.estSt = st; box.dataset.st = st; }
-    const lbl = v.kmh != null
-      ? `Estimado por el Watch: ${fmt.speed(v.kmh)} kilómetros por hora`
-      : 'Estimado por el Watch: sin lectura ahora';
+    const lbl = kmh != null
+      ? `Estimado por el Watch: ${fmt.speed(kmh)} kilómetros por hora`
+      : 'Estimado por el Watch: esperando a que andes o corras';
     if (cache.estLbl !== lbl) { cache.estLbl = lbl; box.setAttribute('aria-label', lbl); }
+  }
+
+  /** ¿Puede llegar el ritmo del Watch en esta clase? El reloj simulado, o la app nativa con el reloj y la build 24+. */
+  function speedExpected() {
+    if (speedSim) return true;
+    if (!isNative()) return false;
+    try {
+      return !!nb.watchManaged?.() && (nativeStatus()?.caps || []).includes('live-speed');
+    } catch { return false; }
   }
 
   /** Toque en el chip: el detalle (ritmo, distancia y cadencia que calcula el Watch), unos segundos. */
   function showEstDetail() {
     const v = speedTrack?.view(Date.now());
-    if (!v) return;
-    const parts = [];
-    if (v.kmh != null) parts.push(`${fmt.speed(v.kmh)} km/h`, `${fmtPaceKmh(v.kmh)} min/km`);
-    parts.push(`${fmt.km(v.km)} km`);
+    if (!v || v.kmh == null) {
+      const km = v && v.km > 0 ? ` Lleva contados ${fmt.km(v.km)} km.` : '';
+      notify(`El Watch calcula tu ritmo por el braceo: sale a los pocos segundos de ponerte a andar o correr. Parado no marca nada.${km}`, { icon: 'watch', duration: 6000 });
+      return;
+    }
+    const parts = [`${fmt.speed(v.kmh)} km/h`, `${fmtPaceKmh(v.kmh)} min/km`, `${fmt.km(v.km)} km`];
     if (v.cadence) parts.push(`${v.cadence} pasos/min`);
     notify(`Estimado por el Watch: ${parts.join(' · ')}. Es orientativo: sale del braceo, no de la cinta.`, { icon: 'watch', duration: 6000 });
   }

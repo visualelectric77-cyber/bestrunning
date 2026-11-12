@@ -3,6 +3,7 @@
 // Uso: node tools/test-watch-speed.mjs   (sale con código ≠ 0 si algo falla)
 import {
   cleanSpeed, tolerance, speedStatus, calFactor, learnFactor, driftText, createSpeedTracker, createSpeedSim,
+  isMoving, plausibleSpeed,
   DRIFT_KMH, DRIFT_SEC, SETTLE_SEC, FACTOR_MIN, FACTOR_MAX,
 } from '../js/training/watch-speed.js';
 
@@ -194,6 +195,116 @@ section('Corrección personal: se aprende solo de clases sin tocar la velocidad'
   ok(calFactor(high) === FACTOR_MAX, `nunca por encima de ${FACTOR_MAX}`);
   ok(calFactor(null) === null && calFactor({ factor: 3, n: 5 }) === null && calFactor({ factor: 'x', n: 5 }) === null, 'calibración rota: como si no hubiera');
   ok(createSpeedTracker({ factor: 3 }).factor() === null && createSpeedTracker({ factor: 0.96 }).calibrated() === true, 'el seguimiento solo acepta correcciones razonables');
+});
+
+section('Parado no marca velocidad (12 nov: salió «≈4,2» sin moverse, con la clase a 9,2)', () => {
+  ok(isMoving({ kmh: 9, cadence: 165 }) && isMoving({ kmh: 4.5, cadence: 105 }) && isMoving({ kmh: 9, cadence: null }), 'andar o correr: te mueves');
+  ok(!isMoving({ kmh: 4.2, cadence: 38 }) && !isMoving({ kmh: 1.5, cadence: 100 }) && !isMoving({ kmh: null, cadence: null }) && !isMoving(null),
+    'braceo sin pasos, casi parado o sin ritmo: no te mueves');
+  ok(!isMoving({ kmh: 2.3, cadence: 96 }) && !isMoving({ kmh: 2.9, cadence: null }) && isMoving({ kmh: 3, cadence: 96 }),
+    'mover las manos (2,3 km/h): por debajo de 3 no es andar en una cinta, aunque la cadencia engañe');
+  ok(!isMoving({ kmh: 9, cadence: 165, moving: false }) && isMoving({ kmh: 9, cadence: 165, moving: true }), 'si el reloj dice que no te mueves (build 25), no te mueves');
+  ok(cleanSpeed({ kmh: 9, km: 1, at: 5, moving: true }).moving === true && cleanSpeed({ kmh: 9, km: 1, at: 5, moving: false }).moving === false
+    && !('moving' in cleanSpeed({ kmh: 9, km: 1, at: 5 })) && !('moving' in cleanSpeed({ kmh: 9, km: 1, at: 5, moving: 'sí' })), 'moving: solo si viene como booleano');
+  ok(plausibleSpeed(9.2, 8.6) && !plausibleSpeed(9.2, 4.2) && !plausibleSpeed(9.2, 16) && plausibleSpeed(5, 4.2) && plausibleSpeed(10, 6),
+    'frente a la clase: 4,2 con la clase a 9,2 no es la cinta a otra velocidad');
+  // feed: lecturas cada 3 s con la clase corriendo a `app` km/h
+  const feed = (tr, S, { n, kmh, cadence, app = 9.2, every = 3000 }) => {
+    let alerts = 0;
+    for (let i = 0; i < n; i++) {
+      S.t += every;
+      S.appKm += (app * every) / 3600000;
+      S.watchKm += ((kmh || 0) * every) / 3600000;
+      const ctx = { t: S.t, appKmh: app, appKm: S.appKm, running: true };
+      tr.tick(ctx);
+      tr.add(cleanSpeed({ kmh, km: S.watchKm, cadence, at: S.t, source: 'watch' }), ctx);
+      if (tr.drift()) alerts++;
+    }
+    return alerts;
+  };
+  // 1) Quieto moviendo la mano: ritmo de 4,2 con cadencia de braceo, dos minutos seguidos
+  const tr = createSpeedTracker({ factor: 1 });
+  const S = fresh();
+  const a1 = feed(tr, S, { n: 40, kmh: 4.2, cadence: 38 });
+  ok(tr.view(S.t).kmh === null && tr.view(S.t).off === false && a1 === 0, `braceo sin pasos: ni cifra ni aviso (${JSON.stringify(tr.view(S.t))})`);
+  // 2) Lecturas sueltas con cadencia de andar, en un tramo de andar (clase a 5): una sola no basta (build 24)
+  const tr2 = createSpeedTracker({ factor: 1 });
+  const S2 = fresh();
+  feed(tr2, S2, { n: 10, kmh: null, cadence: null, app: 5 });
+  feed(tr2, S2, { n: 1, kmh: 4.2, cadence: 100, app: 5 });
+  ok(tr2.view(S2.t).kmh === null, 'una lectura suelta: aún no se enseña');
+  feed(tr2, S2, { n: 1, kmh: null, cadence: null, app: 5 });
+  feed(tr2, S2, { n: 1, kmh: 4.2, cadence: 100, app: 5 });
+  ok(tr2.view(S2.t).kmh === null, 'la racha se corta al pararte: vuelve a empezar');
+  // 2b) Mover las manos: 2,3 km/h, con la cadencia que sea y dure lo que dure, también en un tramo de andar
+  const trH = createSpeedTracker({ factor: 1 });
+  const SH = fresh();
+  const aH = feed(trH, SH, { n: 60, kmh: 2.3, cadence: 96, app: 5 });
+  ok(trH.view(SH.t).kmh === null && aH === 0, `mover las manos (2,3): ni cifra ni aviso (${JSON.stringify(trH.view(SH.t))})`);
+  // 3) Aunque el reloj no dé cadencia y la lectura dure: con la clase a 9,2, un 4,2 no cuadra → sin cifra ni aviso
+  const tr3 = createSpeedTracker({ factor: 1 });
+  const S3 = fresh();
+  const a3 = feed(tr3, S3, { n: 60, kmh: 4.2, cadence: null });
+  ok(tr3.view(S3.t).kmh === null && a3 === 0, `4,2 sostenido con la clase a 9,2: no se enseña ni avisa (${a3})`);
+  ok(tr3.classRatio() === null && tr3.summary().ratio === undefined, 'y de eso no se aprende nada');
+  // 4) Andando de verdad en un tramo de andar (clase a 5): sí se enseña, a partir de la tercera lectura
+  const tr4 = createSpeedTracker({ factor: 1 });
+  const S4 = fresh();
+  feed(tr4, S4, { n: 1, kmh: 4.8, cadence: 108, app: 5 });
+  ok(tr4.view(S4.t).kmh === null, 'andando: la primera lectura aún no');
+  feed(tr4, S4, { n: 1, kmh: 4.8, cadence: 108, app: 5 });
+  ok(tr4.view(S4.t).kmh === 4.8, `andando: a la segunda, la cifra (${tr4.view(S4.t).kmh})`);
+  // 5) Corriendo y te agarras a la barra (el reloj cae a 3): la cifra desaparece y no hay aviso; al soltar, vuelve
+  const tr5 = createSpeedTracker({ factor: 1 });
+  const S5 = fresh();
+  feed(tr5, S5, { n: 20, kmh: 9.2, cadence: 166 });
+  ok(tr5.view(S5.t).kmh === 9.2, 'corriendo: marca lo de la clase');
+  const a5 = feed(tr5, S5, { n: 20, kmh: 3, cadence: 150 });
+  ok(tr5.view(S5.t).kmh === null && a5 === 0, `agarrado a la barra un minuto: sin cifra y sin aviso (${a5})`);
+  feed(tr5, S5, { n: 2, kmh: 9.1, cadence: 166 });
+  ok(tr5.view(S5.t).kmh === 9.1, 'al soltar: vuelve la cifra');
+  // 6) Un hueco de más de 10 s entre lecturas corta la racha
+  const tr6 = createSpeedTracker({ factor: 1 });
+  const S6 = fresh();
+  feed(tr6, S6, { n: 1, kmh: 9, cadence: 165 });
+  feed(tr6, S6, { n: 1, kmh: 9, cadence: 165, every: 12000 });
+  ok(tr6.view(S6.t).kmh === null, 'hueco de 12 s: la racha empieza de nuevo');
+});
+
+section('Sincronía con el reloj (12 nov: «en el móvil tarda mucho en salir»)', () => {
+  const ctxAt = (t, app = 9.2) => ({ t, appKmh: app, appKm: 1, running: true });
+  // Build 25: el reloj ya ha comprobado que te mueves (moving: true) → la cifra sale con la primera lectura
+  const tr = createSpeedTracker({ factor: 1 });
+  let t = 1_762_927_200_000;
+  tr.tick(ctxAt(t));
+  t += 2500;
+  tr.add(cleanSpeed({ kmh: 9.1, km: 0.01, cadence: 166, at: t, moving: true }), ctxAt(t));
+  ok(tr.view(t).kmh === 9.1, `build 25: la primera lectura ya se enseña (${tr.view(t).kmh})`);
+  // …y si el reloj dice que no te mueves, no hay cifra aunque traiga una
+  t += 2500;
+  tr.add(cleanSpeed({ kmh: 9.1, km: 0.02, cadence: 166, at: t, moving: false }), ctxAt(t));
+  ok(tr.view(t).kmh === null, 'build 25 con moving:false: sin cifra');
+  t += 2500;
+  tr.add(cleanSpeed({ km: 0.02, at: t, moving: false }), ctxAt(t));
+  t += 2500;
+  tr.add(cleanSpeed({ kmh: 9.0, km: 0.03, cadence: 165, at: t, moving: true }), ctxAt(t));
+  ok(tr.view(t).kmh === 9, 'build 25: al volver a moverte, la cifra vuelve con esa misma lectura');
+  // Aun comprobado por el reloj, si no cuadra con la clase no se enseña
+  t += 2500;
+  tr.add(cleanSpeed({ kmh: 4, km: 0.04, cadence: 110, at: t, moving: true }), ctxAt(t));
+  ok(tr.view(t).kmh === null, 'build 25: 4,0 con la clase a 9,2 sigue sin enseñarse');
+  // Build 24 (sin moving, una lectura cada ~5 s): a la segunda lectura
+  const tr24 = createSpeedTracker({ factor: 1 });
+  let u = 1_762_927_200_000;
+  tr24.tick(ctxAt(u));
+  u += 5000;
+  tr24.add(cleanSpeed({ kmh: 9.1, km: 0.01, cadence: 166, at: u }), ctxAt(u));
+  ok(tr24.view(u).kmh === null, 'build 24: la primera lectura aún no');
+  u += 5000;
+  tr24.add(cleanSpeed({ kmh: 9.2, km: 0.02, cadence: 166, at: u }), ctxAt(u));
+  ok(tr24.view(u).kmh === 9.2, 'build 24: a la segunda (~10 s), la cifra');
+  // Si dejan de llegar lecturas (te paras), la cifra se va a los 9 s, no a los 15
+  ok(tr24.view(u + 8000).kmh === 9.2 && tr24.view(u + 9500).kmh === null && tr24.view(u + 9500).fresh === true, 'sin lecturas: la cifra se va a los 9 s');
 });
 
 section('Reloj simulado (?debug=speed)', () => {

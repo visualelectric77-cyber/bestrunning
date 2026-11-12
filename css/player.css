@@ -816,6 +816,8 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .hud-est__ic { display: inline-flex; color: var(--ink2); }
 .hud-est[data-st='off'] { color: #ffd60a; border-color: #ffd60a; }
 .hud-est[data-st='off'] .hud-est__ic { color: #ffd60a; }
+/* En espera (parado, o el reloj aún no te ve correr): el chip está, pero apagado */
+.hud-est[data-st='wait'] { color: var(--ink2); border-color: rgba(255, 255, 255, 0.2); }
 .pl.is-tv .hud-est { display: none; }
 /* Inclinación bajo la zona, solo cuando hay que tocarla: con cuenta atrás antes del cambio («pre») y destacada 6 s al
    cambiar («now»). Ámbar de cuesta (blanco si baja); el resto del tiempo no se ve. */

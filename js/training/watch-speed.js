@@ -35,6 +35,32 @@ const LEARN_RATIO_MAX = 1.25;
 const LEARN_KEEP = 8;
 /** Con cuántas clases ya se usa la corrección. */
 export const FACTOR_MIN_CLASSES = 2;
+/**
+ * Parado no hay velocidad que enseñar. El podómetro del reloj cuenta también el braceo de estar quieto (mover la mano,
+ * coger el móvil): en el iPhone del usuario salió «≈4,2» sin moverse, y «2,3» solo moviendo las manos. Una lectura
+ * solo vale como «te estás moviendo» si trae ritmo (≥ 3 km/h: por debajo nadie anda en una cinta) y, cuando el reloj
+ * da la cadencia, esta es de andar o correr (≥ 70 pasos/min).
+ * Quién lo comprueba: desde la build 25 lo hace el reloj (lecturas cada ~2,5 s, tres seguidas) y lo dice en
+ * `speed.moving`; entonces aquí la cifra se enseña en cuanto llega, sin más esperas. Con la build 24 (sin `moving`,
+ * y con una lectura cada ~5 s) se comprueba aquí: 2 lecturas seguidas, sin huecos de más de 10 s.
+ */
+export const MOVING_MIN_KMH = 3;
+export const MOVING_MIN_CADENCE = 70;
+export const MOVING_STREAK = 2;
+const MOVING_GAP_MS = 10000;
+/**
+ * Con la clase en marcha (≥ 3 km/h), una estimación por debajo del 60 % de lo que marca (o por encima del 160 %) no es
+ * «la cinta va a otra velocidad»: es que no estás en ella (parado, en los laterales, agarrado a la barra). No se
+ * enseña ni cuenta para nada.
+ */
+export const RUN_MIN_KMH = 3;
+/** En el chip, una lectura deja de valer a los 9 s: si te paras, la cifra se va pronto (el reloj hace lo mismo). */
+export const SHOW_FRESH_MS = 9000;
+export const PLAUSIBLE_MIN = 0.6;
+export const PLAUSIBLE_MAX = 1.6;
+/** Para aprender, además, la lectura (sin corregir) tiene que parecerse a la clase: entre el 70 % y el 140 %. */
+const LEARN_PAIR_MIN = 0.7;
+const LEARN_PAIR_MAX = 1.4;
 const MAX_KMH = 30;
 const MAX_STEP_KM = 0.5;      // entre dos lecturas no caben más metros: lectura rota
 const MAX_PAIR_GAP_MS = 12000; // hueco entre lecturas a partir del cual ese trozo no sirve para aprender
@@ -61,6 +87,8 @@ export function cleanSpeed(d) {
     cadence: cad >= 0 && cad <= 260 ? Math.round(cad) : null,
     at: Math.round(at),
     source: typeof d.source === 'string' && d.source ? d.source : 'watch',
+    // build 25: el reloj ya dice si te mueves de verdad (sin el campo, se comprueba aquí)
+    ...(typeof d.moving === 'boolean' ? { moving: d.moving } : {}),
   };
 }
 
@@ -74,6 +102,19 @@ export function speedStatus(classKmh, watchKmh, calibrated) {
   const d = watchKmh - classKmh;
   const tol = tolerance(classKmh, calibrated);
   return d > tol + 1e-9 ? 1 : d < -tol - 1e-9 ? -1 : 0;
+}
+
+/** ¿Esta lectura es de alguien andando o corriendo? (no de estar quieto moviendo el brazo) */
+export function isMoving(sample) {
+  if (!sample || sample.moving === false || sample.kmh == null || !(sample.kmh >= MOVING_MIN_KMH)) return false;
+  return sample.cadence == null || sample.cadence >= MOVING_MIN_CADENCE;
+}
+
+/** ¿Lo que calcula el reloj puede ser la cinta a otra velocidad? (false: no estás corriendo en ella) */
+export function plausibleSpeed(classKmh, watchKmh) {
+  if (!(classKmh >= RUN_MIN_KMH)) return true;
+  const r = watchKmh / classKmh;
+  return r >= PLAUSIBLE_MIN && r <= PLAUSIBLE_MAX;
 }
 
 /** Tu corrección personal (cinta / reloj) si ya hay bastantes clases; si no, null. `cal` = state.watchCal. */
@@ -124,6 +165,10 @@ export function createSpeedTracker(opts = {}) {
   let sA = 0;
   let sMs = 0;
   let touched = false;        // has tocado la velocidad a mano: de esta clase no se aprende
+  // ¿te estás moviendo de verdad? (lecturas seguidas de andar o correr, y creíbles frente a la clase)
+  let streak = 0;
+  let lastMoveT = null;
+  let trust = false;          // la última lectura se puede enseñar, comparar y usar para aprender
   // desvío
   let appKmh = null;
   let running = false;
@@ -185,7 +230,19 @@ export function createSpeedTracker(opts = {}) {
       const appNow = num(ctx.appKm);
       n++;
       if (firstKm == null) firstKm = sample.km;
-      const steady = settledFor(t, LEARN_SETTLE_SEC) && appKmh >= LEARN_MIN_KMH;
+      // ¿Andando o corriendo de verdad? Tres lecturas seguidas así, y que cuadren con lo que pide la clase
+      if (isMoving(sample)) {
+        streak = lastMoveT != null && t - lastMoveT <= MOVING_GAP_MS ? streak + 1 : 1;
+        lastMoveT = t;
+      } else {
+        streak = 0;
+        lastMoveT = null;
+      }
+      // Lo que el reloj ya ha comprobado (build 25, `moving: true`) vale al momento; si no, 2 lecturas seguidas
+      const need = sample.moving === true ? 1 : MOVING_STREAK;
+      trust = streak >= need && (!running || appKmh == null || plausibleSpeed(appKmh, sample.kmh * k));
+      const like = trust && appKmh > 0 && sample.kmh / appKmh >= LEARN_PAIR_MIN && sample.kmh / appKmh <= LEARN_PAIR_MAX;
+      const steady = like && settledFor(t, LEARN_SETTLE_SEC) && appKmh >= LEARN_MIN_KMH;
       if (prev && Number.isFinite(appNow)) {
         const dW = sample.km - prev.km;
         const dA = appNow - prev.appKm;
@@ -202,8 +259,8 @@ export function createSpeedTracker(opts = {}) {
       prev = { km: sample.km, appKm: Number.isFinite(appNow) ? appNow : prev?.appKm ?? 0, t, steady };
       last = { ...sample, rx: t };
 
-      // Desvío: solo con velocidad estable, lectura con ritmo y siempre hacia el mismo lado
-      if (sample.kmh == null || appKmh == null || !settledFor(t, SETTLE_SEC)) { offSince = null; return true; }
+      // Desvío: solo con velocidad estable, moviéndote de verdad y siempre hacia el mismo lado
+      if (!trust || appKmh == null || !settledFor(t, SETTLE_SEC)) { offSince = null; return true; }
       const w = sample.kmh * k;
       const st = speedStatus(appKmh, w, calibrated);
       // «0,5 o más»: el borde también cuenta
@@ -226,13 +283,13 @@ export function createSpeedTracker(opts = {}) {
     },
     /**
      * Lo que se enseña ahora: null si el reloj no ha mandado nada en esta clase.
-     * { kmh (ya corregida; null si no hay lectura fresca o estás parado), raw, km, cadence, calibrated,
-     *   off (lleva ≥ 20 s desviado), dev (km/h frente a la clase), fresh }
+     * { kmh (ya corregida; null si no hay lectura fresca, estás parado o no cuadra con la clase), raw, km, cadence,
+     *   calibrated, off (lleva ≥ 20 s desviado), dev (km/h frente a la clase), fresh }
      */
     view(t) {
       if (!last) return null;
       const fresh = t - last.rx <= SPEED_FRESH_MS;
-      const kmh = fresh && last.kmh != null && last.kmh >= 2 ? r1(last.kmh * k) : null;
+      const kmh = trust && last.kmh != null && t - last.rx <= SHOW_FRESH_MS ? r1(last.kmh * k) : null;
       const off = kmh != null && offSince != null && t - offSince >= DRIFT_SEC * 1000;
       return {
         kmh, raw: fresh ? last.kmh : null, km: r3((firstKm + wKm) * k), cadence: fresh ? last.cadence : null,
@@ -277,9 +334,11 @@ export function createSpeedTracker(opts = {}) {
 /**
  * Reloj simulado para verlo sin correr (?debug=speed en el reproductor): sigue la velocidad de la clase con el
  * retraso de una estimación de verdad, un 4 % por encima (el sesgo medido) y, si se pide, con la cinta puesta a otra
- * velocidad (`offset` km/h frente a la clase). next(ctx) → lectura cada 3 s, o null si aún no toca.
+ * velocidad (`offset` km/h frente a la clase). Con `still`, hace de alguien quieto moviendo la mano: lecturas de 4,2
+ * km/h con cadencia de braceo (lo que salió en el iPhone el 12 nov), que no deben enseñar ninguna cifra.
+ * next(ctx) → lectura cada 3 s, o null si aún no toca.
  */
-export function createSpeedSim({ offset = 0, bias = 1.04, every = 3000 } = {}) {
+export function createSpeedSim({ offset = 0, bias = 1.04, every = 3000, still = false } = {}) {
   let v = null;
   let km = 0;
   let lastAt = null;
@@ -291,6 +350,10 @@ export function createSpeedSim({ offset = 0, bias = 1.04, every = 3000 } = {}) {
       const dt = t - lastAt;
       if (dt < every) return null;
       lastAt = t;
+      if (still) {
+        km += (4.2 * dt) / 3600000;
+        return cleanSpeed({ kmh: 4.2 + 0.2 * Math.sin(t / 5000), km, cadence: 38, at: t, source: 'watch' });
+      }
       const target = Math.max(0, (Number(appKmh) || 0) + offset) * bias;
       v = v == null ? target : v + (target - v) * (1 - Math.exp(-dt / 6000));
       const wob = 0.08 * Math.sin(t / 7000);
