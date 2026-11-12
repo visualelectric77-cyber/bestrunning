@@ -12,7 +12,9 @@
 import { clamp, todayKey, addDays, weekdayOf, mondayOf, daysBetween, weekDates, hashStr, makeRng, roundTo } from '../core/utils.js';
 import { TEMPLATES, getTemplate, templatesFor } from './templates.js';
 import { buildWorkout } from './generator.js';
-import { DEFAULT_LEVELS } from './levels.js';
+import { DEFAULT_LEVELS, isHardEffort, vamNow } from './levels.js';
+import { raceSpeedFor } from './race.js';
+import { PACE_ID, PACE_LABEL, paceSeed, paceStage } from './goal-pace.js';
 import {
   SEASON_WEEKS, MESO_WEEKS, isTestWeekIndex, phaseOfMeso, themeOfMeso, eventOn, templateMeta,
 } from './season.js';
@@ -52,6 +54,24 @@ const PATTERNS = {
   3: { 1: 'H', 2: 'E', 3: 'M', 4: 'H', 5: 'E', we: 'M' },
   4: { 1: 'E', 2: 'M', 3: 'E', 4: 'M', 5: 'E', we: 'M' },
 };
+
+/* ── Entreno exigente (Ajustes › Sobre ti › Exigencia; levels.isHardEffort) ──
+   Para quien quiere mejorar marcas y ya entrena casi a diario: tres sesiones de calidad por semana en vez de una o dos
+   (martes corta y densa, jueves la clave, finde largo con ritmo), sin dos duras seguidas; menos tiempo «suave» obligado;
+   un 10 % más de carga por minuto; y un bloque de carrera que de verdad trabaja lo que pide esa distancia. La descarga
+   de cada cuarta semana y la semana de test no cambian. Sin el modo, el plan es exactamente el de siempre. */
+const HARD_PATTERNS = {
+  1: { 1: 'E', 2: 'H', 3: 'E', 4: 'H', 5: 'E', we: 'M' },
+  2: { 1: 'E', 2: 'H', 3: 'M', 4: 'H', 5: 'E', we: 'H' },
+  3: { 1: 'M', 2: 'H', 3: 'E', 4: 'H', 5: 'E', we: 'H' },
+  4: { 1: 'E', 2: 'M', 3: 'E', 4: 'M', 5: 'E', we: 'M' },
+};
+const HARD_EASY_BAND = [0.66, 0.76];
+const HARD_EASY_HARD_BAND = [0.6, 0.8];
+const HARD_LOAD = 1.1;          // carga por minuto frente al plan normal
+const HARD_GROWTH_MAX = 1.06;   // crecimiento semanal, medido contra la mejor de las últimas semanas normales
+const HARD_GROWTH_HARD = 1.1;
+const HARD_SHORT_MIN = 25;      // una sesión dura de ≤ 25 min tiene que ser densa (series o umbral), no un fartlek suelto
 
 /* Reloj inyectable (solo tests/simulaciones): «hoy» para contar sesiones perdidas. */
 let CLOCK = null;
@@ -193,7 +213,8 @@ function eligible(minutes, incline) {
   const k = `${minutes}|${incline ? 1 : 0}|${TEMPLATES.length}`;
   let list = ELIG.get(k);
   if (!list) {
-    list = TEMPLATES.filter((t) => t.category !== 'test' && templateMeta(t).family !== 'test' && allows(t, minutes) && (!t.requiresIncline || incline));
+    // (`planOnly`: clases que solo coloca el plan en su sitio, como la sesión a ritmo objetivo; nunca al azar)
+    list = TEMPLATES.filter((t) => t.category !== 'test' && !t.planOnly && templateMeta(t).family !== 'test' && allows(t, minutes) && (!t.requiresIncline || incline));
     if (ELIG.size > 64) ELIG.clear();
     ELIG.set(k, list);
   }
@@ -262,13 +283,13 @@ function adaptFor(hx, prev, monday, today) {
 
 const isHard = (r) => r === 'H' || r === 'T';
 
-function rolesFor(info, sch, adapt, prevWeek, monday) {
+function rolesFor(info, sch, adapt, prevWeek, monday, pushy = false) {
   const gw = info.goal || null;
   const isLong = (d) => sch.longs.includes(d);
-  const pat = { ...PATTERNS[info.weekInCycle] };
+  const pat = { ...(pushy ? HARD_PATTERNS : PATTERNS)[info.weekInCycle] };
   // Con objetivo, el jueves es siempre la sesión de ritmo de carrera y el finde la tirada larga (sin intercambios)
-  if (!gw && info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
-  if (!gw && info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
+  if (!pushy && !gw && info.weekInCycle === 3 && info.cycleIndex % 2 === 1) [pat[4], pat.we] = [pat.we, pat[4]];
+  if (!pushy && !gw && info.phase.key === 'picos' && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
   // Semana pico antes de afinar: el finde es el ensayo de carrera (duro) y el jueves, ritmo controlado
   if (gw && gw.isLastBuild && info.weekInCycle === 3) { pat.we = 'H'; pat[4] = 'M'; }
   let roles = {};
@@ -373,7 +394,8 @@ function computeWeek(state, W, cache, adapt) {
   const theme = themeOfMeso(info.cycleIndex);
   const prev = W > 0 ? cache[W - 1] : null;
   const gw = info.goal || null;
-  const { roles, testDay } = rolesFor(info, sch, adapt, prev, monday);
+  const pushy = isHardEffort(state?.profile);
+  const { roles, testDay } = rolesFor(info, sch, adapt, prev, monday, pushy);
   const lf = info.nominalLoad;
   const rng = makeRng(hashStr(`season|${monday}|${adapt.sig}`));
 
@@ -412,7 +434,8 @@ function computeWeek(state, W, cache, adapt) {
     days[w] = { date, w, role, minutes, long, kind: role === 'T' ? 'test' : long ? 'long' : 'short', surprise: false, event: null };
     train.push(days[w]);
   }
-  const surpriseDay = gw && gw.stage !== 'build' ? null
+  // (entreno exigente con carrera: en las semanas de construcción no hay día «sorpresa»; cada sesión tiene su papel)
+  const surpriseDay = gw && (gw.stage !== 'build' || pushy) ? null
     : (sch.classic ? [3, 5, 2, 1] : [3, 5, 2, 1, 6, 7, 4]).map((w) => days[w]).find((d) => d && d.role && d.role !== 'T' && d.role !== 'H') || null;
   let eventDay = null;
   for (let w = 1; w <= 7 && !eventDay; w++) {
@@ -448,6 +471,7 @@ function computeWeek(state, W, cache, adapt) {
   let target = info.isDeload
     ? (prevLoad ? prevLoad * dRatio : totalMin * 0.92)
     : totalMin * phase.lpm[info.weekInCycle - 1] * growth;
+  if (pushy && !info.isDeload) target *= HARD_LOAD;
   if (adapt.mode === 'tired') target *= 0.88;
   else if (adapt.mode === 'return') target *= 0.82;
   else if (adapt.mode === 'fresh') target *= 1.04;
@@ -472,6 +496,17 @@ function computeWeek(state, W, cache, adapt) {
     capHard = ref * hard;
     if (!info.isDeload) { cap = Math.min(cap, prevLoad * GROWTH_MAX); capHard = Math.min(capHard, prevLoad * GROWTH_HARD); }
     if (info.isDeload) target = Math.min(target, ref * dRatio);
+    // Entreno exigente: el crecimiento se mide contra la mejor de las tres últimas semanas que no fueron de descarga.
+    // Así una semana de test (más ligera) no deja a la siguiente, que debería ser la de más carga, por debajo de las de antes.
+    if (pushy && !info.isDeload && adapt.mode === 'normal' && adapt.missed < 2) {
+      let top = prevLoad;
+      for (let i = W - 2; i >= Math.max(0, W - 4); i--) {
+        const x = cache[i];
+        if (x && !x.info.isDeload && x.adapt.mode !== 'return' && x.adapt.mode !== 'tired') top = Math.max(top, x.load);
+      }
+      cap = top * HARD_GROWTH_MAX;
+      capHard = top * HARD_GROWTH_HARD;
+    }
   }
   if (cap && !info.isDeload) target = Math.min(target, cap * 0.98);
 
@@ -479,11 +514,17 @@ function computeWeek(state, W, cache, adapt) {
     // Reparto del objetivo por día según su papel (para puntuar candidatos por carga y tiempo suave)
     const LPM = { E: 0.92, M: 1.25, H: 1.6, T: 2.2 };
     const SHARE = { E: 0.95, M: 0.78, H: 0.62, T: 0.5 };
-    const kTarget = target / Math.max(1, train.reduce((a, d) => a + LPM[d.role] * d.minutes, 0));
+    // Entreno exigente: la sesión dura corta tiene que ser densa (más carga por minuto y la mitad del tiempo en ritmo)
+    const dense = (d) => pushy && d.role === 'H' && d.minutes <= HARD_SHORT_MIN;
+    const lpmOf = (d) => (dense(d) ? 2.1 : LPM[d.role]);
+    const shareOf = (d) => (dense(d) ? 0.5 : SHARE[d.role]);
+    const kTarget = target / Math.max(1, train.reduce((a, d) => a + lpmOf(d) * d.minutes, 0));
     // Objetivo: ritmo de carrera en las sesiones de calidad, tirada larga de fondo y ensayo de carrera en la semana pico
     const gd = gw && gw.stage !== 'recovery' ? goalDistance(gw.distance) : null;
     const simDay = gd && gw.isLastBuild && !info.isDeload ? sch.longRun : null;
     const recovering = gw && gw.stage === 'recovery';
+    // Entreno exigente en las semanas de construcción hacia una carrera: manda lo que pide la distancia, no el tema del mes
+    const specific = pushy && gd && gw.stage === 'build';
 
     // Candidatos por día (con siete días de entreno, menos por día: la búsqueda crece muy deprisa)
     const kCands = train.length >= 7 ? 2 : K_CANDS;
@@ -518,29 +559,32 @@ function computeWeek(state, W, cache, adapt) {
         } else if (d.surprise) {
           s += themeHit || famHit ? -3 : 1.5;
           if (famFresh) s += 2.5;
-        } else {
+        } else if (!specific) {
           if (themeHit) s += 3;
           if (famHit) s += 2;
           if (theme.key === 'mixto' && famFresh) s += 1.5;
         }
-        if (phase.families.includes(m.family)) s += 1;
+        if (!specific && phase.families.includes(m.family)) s += 1;
         if (d.w === sch.keyDay && KEY_THU.includes(m.family)) s += 2;
         if (d.w === sch.longRun && KEY_WE.includes(m.family)) s += 1;
         if (d.w === sch.longRun && phase.key === 'picos' && d.role === 'H' && m.family === 'reto') s += 3;
         if (gd) {
-          if (d.role !== 'E' && (d.w === sch.keyDay || sch.keyDay == null || gw.stage !== 'build') && gd.thu.includes(m.family)) s += gw.stage === 'build' ? 3 : 5;
-          if (d.long && d.w === sch.longRun && gw.stage === 'build' && gd.long.includes(m.family)) s += 2.5;
+          if (d.role !== 'E' && (d.w === sch.keyDay || sch.keyDay == null || gw.stage !== 'build') && gd.thu.includes(m.family)) s += specific ? 8 : gw.stage === 'build' ? 3 : 5;
+          if (d.long && d.w === sch.longRun && gw.stage === 'build' && gd.long.includes(m.family)) s += specific ? 6 : 2.5;
+          // la otra sesión dura de la semana (la corta) también trabaja lo de la distancia
+          if (specific && d.role === 'H' && d.w !== sch.keyDay && !d.long && gd.thu.includes(m.family)) s += 4;
           if (d.w === simDay && gd.sim.includes(t.id)) s += 9;
         }
         if (recovering && m.intensity === 'easy') s += 2;
         if (d === focusDay && foc.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 14;
         if (d === keepDay && keepCap.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 3;
         const cn = estimate(t.id, d.minutes, 1, 1, incline);
-        const dayTarget = kTarget * LPM[d.role] * d.minutes;
+        const dayTarget = kTarget * lpmOf(d) * d.minutes;
         s -= 6 * Math.min(1.5, Math.abs(cn.load - dayTarget) / dayTarget);
-        s -= 10 * Math.abs(cn.easy / Math.max(1, cn.total) - SHARE[d.role]);
-      // las clases más ligeras (caminar, técnica) se guardan para las descargas
-      if (cn.load / d.minutes < 0.85) s += info.isDeload ? 1.5 : -3;
+        s -= 10 * Math.abs(cn.easy / Math.max(1, cn.total) - shareOf(d));
+      // las clases más ligeras (caminar, técnica) se guardan para las descargas; con el entreno exigente, nunca en el
+      // día largo de una semana de carga (salía «Marcha en rampa» de 55 min en la semana pico)
+      if (cn.load / d.minutes < 0.85) s += info.isDeload ? 1.5 : pushy && d.long ? -14 : -3;
         s += rng.next() * 0.8;
         const winOk = since == null || since >= win;
       scored.push({ t, m, s, cn, winOk, ok: winOk && dI <= 1 });
@@ -571,8 +615,8 @@ function computeWeek(state, W, cache, adapt) {
     });
 
     // Búsqueda de la mejor combinación de la semana
-    const band = info.isDeload ? DELOAD_EASY_BAND : EASY_BAND;
-    const hardBand = info.isDeload ? DELOAD_EASY_HARD_BAND : EASY_HARD_BAND;
+    const band = info.isDeload ? DELOAD_EASY_BAND : pushy ? HARD_EASY_BAND : EASY_BAND;
+    const hardBand = info.isDeload ? DELOAD_EASY_HARD_BAND : pushy ? HARD_EASY_HARD_BAND : EASY_HARD_BAND;
     let best = null;
     const chosen = [];
     const rec = (i, score, load, easy, total) => {
@@ -683,7 +727,8 @@ const MEMO = new Map();
 function settingsKey(state) {
   const s = sched(state);
   const g = goalSig(state?.plan?.goal);
-  return [startMonday(state), Object.values(s.days).join(','), hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '');
+  return [startMonday(state), Object.values(s.days).join(','), hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '')
+    + (isHardEffort(state?.profile) ? '|exigente' : '');
 }
 
 function weekPicks(state, W) {
@@ -790,15 +835,31 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
     const m = templateMeta(getTemplate(templateId));
     templateId = fallbackPick(state, dateKey, minutes, { family: m.family, intensity: m.intensity });
   }
+  // Entreno exigente con carrera: el día clave de cada semana de construcción es la sesión a tu ritmo objetivo
+  // (js/training/goal-pace.js), que crece de una semana a otra. La semilla lleva distancia, velocidad y etapa.
+  let pace = null;
+  const gwk = week.info?.goal || null;
+  if (!isOverride && templateId && templateId !== TEST_ID && def.role === 'H' && !def.event && gwk && gwk.stage === 'build'
+    && w === sch.keyDay && isHardEffort(state?.profile) && allows(getTemplate(PACE_ID), minutes)) {
+    const g0 = goalOf(state);
+    let vam = null;
+    try { vam = vamNow(state).vam; } catch { vam = null; }
+    const v = g0 ? raceSpeedFor(g0.distance, { targetSec: g0.targetSec, levels: state?.levels, vam }) : null;
+    const stage = paceStage(gwk.buildIndex, gwk.buildWeeks);
+    const sd = v ? paceSeed(g0.distance, v, stage) : null;
+    if (sd) { templateId = PACE_ID; seed = sd; slot = 'key'; pace = { distance: g0.distance, speed: v, stage }; }
+  }
   const g = def.race && !isOverride ? goalOf(state) : null;
   const race = g ? { distance: g.distance, label: goalDistance(g.distance).label, km: goalDistance(g.distance).km, date: g.date, targetSec: g.targetSec, where: g.where } : null;
   return {
-    date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info, race,
+    date: dateKey, weekday: w, kind, slot, templateId, minutes, seed, isOverride, info, race, pace,
     role: kind === 'rest' ? null : def.role ? ROLE_NAME[def.role] : 'easy',
     surprise: !isOverride && !!def.surprise,
     focus: !isOverride && kind !== 'rest' && def.focus ? def.focus : null,   // la sesión de la semana que trabaja tu enfoque
     event: !isOverride && def.event ? { key: def.event.key, name: def.event.name } : null,
-    intro: kind === 'rest' ? '' : isOverride && !def.role ? '' : introFor(info, def, week.adapt),
+    intro: kind === 'rest' ? '' : isOverride && !def.role ? ''
+      : pace ? `Hoy, tu ritmo de ${PACE_LABEL[pace.distance]}: ${String(pace.speed.toFixed(1)).replace('.', ',')} km/h. Apréndetelo: tiene que salir igual el primer bloque que el último.`
+        : introFor(info, def, week.adapt),
   };
 }
 

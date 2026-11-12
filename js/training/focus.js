@@ -28,6 +28,8 @@ const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const clases = (n) => `${n} ${n === 1 ? 'clase' : 'clases'}`;
 const nextMonday = (key) => addDays(mondayOf(key), 7);
+/** ¿Hay una carrera que manda? Solo hasta una semana después de correrla: un objetivo ya pasado no bloquea el enfoque. */
+const goalRules = (state, today) => { const g = goalOf(state); return !!g && g.date >= addDays(today, -7); };
 const emptyFocus = () => ({ current: null, past: [], checked: null });
 
 const validEntry = (e) => !!(e && CAPACITIES[e.capacity] && typeof e.from === 'string' && typeof e.to === 'string');
@@ -155,7 +157,7 @@ export function focusUpdate(state, now = new Date()) {
   const today = todayKey(now);
   const monday = mondayOf(today);
   const f = focusState(state);
-  if (goalOf(state)) return null;                                   // con carrera manda la carrera
+  if (goalRules(state, today)) return null;                         // con carrera manda la carrera
   let { current, past } = f;
   let changed = false;
   // La primera regla elegía «lo que menos destaca» aunque fuese bien (a quien valoraba todo igual le salía siempre Fondo):
@@ -221,7 +223,7 @@ export function focusView(state, now = new Date()) {
   const resultText = last ? (last.result.delta >= IMPROVED
     ? `Tu bloque de ${CAPACITIES[last.capacity].name.toLowerCase()} funcionó: de ${last.result.before} a ${last.result.after}.`
     : `Tu bloque de ${CAPACITIES[last.capacity].name.toLowerCase()} no movió la aguja (${last.result.before} → ${last.result.after}): probamos otro camino.`) : '';
-  if (goalOf(state)) return { state: 'goal', eyebrow: 'Tu enfoque', title: 'Manda tu carrera', text: 'Mientras tengas una carrera, el plan se organiza alrededor de lo que pide esa distancia.', resultText };
+  if (goalRules(state, todayKey(now))) return { state: 'goal', eyebrow: 'Tu enfoque', title: 'Manda tu carrera', text: 'Mientras tengas una carrera, el plan se organiza alrededor de lo que pide esa distancia.', resultText };
   const e = f.current;
   if (!e) {
     const n = itemsBefore(state, addDays(monday, 7)).length;

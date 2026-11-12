@@ -4,6 +4,7 @@
 // Las plantillas NO dependen de weekInCycle/cycleIndex (el id de clase no los incluye): solo de minutos, niveles,
 // carga, inclinación y la semilla.
 import { round1, roundTo, clamp } from '../core/utils.js';
+import { PACE_ID, PACE_LABEL, PACE_PLANS, parsePaceSeed } from './goal-pace.js';
 import { ZONES, LEVEL_KEYS, speedForZone, zoneForSpeed, clampSpeed, vamFromLevels } from './levels.js';
 import { defineExtraTemplates } from './templates-extra.js';
 
@@ -1284,6 +1285,34 @@ T({
     for (const s of segs) if (s.stage == null) s.stage = 0;
     return segs;
   },
+});
+
+// Ritmo objetivo de carrera (js/training/goal-pace.js): solo la pone el plan el día clave de un bloque de carrera con
+// el entreno exigente (`planOnly` la deja fuera del sorteo del plan). La semilla lleva distancia, velocidad y etapa; sin
+// una semilla de las suyas (abierta a mano desde Clases) sale una versión genérica entre «correr» y «rápido».
+T({
+  id: PACE_ID, title: 'Ritmo de carrera', subtitle: 'Series a tu ritmo objetivo', category: 'tempo', focus: 'Ritmo de carrera', durations: [30, 45, 50, 55, 60],
+  planOnly: true, family: 'tempo', themes: [TH.ritmo], intensity: 'hard',
+  description: 'La sesión más específica de tu plan: bloques a la velocidad exacta que pide tu tiempo objetivo, con trote entre ellos. Cada semana del bloque suman más tiempo seguido, hasta hacer de un tirón casi la mitad de la carrera.',
+  coachNotes: ['Este es tu ritmo de carrera: apréndetelo. Tiene que salir igual el primer bloque que el último.', 'No lo corras más rápido aunque te veas bien: hoy se trata de clavarlo.', 'En los trotes, suelta de verdad: el siguiente bloque sale mejor.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const p = parsePaceSeed(ctx.seed);
+    const dist = p?.distance || '10k';
+    const speed = k.spd(clamp(p ? p.speed : k.between(0.5), k.R - 0.3, k.F + 0.2));
+    let [n, w, rest] = PACE_PLANS[dist][p ? p.stage : 1];
+    const lenOf = () => n * w + (n - 1) * rest;
+    while (n > 1 && lenOf() > B) n--;
+    if (lenOf() > B) w = Math.max(180, Math.floor(B / 60) * 60);
+    const label = `Ritmo de ${PACE_LABEL[dist]}`;
+    const out = [k.flex()];
+    for (let i = 0; i < n; i++) {
+      const last = i === n - 1;
+      out.push(W(k.at(speed, w, { label, block: 'Ritmo de carrera', cue: i === 0 ? k.cue('tempo') : last ? k.cue('last') : k.cue('mind') })));
+      if (!last) out.push(k.rec(rest, { cue: i === 0 ? k.cue('recovery') : '' }));
+    }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return numberReps(out);
+  }),
 });
 
 /* ───────────── Contrato de las 39 plantillas originales ───────────── */

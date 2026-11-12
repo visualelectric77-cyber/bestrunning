@@ -455,6 +455,8 @@ function racesCard(s) {
   const vam = safe(() => vo2Data(s).vam, 0);
   const rows = safe(() => predictRaces(vam), []);
   if (!rows.length) return '';
+  // tu última carrera real en la cinta, de la que sale esa VAM cuando es más reciente que el test
+  const real = safe(() => vo2Data(s).now?.race, null);
   const pace = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   return `<div class="card pg-card pg-races">
     <div class="pg-card__head"><div class="eyebrow">Tus marcas estimadas</div></div>
@@ -465,7 +467,7 @@ function racesCard(s) {
         <span class="pg-races__pace num">${pace(r.paceSec)}<small>/km</small></span>
       </div>`).join('')}
     </div>
-    <p class="muted pg-races__note">Según tu VAM de ${fmt.speed(vam)} km/h. El tiempo rápido es con buen día y entrenamiento específico. En la cinta, con un 1 % de inclinación se parece más a correr fuera.</p>
+    <p class="muted pg-races__note">${real ? `Tu ${esc(real.label)} del ${esc(fmt.dateShort(real.date).split(' ').slice(1).join(' '))}: <b class="num">${fmtRaceTime(real.sec)}</b>. ` : ''}Según tu VAM de ${fmt.speed(vam)} km/h. El tiempo rápido es con buen día y entrenamiento específico. En la cinta, con un 1 % de inclinación se parece más a correr fuera.</p>
   </div>`;
 }
 

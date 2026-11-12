@@ -2,8 +2,9 @@
 // Pulso del Apple Watch (SPEC §12): importación vía Atajo + portapapeles, línea de pulso sobre el perfil,
 // zonas de FC y pulso por velocidad; las casillas de media/máxima siguen como alternativa manual.
 import { fmt, esc, clamp, round1, todayKey, capitalize, addDays } from '../core/utils.js';
-import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels, hrMaxFromAge } from '../training/levels.js';
-import { raisedHrMax } from '../training/race-predict.js';
+import { ZONES, LEVEL_KEYS, estimateVo2max, vamFromLevels, hrMaxFromAge, isHardEffort } from '../training/levels.js';
+import { raisedHrMax, measuredHrMax } from '../training/race-predict.js';
+import { raceReport } from '../training/race-report.js';
 import { buildHrModel, sessionHrOffset } from '../training/hr-model.js';
 import { zoneCompliance } from '../training/hr-shape.js';
 import { getState, setState, subscribe, lastPersistOk } from '../core/store.js';
@@ -153,11 +154,39 @@ export function mount(el, { params = {} } = {}) {
       const p = getState().profile || {};
       const cur = p.hrMax || hrMaxFromAge(p.age || 46);
       const nv = hasHrSeries(ses) ? raisedHrMax(cur, ses) : null;
-      if (!nv) return;
+      if (!nv) { suggestHrMax(ses, cur); return; }
       setState((d) => { if (d.profile) d.profile.hrMax = nv; });
       diagMark('fcmax.medida', { de: cur, a: nv });
       later(() => toast(`Tu FC máxima medida es ${nv} ppm: hemos ajustado tus zonas de pulso`, { icon: 'heart', duration: 5200 }), 1200);
     } catch { /* nada */ }
+  }
+  /**
+   * FC máxima que se queda corta: si llegas a ella (o a 2 ppm) y NO ibas al límite, lo normal es que la real sea más
+   * alta. La app sola no puede descubrirlo, porque con esa máxima te frena antes de superarla; por eso lo pregunta,
+   * una vez por sesión. Sube solo si dices que sí, y poco (lo medido + 4); el Test VAM la mide de verdad.
+   */
+  let hrMaxAsking = false;
+  async function suggestHrMax(ses, cur) {
+    try {
+      if (hrMaxAsking || !ses || ses.hrMaxAsked || !hasHrSeries(ses) || ses.isTest) return;
+      if (!['easy', 'ok', 'hard'].includes(ses.feeling)) return;       // sin valorar, o al límite: nada que preguntar
+      const m = measuredHrMax(ses);
+      if (!m || m < cur - 2 || m > cur) return;
+      const nv = m + 4;
+      hrMaxAsking = true;
+      setState((d) => { const h = (d.history || []).find((x) => x.id === ses.id); if (h) h.hrMaxAsked = true; });
+      const yes = await confirmDialog({
+        title: '¿Subimos tu pulso máximo?',
+        message: `Has llegado a ${m} ppm sin ir al límite, y tu FC máxima está puesta en ${cur}. Lo normal es que la real sea más alta. Si la subimos a ${nv}, tus zonas suben un poco y la app te frenará menos. El Test VAM la medirá de verdad.`,
+        confirmText: `Subir a ${nv}`,
+        cancelText: 'Dejarla',
+      });
+      hrMaxAsking = false;
+      if (!yes || disposed) return;
+      setState((d) => { if (d.profile) d.profile.hrMax = nv; });
+      diagMark('fcmax.propuesta', { de: cur, a: nv });
+      toast(`FC máxima: ${nv} ppm. Hemos ajustado tus zonas de pulso`, { icon: 'heart', duration: 4200 });
+    } catch { hrMaxAsking = false; }
   }
   if (session && hasHrSeries(session)) later(() => maybeRaiseHrMax(findSession()), 1500);
   window.addEventListener('br:native-hr', onNativeHr);
@@ -229,6 +258,21 @@ export function mount(el, { params = {} } = {}) {
     const sixth = s.hrAvg
       ? statCell({ label: 'Pulso medio', value: fmt.int(s.hrAvg), unit: 'ppm', count: s.hrAvg, kind: 'int' })
       : statCell({ label: 'Completado', value: String(Math.round(pct * 100)), unit: '%', count: Math.round(pct * 100), kind: 'int' });
+    // Carrera en la cinta: las cifras son las de la CARRERA; el calentamiento y la vuelta a la calma van aparte
+    let rr = null;
+    try { rr = s.race ? raceReport(s, workout?.segments) : null; } catch { rr = null; }
+    const statsHtml = rr
+      ? `${statCell({ label: 'Ritmo', value: fmt.clock(rr.paceSec), unit: '/km' })}
+                ${statCell({ label: 'Vel. media', value: fmt.speed(rr.speed), unit: 'km/h', count: rr.speed, kind: 'speed' })}
+                ${rr.hr
+                  ? statCell({ label: 'Pulso medio', value: fmt.int(rr.hr.avg), unit: 'ppm', count: rr.hr.avg, kind: 'int' })
+                  : statCell({ label: 'Vel. máx.', value: fmt.speed(s.maxSpeed || 0), unit: 'km/h', count: s.maxSpeed || 0, kind: 'speed' })}
+                ${rr.hr
+                  ? statCell({ label: 'Pulso máx.', value: fmt.int(rr.hr.max), unit: 'ppm', count: rr.hr.max, kind: 'int' })
+                  : statCell({ label: 'Distancia', value: fmt.km(rr.km), unit: 'km' })}
+                ${statCell({ label: kcalOf(s).label, value: fmt.int(kcalOf(s).value), count: kcalOf(s).value, kind: 'int' })}
+                ${statCell({ label: 'Sesión', value: fmt.clock(s.elapsedSec || 0), count: s.elapsedSec || 0, kind: 'clock' })}`
+      : '';
 
     el.innerHTML = `
       <div class="sm ${s.completed ? 'sm--done' : ''}">
@@ -261,12 +305,12 @@ export function mount(el, { params = {} } = {}) {
             <div class="sm-main stagger">
             <section class="card sm-stats" style="--i:1">
               <div class="stat-grid">
-                ${statCell({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0), count: s.elapsedSec || 0, kind: 'clock' })}
+                ${statsHtml || `${statCell({ label: 'Tiempo', value: fmt.clock(s.elapsedSec || 0), count: s.elapsedSec || 0, kind: 'clock' })}
                 ${statCell({ label: 'Ritmo medio', value: s.avgSpeed > 0 ? fmt.pace(s.avgSpeed) : '–:––', unit: '/km' })}
                 ${statCell({ label: kcalOf(s).label, value: fmt.int(kcalOf(s).value), count: kcalOf(s).value, kind: 'int' })}
                 ${statCell({ label: 'Vel. media', value: fmt.speed(s.avgSpeed || 0), unit: 'km/h', count: s.avgSpeed || 0, kind: 'speed' })}
                 ${statCell({ label: 'Vel. máx.', value: fmt.speed(s.maxSpeed || 0), unit: 'km/h', count: s.maxSpeed || 0, kind: 'speed' })}
-                ${sixth}
+                ${sixth}`}
               </div>
             </section>
 
@@ -460,7 +504,7 @@ export function mount(el, { params = {} } = {}) {
     const hrN = Array.isArray(s.hrSeries) ? s.hrSeries.length : 0;
     const key = `${s.id}|${s.feeling || ''}|${s.rpe || ''}|${hrN}|${s.debrief?.hrN ?? ''}|${(s.levelChanges || []).length}|${s.debrief?.planChoice || ''}`;
     if (analysisMemo.key !== key) {
-      const debrief = s.debrief && s.debrief.hrN === hrN ? s.debrief : debriefNow(s, st);
+      const debrief = s.debrief && s.debrief.hrN === hrN && !(s.race && s.debrief.kind !== 'race') ? s.debrief : debriefNow(s, st);
       let a = null;
       try { a = classAnalysis(s, { state: st, debrief, segments: workout?.segments || null, showNext: s.dayKey === todayKey() }); } catch { a = null; }
       analysisMemo = { key, a };
@@ -478,7 +522,7 @@ export function mount(el, { params = {} } = {}) {
     const db = debriefNow(s, st);
     if (!db) return;
     let suggest = s.debrief?.suggest || null;
-    if (!suggest && wantsEasierNext(db, s) && !s.debrief?.planChoice) {
+    if (!suggest && wantsEasierNext(db, s, { pushy: isHardEffort(getState().profile) }) && !s.debrief?.planChoice) {
       try { suggest = easierNext(st, s.dayKey); } catch { suggest = null; }
     }
     const next = { ...db, suggest, planChoice: s.debrief?.planChoice || null };
@@ -762,6 +806,7 @@ export function mount(el, { params = {} } = {}) {
     render();
     // Con la sesión ya valorada, los logros se evalúan aquí (si no, al pulsar Guardar)
     if (!wasForm) later(awardAchievements, 1700);
+    later(() => maybeRaiseHrMax(findSession()), 2600);
     return true;
   }
 
@@ -1063,6 +1108,12 @@ export function mount(el, { params = {} } = {}) {
     invalidateCard();
     haptic('success');
     render();
+    // Antes del resultado: si has llegado a tu FC máxima sin ir al límite, se pregunta si subirla (una vez por sesión)
+    try {
+      const pf = getState().profile || {};
+      await suggestHrMax(findSession(), pf.hrMax || hrMaxFromAge(pf.age || 46));
+    } catch { /* sin pregunta */ }
+    if (disposed) return;
     showResult({ changes, newAch, message, testRes, feeling: updated.feeling });
   }
 

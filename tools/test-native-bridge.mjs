@@ -80,6 +80,7 @@ const SCHEMA = {
     hrTarget: opt(HRZ), hrUsual: opt({ lo: 'int', hi: 'int' }), record: opt({ d: 'int', side: 'int', bestKm: 'num', beaten: 'bool' }),
     voice: opt('bool'),
     music: opt({ on: 'bool', app: 'bool', title: opt('str'), artist: opt('str'), bpm: opt('num'), volume: 'num', canSkip: 'bool' }),
+    speedFactor: opt('num'), // build 24: tu corrección reloj → cinta ya aprendida (el reloj la aplica a lo que enseña)
   },
   event: {
     name: 'str', phase: opt('str'), n: opt('int'), seg: opt('int'), dir: opt('str'), kmh: opt('num'), goAt: opt('int'), i: opt('int'),
@@ -95,6 +96,8 @@ const SCHEMA = {
   ack: { ref: 'str', id: 'str', ok: 'bool', reason: opt('str') },
   cmd: { name: 'str', from: 'str', dir: opt('int'), delta: opt('num'), value: opt('num'), on: opt('bool'), save: opt('bool'), classId: opt('str') },
   hr: { run: opt('str'), samples: arr(arr('num')), replay: opt('bool') },
+  // build 24 (cap 'live-speed'): lo que el reloj calcula que corres (braceo). Orientativo: nunca cambia la clase
+  speed: { run: opt('str'), kmh: opt('num'), km: 'num', cadence: opt('int'), at: 'int', source: 'str' },
   'workout.summary': {
     run: opt('str'), sessionId: opt('str'), startedAt: 'num', endedAt: 'num', uuid: opt('str'), kcalActive: opt('int'), hrAvg: opt('int'),
     hrMax: opt('int'), hrMin: opt('int'), samples: arr(arr('num')), source: 'str',
@@ -146,7 +149,8 @@ const DECIMALS = {
   today: { 'segments[].kmh': 1, estKm: 3, recordKm: 3, weekKm: 3 },
   'class.ready': { firstKmh: 1, recordKm: 3 },
   'class.start': { 'segments[].kmh': 1, 'record.bestKm': 3 },
-  state: { 'seg.kmh': 1, 'seg.left': 1, 'seg.adj': 1, 'next.kmh': 1, elapsed: 1, remaining: 1, km: 3, avgKmh: 1, 'record.bestKm': 3, 'music.volume': 2 },
+  state: { 'seg.kmh': 1, 'seg.left': 1, 'seg.adj': 1, 'next.kmh': 1, elapsed: 1, remaining: 1, km: 3, avgKmh: 1, 'record.bestKm': 3, 'music.volume': 2, speedFactor: 3 },
+  speed: { kmh: 1, km: 3 },
   event: { kmh: 1, delta: 1, total: 1, bestKm: 3, km: 3 },
   'class.end': { km: 3, avgKmh: 1, maxKmh: 1 },
 };
@@ -367,6 +371,7 @@ function harness(env, workout, { ghost = null, treadmill = { minSpeed: 1, maxSpe
     engine: null, muted: false, musicOn: true, appMusic, countingDown: false, finale: false, finished: false,
     np: appMusic ? { trackId: 't1', title: 'Better Machine', artist: 'Conathor', bpm: 128 } : null, vol: undefined,
     ghost, ghostSide: 0, canSkip: true, calls: [], session: null, discarded: null, audioLive: undefined,
+    speeds: [], speedFactor: undefined,
   };
   const cb = {
     onTick: (s) => P.nb.tick(s),
@@ -411,8 +416,9 @@ function harness(env, workout, { ghost = null, treadmill = { minSpeed: 1, maxSpe
     extras: () => ({
       muted: P.muted, musicOn: P.musicOn, appMusic: P.appMusic, countingDown: P.countingDown, finale: P.finale, finished: P.finished,
       np: P.np, vol: P.vol, sub: P.engine ? `Tramo ${P.engine.getState().segIndex + 1}/${P.engine.getState().segCount}` : '',
-      ghost: P.ghost, ghostSide: P.ghostSide, canSkip: P.canSkip, audioLive: P.audioLive,
+      ghost: P.ghost, ghostSide: P.ghostSide, canSkip: P.canSkip, audioLive: P.audioLive, speedFactor: P.speedFactor,
     }),
+    onSpeed: (smp) => P.speeds.push(smp),
     commands: {
       start: () => { P.calls.push('start'); P.start(); },
       toggle: () => {
@@ -461,7 +467,7 @@ await section('Safari', async () => {
   ok(globalThis.window.BRNative === undefined, 'Safari: window.BRNative no existe');
   const a = NB.attachPlayer({ workout: W1, getEngine: () => null });
   const methods = ['ready', 'prepare', 'resumed', 'started', 'countdown', 'tick', 'segment', 'event', 'record', 'hrFields', 'finish', 'discard',
-    'samples', 'restore', 'liveHr', 'watchManaged', 'detach'];
+    'samples', 'restore', 'liveHr', 'liveSpeed', 'watchManaged', 'detach'];
   ok(methods.every((m) => typeof a[m] === 'function'), 'Safari: el adaptador vacío tiene todos los métodos');
   let threw = false;
   try {
@@ -470,6 +476,7 @@ await section('Safari', async () => {
   } catch { threw = true; }
   ok(!threw, 'Safari: el adaptador vacío no lanza');
   ok(a.liveHr() === null && a.watchManaged() === false && eq(a.samples(), []) && eq(a.hrFields({}, {}), {}), 'Safari: valores neutros del adaptador vacío');
+  ok(a.liveSpeed() === null && NB.liveSpeed() === null, 'Safari: liveSpeed() es null (en el adaptador vacío y en el módulo)');
   ok(NB.attachPlayer(null) === a, 'Safari: attachPlayer(null) da el mismo adaptador vacío');
   const B = NB.createNativeBridge({ handler: () => null, timers: makeTimers(), now, store: makeStore(baseState()) });
   ok(B.post('state', {}) === false && B.init() === false, 'Safari: una fábrica sin manejador no publica ni arranca');
@@ -1004,6 +1011,64 @@ await section('Pulso en directo', async () => {
   P.nb.detach();
 });
 
+/* ═════════════════ 8b · Ritmo estimado por el reloj (speed, build 24) ═════════════════ */
+
+await section('Ritmo estimado', async () => {
+  const env = newEnv();
+  await env.B.ready();
+  ok(env.B.liveSpeed() === null, 'liveSpeed() = null sin reproductor');
+  ok(env.B.receive({ v: 1, type: 'speed', seq: 1, boot: 'w3f9a0', at: now(), data: { km: 1, kmh: 10, at: now(), source: 'watch' } }) === 'speed',
+    'speed sin reproductor: se atiende y no rompe nada');
+  ok(env.B.liveSpeed() === null, 'speed sin reproductor: no se guarda');
+  const P = harness(env, W1);
+  P.start();
+  P.run(5000);
+  const run = P.engine.getState().startedAt;
+  const speedBefore = P.engine.getState().currentSpeed;
+  const msg = (data, seq = 2) => ({ v: 1, type: 'speed', seq, boot: 'w3f9a0', at: now(), data: { run, source: 'watch', ...data } });
+  const t0 = now() - 800;
+  const first = msg({ kmh: 6.8, km: 0.009, cadence: 152, at: t0 });
+  ok(!envErrors(first).length, `speed de ejemplo cumple el esquema: ${envErrors(first).join(' · ')}`);
+  ok(env.B.receive(JSON.stringify(first)) === 'speed', 'speed llega a su manejador');
+  ok(eq(P.nb.liveSpeed(), { kmh: 6.8, km: 0.009, cadence: 152, source: 'watch', at: t0 }), `liveSpeed() = última lectura (${JSON.stringify(P.nb.liveSpeed())})`);
+  ok(eq(env.B.liveSpeed(), P.nb.liveSpeed()), 'liveSpeed() de la fábrica = la del adaptador');
+  ok(P.speeds.length === 1 && P.speeds[0].kmh === 6.8, 'onSpeed: el reproductor recibe la lectura saneada');
+  ok(P.engine.getState().currentSpeed === speedBefore, 'speed NO cambia la velocidad de la clase');
+  // Otra clase, basura, lecturas viejas o repetidas: fuera
+  env.B.receive(msg({ run: 'otra-clase', kmh: 12, km: 3, at: now() }));
+  env.B.receive(msg({ kmh: 9, km: -1, at: now() }));
+  env.B.receive(msg({ kmh: 9, km: 'x', at: now() }));
+  env.B.receive(msg({ kmh: 9, km: 0.02 }));
+  env.B.receive(msg({ kmh: 9, km: 0.02, at: now() - 31000 }));
+  env.B.receive(msg({ kmh: 9, km: 0.02, at: t0 }));
+  ok(P.speeds.length === 1 && P.nb.liveSpeed().kmh === 6.8, `speed de otra clase, sin km, sin hora, viejo o repetido: se ignora (${P.speeds.length})`);
+  // Ritmo imposible o parado: queda la distancia, sin km/h; cadencia imposible, sin cadencia
+  P.run(3000);
+  env.B.receive(msg({ kmh: 72, km: 0.015, cadence: 400, at: now() }));
+  ok(eq(P.nb.liveSpeed(), { kmh: null, km: 0.015, cadence: null, source: 'watch', at: now() }), `speed con cifras imposibles: solo la distancia (${JSON.stringify(P.nb.liveSpeed())})`);
+  P.run(3000);
+  env.B.receive(msg({ km: 0.021, at: now() }));
+  ok(P.nb.liveSpeed().kmh === null && P.nb.liveSpeed().km === 0.021 && P.speeds.length === 3, 'speed parado (sin kmh): se acepta');
+  P.run(14000);
+  ok(P.nb.liveSpeed() !== null, 'liveSpeed() sigue a los 14 s');
+  P.run(2000);
+  ok(P.nb.liveSpeed() === null, 'liveSpeed() = null pasados 15 s sin lecturas');
+  // speedFactor: solo sale en state si el reproductor lo da y es razonable (0,85…1,15)
+  ok(env.ofType('state').every((m) => m.data.speedFactor === undefined), 'state sin corrección aprendida: sin speedFactor');
+  P.speedFactor = 0.96234;
+  quiet(env);
+  const i0 = env.mark();
+  P.run(1500);
+  const withF = env.ofType('state', i0).pop();
+  ok(withF?.data.speedFactor === 0.962 && !envErrors(withF).length, `state con speedFactor a 3 decimales (${withF?.data.speedFactor}) ${withF ? envErrors(withF).join(' · ') : ''}`);
+  P.speedFactor = 1.4;
+  P.run(1500);
+  ok(env.ofType('state').pop()?.data.speedFactor === undefined, 'speedFactor fuera de 0,85…1,15: no se manda');
+  ok(env.all().every((m) => m.type !== 'speed'), 'la página nunca publica speed');
+  P.nb.detach();
+  ok(env.B.liveSpeed() === null, 'liveSpeed() = null tras soltar el reproductor');
+});
+
 /* ═════════════════ 9 · Equivalencia con el Atajo ═════════════════ */
 
 await section('Equivalencia', async () => {
@@ -1314,7 +1379,7 @@ await section('Fixtures', async () => {
     }
   }
   // Fixtures de Swift (native/Fixtures): pasan por receive() y llegan a su manejador
-  const HANDLED = { 'native.hello': 'status', 'native.status': 'status', hr: 'hr', cmd: 'cmd', 'workout.summary': 'summary', 'backup.data': 'backup', 'audio.kick': 'audio' };
+  const HANDLED = { 'native.hello': 'status', 'native.status': 'status', hr: 'hr', speed: 'speed', cmd: 'cmd', 'workout.summary': 'summary', 'backup.data': 'backup', 'audio.kick': 'audio' };
   const dirs = [FIX_DIR, ...(existsSync(NATIVE_FIX_DIR) ? [NATIVE_FIX_DIR] : [])];
   const env2 = newEnv();
   await env2.B.ready();

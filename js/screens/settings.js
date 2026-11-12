@@ -5,7 +5,7 @@ import { icon, listIcon, navBar, enableCollapsingHeader, toggle, stepper, segmen
 import { haptic } from '../core/haptics.js';
 import {
   ZONES, LEVEL_KEYS, MIN_LEVEL_GAP, hrZones, hrMaxFromAge, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category, enforceLevelOrder,
-  vamNow, vamSourceLabel, vamGapNote,
+  vamNow, vamSourceLabel, vamGapNote, hrTargetForZone,
 } from '../training/levels.js';
 import { sessionTally, sessionsText } from '../training/stats.js';
 import { CATEGORIES } from '../training/templates.js';
@@ -349,7 +349,11 @@ function hrZonesHtml(s) {
 function hrZonesFoot(s) {
   const p = s.profile || {};
   const hrMax = p.hrMax || hrMaxFromAge(p.age || 46);
-  return `${p.hrRest ? `Método Karvonen con FC en reposo de ${p.hrRest}\u00a0ppm` : 'Porcentaje de tu FC máxima'} · FC máx. ${hrMax}\u00a0ppm`;
+  // Con el entreno exigente los techos de «Correr» y «Rápido» son más altos que la zona: se dice aquí, junto a las zonas
+  const pushed = p.effort === 'hard'
+    ? safe(() => ` · Exigente: Correr hasta ${hrTargetForZone('run', p).max} y Rápido hasta ${hrTargetForZone('fast', p).max}\u00a0ppm`, '')
+    : '';
+  return `${p.hrRest ? `Método Karvonen con FC en reposo de ${p.hrRest}\u00a0ppm` : 'Porcentaje de tu FC máxima'} · FC máx. ${hrMax}\u00a0ppm${pushed}`;
 }
 
 // FC en reposo: de dónde sale (Salud · 7 días / a mano) y, si la escribiste a mano, la que da Salud para volver a ella.
@@ -378,6 +382,9 @@ function profileHtml(s) {
       </div>
       ${hrRestRowsHtml(p)}
     `, `La FC máxima se estima con la fórmula de Tanaka (208 − 0,7 × edad). Si la conoces por una prueba de esfuerzo, ponla tal cual. Con la FC en reposo usamos el método Karvonen, más personal.${isNative() ? ' La de reposo se pone al día sola con Salud (mediana de tus últimos 7 días); si la escribes a mano, se queda la tuya. Bórrala para volver a la de Salud.' : ''}`)}
+    ${group('Exigencia', `
+      ${toggleRow('st-effort', 'Entreno exigente', 'Para mejorar marcas: lo duro, más duro; lo suave, igual de suave', p.effort === 'hard')}
+    `, 'En los tramos rápidos y de ritmo la app deja subir más tu pulso antes de bajarte la velocidad (los rápidos, hasta 5 ppm de tu FC máxima), no convierte una sesión dura en suave por un día de pulso alto y sube tus velocidades también cuando valoras «Exigente» y los datos lo respaldan. El pulso sigue mandando: si te pasas de ese techo, te baja. No es un consejo médico: si tienes dudas, consulta antes con tu médico.')}
     <div class="st-group">
       <div class="st-group__title">Tus zonas de pulso</div>
       <div class="list st-hrzones" data-hrzones>${hrZonesHtml(s)}</div>
@@ -2595,6 +2602,10 @@ const PAGES = {
       } else if (id === 'st-sex') {
         haptic('selection');
         ctx.save((d) => { d.profile.sex = v === 'f' ? 'f' : 'm'; });
+      } else if (id === 'st-effort') {
+        haptic('selection');
+        ctx.save((d) => { d.profile.effort = v ? 'hard' : null; });
+        refreshZones();
       } else if (id === 'st-hrmax') {
         ctx.save((d) => { d.profile.hrMax = Math.round(Number(v)) || hrMaxFromAge(d.profile.age || 46); });
         refreshZones();

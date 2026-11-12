@@ -63,6 +63,7 @@ function cleanSegments(workout) {
       block: typeof s?.block === 'string' ? s.block : '',
       rep,
       stage: Math.max(0, Math.round(Number(s?.stage) || 0)),
+      race: !!s?.race,   // tramo de carrera (js/training/race.js): tiene sus avisos propios (salida, mitad, último km, meta)
     });
   });
   return out;
@@ -407,7 +408,7 @@ function buildTtsSchedule(workout, { chattiness = 'normal', announceLead = 10, n
     }
 
     /* 7 · Mitad del entrenamiento */
-    if (!isTest && total >= 600) {
+    if (!isTest && total >= 600 && !segs.some((s) => s.race)) {
       place('halfWorkout', 2, total / 2, total / 2 - 30, total / 2 + 30, simple('halfWorkout', { name: withName(0.35) }), segs[segAt(total / 2)].idx);
     }
 
@@ -423,7 +424,7 @@ function buildTtsSchedule(workout, { chattiness = 'normal', announceLead = 10, n
 
     /* 9 · Mitad de segmentos largos */
     segs.forEach((s, k) => {
-      if (s.sec < 180 || s.zone === 'warmup' || s.zone === 'cooldown') return;
+      if (s.sec < 180 || s.zone === 'warmup' || s.zone === 'cooldown' || s.race) return;
       const mid = starts[k] + s.sec / 2;
       // el texto dice lo que queda desde el instante final del aviso (misma plantilla si se desplaza)
       const build = (at, draft) => {
@@ -501,13 +502,17 @@ function buildTtsSchedule(workout, { chattiness = 'normal', announceLead = 10, n
  */
 function lastBlockIndex(segs, isTest) {
   if (isTest) return -1;
+  // Carrera en la cinta: «último bloque» caía en la vuelta a la calma, con la meta ya cruzada («¡dalo todo!»).
+  // La carrera avisa del último kilómetro por su cuenta.
+  if (segs.some((s) => s.race)) return -1;
   let a = 0;
   while (a < segs.length && segs[a].zone === 'warmup') a++;
   // El trote final del calentamiento (mismo bloque que el calentamiento) no es parte del bloque principal
   const warmBlock = a > 0 ? segs[a - 1].block : null;
   while (warmBlock && a < segs.length && segs[a].block === warmBlock) a++;
   let b = segs.length - 1;
-  while (b >= 0 && segs[b].zone === 'cooldown') b--;
+  // el paseo final también es vuelta a la calma: nunca es «el último bloque»
+  while (b >= 0 && (segs[b].zone === 'cooldown' || segs[b].zone === 'walk')) b--;
   const coolBlock = b < segs.length - 1 ? segs[b + 1].block : null;
   while (coolBlock && b >= 0 && segs[b].block === coolBlock) b--;
   if (b - a < 2) return -1;
@@ -867,7 +872,7 @@ function buildPackSchedule(workout, opts, base, avail) {
     }
 
     /* Mitad del entrenamiento */
-    if (!isTest && total >= 600) {
+    if (!isTest && total >= 600 && !segs.some((s) => s.race)) {
       place('halfWorkout', 2, total / 2, total / 2 - 30, total / 2 + 30, simple('halfWorkout'), segs[segAt(total / 2)].idx);
     }
 
@@ -883,7 +888,7 @@ function buildPackSchedule(workout, opts, base, avail) {
 
     /* Mitad de segmentos largos */
     segs.forEach((s, k) => {
-      if (s.sec < 180 || s.zone === 'warmup' || s.zone === 'cooldown') return;
+      if (s.sec < 180 || s.zone === 'warmup' || s.zone === 'cooldown' || s.race) return;
       const mid = starts[k] + s.sec / 2;
       place('halfSegment', 2, mid, mid - 8, mid + 8, simple('halfSegment'), s.idx);
     });

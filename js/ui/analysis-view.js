@@ -37,6 +37,7 @@ export function classAnalysisHtml(a, { planHtml = '' } = {}) {
       ${ring({ value: ex.score / 100, size: 76, stroke: 7, inner: `<span class="ca-hero__score num">${ex.score}</span>` })}
       <span class="ca-hero__label">${esc(ex.label)}</span>
     </div>` : '';
+  const race = a.race ? raceCardHtml(a.race) : '';
   const checks = a.checks.map((c) => `<div class="ca-check">
       <span class="ca-check__ic ${c.state === 'ok' ? 'is-ok' : 'is-warn'}" aria-hidden="true">${icon(c.state === 'ok' ? 'check' : 'warning', 13, { stroke: 2.6 })}</span>
       <span class="ca-check__txt"><span>${esc(c.label)}</span>${c.sub ? `<small>${esc(c.sub)}</small>` : ''}</span>
@@ -44,11 +45,11 @@ export function classAnalysisHtml(a, { planHtml = '' } = {}) {
     </div>`).join('');
   const hero = `<section class="card ca-card ca-hero" style="--i:2">
     <div class="ca-hero__top">
-      <div class="ca-hero__head"><div class="eyebrow">Tu clase</div><h2 class="ca-hero__title">${esc(a.headline)}</h2></div>
+      <div class="ca-hero__head"><div class="eyebrow">${a.race ? 'Tu carrera' : 'Tu clase'}</div><h2 class="ca-hero__title">${esc(a.headline)}</h2></div>
       ${scoreHtml}
     </div>
     ${a.lead ? `<p class="ca-lead">${esc(a.lead)}</p>` : ''}
-    <div class="ca-checks">${checks}</div>
+    ${checks ? `<div class="ca-checks">${checks}</div>` : ''}
     ${a.goal.purpose ? `<p class="ca-purpose"><b>Buscaba</b> ${esc(a.goal.purpose)}</p>` : ''}
   </section>`;
 
@@ -77,7 +78,54 @@ export function classAnalysisHtml(a, { planHtml = '' } = {}) {
       ${a.nextHint ? `<p class="ca-next__hint">${esc(a.nextHint)}</p>` : ''}` : ''}
     ${planHtml}
   </section>` : '';
-  return hero + cmp + moments + foot;
+  return hero + race + cmp + moments + foot;
+}
+
+/**
+ * Carrera en la cinta (js/training/race-report.js): kilómetro a kilómetro con su tiempo, su velocidad y su pulso, la
+ * recuperación al cruzar la meta y, APARTE, lo que duraron el calentamiento y la vuelta a la calma.
+ */
+export function raceCardHtml(r) {
+  if (!r) return '';
+  const best = r.splits.length ? Math.min(...r.splits.map((x) => x.sec)) : 0;
+  const worst = r.splits.length ? Math.max(...r.splits.map((x) => x.sec)) : 0;
+  const hasHr = r.splits.some((x) => x.hrAvg);
+  const rows = r.splits.map((x) => {
+    // barra: el km más rápido la llena; cada segundo de más la acorta un poco (se ve el reparto de un vistazo)
+    const w = worst > best ? 100 - Math.min(40, ((x.sec - best) / Math.max(1, worst - best)) * 40) : 100;
+    return `<div class="ca-race__row" role="row">
+      <span class="ca-race__km num" role="cell">${x.km}</span>
+      <span class="ca-race__bar" role="presentation"><i style="width:${w.toFixed(0)}%"></i></span>
+      <b class="ca-race__t num" role="cell">${esc(fmt.clock(x.sec))}</b>
+      <span class="ca-race__v num" role="cell">${esc(fmt.speed(x.speed))}</span>
+      ${hasHr ? `<span class="ca-race__hr num" role="cell">${x.hrAvg ?? '–'}</span>` : ''}
+    </div>`;
+  }).join('');
+  const split = r.splits.length ? `<div class="ca-race${hasHr ? ' has-hr' : ''}" role="table" aria-label="Parciales por kilómetro">
+      <div class="ca-race__row ca-race__head" role="row">
+        <span role="columnheader">Km</span><span role="presentation"></span><span role="columnheader">Tiempo</span><span role="columnheader">km/h</span>${hasHr ? '<span role="columnheader">Pulso</span>' : ''}
+      </div>
+      ${rows}
+    </div>` : '';
+  const facts = [];
+  if (r.hr) facts.push({ label: 'Pulso medio', value: String(r.hr.avg), unit: 'ppm' }, { label: 'Pulso máximo', value: String(r.hr.max), unit: 'ppm' });
+  if (r.recovery) facts.push({ label: '1 min tras la meta', value: `−${r.recovery.min1}`, unit: 'ppm' });
+  const factsHtml = facts.length ? `<div class="ca-moments ca-race__facts">${facts.map((m) => `<div class="ca-moment">
+      <span class="ca-moment__label">${esc(m.label)}</span>
+      <span class="ca-moment__value"><b class="num">${esc(m.value)}</b><small>${esc(m.unit)}</small></span>
+    </div>`).join('')}</div>` : '';
+  const part = (label, p) => (p.sec >= 30 ? `<div class="ca-race__part"><span>${esc(label)}</span><b class="num">${esc(fmt.clock(p.sec))} · ${esc(fmt.km(p.km))} km</b></div>` : '');
+  return `<section class="card ca-card" style="--i:2">
+    <div class="ca-card__head"><div class="eyebrow">Kilómetro a kilómetro</div><span class="ca-hint">${esc(fmt.clock(r.paceSec))} /km de media</span></div>
+    ${split}
+    ${factsHtml}
+    <div class="ca-race__parts">
+      <div class="ca-card__head"><div class="eyebrow">Aparte de la carrera</div></div>
+      ${part('Calentamiento', r.warm)}
+      ${part('Vuelta a la calma', r.cool)}
+      <div class="ca-race__part is-total"><span>Toda la sesión</span><b class="num">${esc(fmt.clock(r.total.sec))} · ${esc(fmt.km(r.total.km))} km</b></div>
+    </div>
+  </section>`;
 }
 
 function capitalizeDay(key) {

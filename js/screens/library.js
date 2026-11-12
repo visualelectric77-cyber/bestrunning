@@ -5,6 +5,7 @@ import { icon, navBar, enableCollapsingHeader, workoutCard, chip, segmented, emp
 import { CATEGORIES, TEMPLATES, templatesFor } from '../training/templates.js';
 import { buildWorkout, workoutId } from '../training/generator.js';
 import { buildRaceWorkout, raceSpeedFor } from '../training/race.js';
+import { vamNow } from '../training/levels.js';
 import { goalOf } from '../training/goal.js';
 import { todayKey, esc, hashStr, debounce } from '../core/utils.js';
 
@@ -144,8 +145,11 @@ function featured(state, minutes) {
 /** Carreras en la cinta (5K, 10K, 15K y media) al ritmo de tu objetivo o de tu marca prevista. */
 function raceSection(state) {
   const g = goalOf(state);
+  // el ritmo por defecto sale de la misma VAM que el resto de la app (tu test o tu última carrera real)
+  let raceVam = null;
+  try { raceVam = vamNow(state).vam; } catch { raceVam = null; }
   const ws = ['5k', '10k', '15k', '21k'].map((k) => {
-    const v = raceSpeedFor(k, { targetSec: g && g.distance === k ? g.targetSec : null, levels: state.levels });
+    const v = raceSpeedFor(k, { targetSec: g && g.distance === k ? g.targetSec : null, levels: state.levels, vam: raceVam });
     return v ? buildRaceWorkout(k, { speed: v, levels: state.levels, weightKg: Number(state.profile?.weightKg) || 78 }) : null;
   }).filter(Boolean);
   if (!ws.length) return '';

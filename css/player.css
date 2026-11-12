@@ -791,6 +791,32 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   background: #fff;
   text-shadow: none;
 }
+/* Lo que el Apple Watch calcula que corres (orientativo): chip de contorno en la misma línea del ritmo, sin fila nueva.
+   Solo existe si el reloj manda lecturas; ámbar cuando lleva 20 s desviado de lo que marca la clase. Un toque enseña
+   el detalle (ritmo, distancia, cadencia). */
+.hud-est {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  margin: 0;
+  padding: 3px 8px 3px 6px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.34);
+  border: var(--hairline) solid rgba(255, 255, 255, 0.42);
+  text-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.hud-est[hidden] { display: none; }
+.hud-est__ic { display: inline-flex; color: var(--ink2); }
+.hud-est[data-st='off'] { color: #ffd60a; border-color: #ffd60a; }
+.hud-est[data-st='off'] .hud-est__ic { color: #ffd60a; }
+.pl.is-tv .hud-est { display: none; }
 /* Inclinación bajo la zona, solo cuando hay que tocarla: con cuenta atrás antes del cambio («pre») y destacada 6 s al
    cambiar («now»). Ámbar de cuesta (blanco si baja); el resto del tiempo no se ve. */
 .hud-incl {

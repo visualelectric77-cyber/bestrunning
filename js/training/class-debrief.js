@@ -4,6 +4,7 @@
 import { fmt } from '../core/utils.js';
 import { classInputs, simulate } from './hr-dynamics.js';
 import { zoneCompliance } from './hr-shape.js';
+import { raceReport, raceDebrief } from './race-report.js';
 
 const WORK = new Set(['jog', 'run', 'fast', 'sprint']);
 const HARD_FEEL = new Set(['hard', 'max', 'fail']);
@@ -51,13 +52,19 @@ function speedChanges(session, segments) {
 
 /**
  * → null (tests: tienen su propia tarjeta) o { kind, headline, body, tip, hrN }.
- * kind: 'high' | 'low' | 'onpoint' | 'hard' | 'under' | 'usual' | 'nohr'.
+ * kind: 'high' | 'low' | 'onpoint' | 'hard' | 'under' | 'usual' | 'nohr' | 'race' (carrera en la cinta: race-report.js).
  */
 export function classDebrief(session, { segments = null, model = null, profile = null } = {}) {
   const s = session;
   if (!s || s.isTest) return null;
   const series = Array.isArray(s.hrSeries) ? s.hrSeries : [];
   const hrN = series.length;
+  // Una carrera no se juzga por «estar en tu zona»: se cuenta la carrera (tiempo, reparto y pulso al llegar)
+  if (s.race && Array.isArray(segments)) {
+    let d = null;
+    try { d = raceDebrief(raceReport(s, segments), { hrMax: profile?.hrMax, feeling: s.feeling }); } catch { d = null; }
+    if (d) return { ...d, hrN };
+  }
   const levelDown = (Array.isArray(s.levelChanges) ? s.levelChanges : []).some((c) => num(c.to) < num(c.from));
   const levelUp = (Array.isArray(s.levelChanges) ? s.levelChanges : []).some((c) => num(c.to) > num(c.from));
 
@@ -117,9 +124,14 @@ export function classDebrief(session, { segments = null, model = null, profile =
   return { kind, hrN, headline, body: parts.join(' '), tip };
 }
 
-/** ¿Conviene aligerar lo que viene? Solo tras un día alto o una clase que notaste dura. */
-export function wantsEasierNext(debrief, session) {
-  return !!debrief && !session?.isTest && (debrief.kind === 'high' || HARD_FEEL.has(session?.feeling));
+/**
+ * ¿Conviene aligerar lo que viene? Solo tras un día alto o una clase que notaste dura. Con el entreno exigente
+ * (`pushy`), «Exigente» es lo normal y no basta: hace falta haber ido al límite, no haber podido, o un día alto.
+ */
+export function wantsEasierNext(debrief, session, { pushy = false } = {}) {
+  if (!debrief || session?.isTest) return false;
+  if (debrief.kind === 'high') return true;
+  return pushy ? session?.feeling === 'max' || session?.feeling === 'fail' : HARD_FEEL.has(session?.feeling);
 }
 
 /* ───────── Resumen con IA cuando no hay pulso (tarea 'sessionSummary' del iPhone) ───────── */

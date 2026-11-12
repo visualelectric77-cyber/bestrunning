@@ -54,16 +54,31 @@ section('Te pasas: baja lo justo', () => {
   ok(r && r.dir === -1 && r.reason === 'over' && r.tenths >= 1 && r.tenths <= 3, `baja entre 0,1 y 0,3 (${r?.tenths})`);
   ok(r.predicted === Math.round(p) && g.predicted === Math.round(p) && r.hrMax === MAX, 'cuenta la meta prevista y tu máxima');
   ok(Math.abs(r.to - (12.5 - r.tenths / 10)) < 1e-9, 'velocidad nueva coherente');
-  // lo justo: con una décima menos no llegaba a (máxima − 3), o es el tope de 0,3
-  if (r.tenths > 1) ok(finishHr(M, 40, { hrNow: 170, speed: 12.5 - (r.tenths - 1) / 10, remKm: 3, load: 20 }) > MAX - 3, 'no baja más de lo necesario');
-  if (r.tenths < 3) ok(finishHr(M, 40, { hrNow: 170, speed: r.to, remKm: 3, load: 20 }) <= MAX - 3, 'con lo que baja, llega');
-  // ligeramente pasado → una décima
-  const g2 = createRaceGuide({ hrMax: MAX });
+  // lo justo: con una décima menos no llegaba a tu máxima, o es el tope de 0,3
+  if (r.tenths > 1) ok(finishHr(M, 40, { hrNow: 170, speed: 12.5 - (r.tenths - 1) / 10, remKm: 3, load: 20 }) > MAX, 'no baja más de lo necesario');
+  if (r.tenths < 3) ok(finishHr(M, 40, { hrNow: 170, speed: r.to, remKm: 3, load: 20 }) <= MAX, 'con lo que baja, llega a tope');
+  // pasado por poco (hasta 3 ppm sobre tu máxima: lo que se equivoca el modelo) → no toca nada
   let v = 10;
   while (finishHr(M, 40, { hrNow: 165, speed: v, remKm: 3, load: 20 }) <= MAX + 0.6) v = Math.round((v + 0.1) * 10) / 10;
-  const r2 = g2.step(base({ speed: v, hr: 165 }));
-  ok(r2 && r2.dir === -1 && r2.tenths <= 3, `pasado por poco a ${v}: baja ${r2?.tenths} décimas`);
+  const pv = finishHr(M, 40, { hrNow: 165, speed: v, remKm: 3, load: 20 });
+  if (pv <= MAX + 3) ok(createRaceGuide({ hrMax: MAX }).step(base({ speed: v, hr: 165 })) === null, `pasado por poco (${pv.toFixed(1)} ppm a ${v}): no frena`);
+  // pasado de largo (más de 3 ppm) → baja
+  let w = v;
+  while (finishHr(M, 40, { hrNow: 165, speed: w, remKm: 3, load: 20 }) <= MAX + 3.4) w = Math.round((w + 0.1) * 10) / 10;
+  const g2 = createRaceGuide({ hrMax: MAX });
+  const r2 = g2.step(base({ speed: w, hr: 165 }));
+  ok(r2 && r2.dir === -1 && r2.tenths <= 3, `pasado más de 3 ppm a ${w}: baja ${r2?.tenths} décimas`);
   ok(g.count === 1 && g2.count === 1, 'cuenta los ajustes');
+  // al principio (antes de 4 min o de 1 km) solo baja si se pasa de largo: más de 8 ppm
+  const early = { raceSec: 120, nowMs: 120000, doneKm: 0.4, remKm: 4.6, load: 6, hr: 150 };
+  let e = 10;
+  while (finishHr(M, 40, { hrNow: 150, speed: e, remKm: 4.6, load: 6 }) <= MAX + 4) e = Math.round((e + 0.1) * 10) / 10;
+  const pe = finishHr(M, 40, { hrNow: 150, speed: e, remKm: 4.6, load: 6 });
+  if (pe <= MAX + 8) ok(createRaceGuide({ hrMax: MAX }).step(base({ ...early, speed: e })) === null, `al principio, ${pe.toFixed(1)} ppm previstos no bastan para frenar`);
+  ok(createRaceGuide({ hrMax: MAX }).step(base({ ...early, speed: e, raceSec: 300, nowMs: 300000, doneKm: 1.1, remKm: 4.6 }))?.dir === -1, 'pasados 4 min y 1 km, esa misma previsión sí baja');
+  let f = e;
+  while (finishHr(M, 40, { hrNow: 150, speed: f, remKm: 4.6, load: 6 }) <= MAX + 8.4) f = Math.round((f + 0.1) * 10) / 10;
+  ok(createRaceGuide({ hrMax: MAX }).step(base({ ...early, speed: f }))?.dir === -1, `al principio, pasarse de largo (a ${f}) sí baja`);
 });
 
 section('Calma: primer minuto, entre ajustes y tras un cambio tuyo', () => {
@@ -148,7 +163,7 @@ section('Carrera entera simulada: converge sin pasarse', () => {
     if (r) { actions.push(r); speed = r.to; }
   }
   ok(actions.length >= 2 && actions.length <= 10 && actions.every((a) => a.dir === -1), `baja varias veces y no más de 10 (${actions.length})`);
-  ok(peak <= MAX + 1.5, `no pasa de tu máxima (pico ${peak.toFixed(1)})`);
+  ok(peak <= MAX + 4, `no se pasa de tu máxima más que el margen del modelo (pico ${peak.toFixed(1)})`);
   ok(hr >= MAX - 9, `y llega apurando, no paseando (${hr.toFixed(1)} en meta)`);
   ok(km >= 5 && sec < 1800, `acaba los 5 km (${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')})`);
 });

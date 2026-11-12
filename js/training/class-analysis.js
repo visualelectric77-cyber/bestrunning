@@ -8,6 +8,7 @@ import { isHills } from './hr-model.js';
 import { skippedRanges } from './stats.js';
 import { planDay, countsAsSession } from './planner.js';
 import { workoutFromId } from './generator.js';
+import { raceReport, raceDebrief } from './race-report.js';
 import { fmt, addDays, daysBetween } from '../core/utils.js';
 
 const NB = ' ';
@@ -126,6 +127,8 @@ export function speedAdherence(session, segments) {
  */
 export function executionOf(session, segments, profile) {
   const completion = Math.max(0, Math.min(1, num(session?.completionPct)));
+  // Una carrera terminada no lleva nota: no se trata de ir en una zona ni a la velocidad del plan, sino de la marca
+  if (session?.race && num(session.race.sec) > 0) return { score: null, label: '', completion, zone: null, speed: null, race: true };
   let zone = null;
   try { zone = Array.isArray(session?.hrSeries) && session.hrSeries.length >= 30 ? zoneCompliance(segments, session.hrSeries, profile) : null; } catch { zone = null; }
   const speed = speedAdherence(session, segments);
@@ -410,6 +413,18 @@ export function classAnalysis(session, { state = null, debrief = null, segments 
   const history = Array.isArray(state?.history) ? state.history : [];
   const segs = segments || segmentsOfSession(state, session);
   const profile = state?.profile || {};
+  // Carrera en la cinta: la carrera se cuenta aparte del calentamiento y de la vuelta a la calma (race-report.js)
+  let race = null;
+  try { race = session.race ? raceReport(session, segs) : null; } catch { race = null; }
+  if (race) {
+    const d = raceDebrief(race, { hrMax: profile.hrMax || null, feeling: session.feeling });
+    const load = loadVersusUsual(session, history);
+    const next = showNext && session.dayKey ? nextPlanned(state, session.dayKey, now) : null;
+    return {
+      race, execution: executionOf(session, segs, profile), checks: [], goal: { text: '', purpose: '' },
+      headline: d.headline, lead: d.body, tip: d.tip, compare: null, moments: [], load, next, nextHint: nextHint(next, load, session),
+    };
+  }
   const execution = executionOf(session, segs, profile);
   const goal = goalLine(session, execution);
   const compare = compareWithPast(session, history);

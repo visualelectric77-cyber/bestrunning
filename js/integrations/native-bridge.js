@@ -9,6 +9,7 @@ import { clamp, round1, todayKey, addDays, mondayOf, weekdayOf, capitalize, fmt 
 import { ZONES, LEVEL_KEYS, hrZones, hrMaxFromAge, hrTargetForZone } from '../training/levels.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, WORK_ZONES } from '../training/hr-shape.js';
+import { cleanSpeed, SPEED_FRESH_MS, FACTOR_MIN, FACTOR_MAX } from '../training/watch-speed.js';
 
 /** Zona de pulso del tramo para el reloj: la misma que enseña el iPhone (ajustada a tu recuperación de hoy). */
 let dayLevel = { day: '', level: null };
@@ -60,7 +61,8 @@ import { diagMark } from '../core/diag.js';
  * @typedef {{ status: string, run?: string, classId?: string, title?: string, isTest?: boolean,
  *   inTestStage?: boolean, seg?: SegState, next?: NextSeg, elapsed?: number, remaining?: number, total?: number,
  *   km?: number, kcal?: number, avgKmh?: number, hrTarget?: HRZoneSpec, hrUsual?: HRUsual, record?: RecordState,
- *   voice?: boolean, music?: MusicState }} StateData
+ *   voice?: boolean, music?: MusicState, speedFactor?: number }} StateData   speedFactor (build 24): tu corrección
+ *   personal reloj → cinta ya aprendida (0,85…1,15); el reloj la aplica a lo que calcula antes de enseñarlo.
  * @typedef {{ name: string, phase?: string, n?: number, seg?: number, dir?: string, kmh?: number, goAt?: number,
  *   i?: number, prev?: number, reason?: string, zone?: string, delta?: number, total?: number, km?: number,
  *   pace?: string, d?: number, bestKm?: number, title?: string, artist?: string, bpm?: number, vam?: number }} EventData
@@ -73,6 +75,10 @@ import { diagMark } from '../core/diag.js';
  * @typedef {{ name: string, from: string, dir?: number, delta?: number, value?: number, on?: boolean,
  *   save?: boolean, classId?: string }} CmdData
  * @typedef {{ run?: string, samples: number[][], replay?: boolean }} HRData
+ * @typedef {{ run?: string, kmh?: number, km: number, cadence?: number, at: number, source: string }} SpeedData
+ *   Build 24 (reloj → iPhone → página, cada ~3 s, cap 'live-speed'): lo que el reloj calcula que corres por el braceo.
+ *   ORIENTATIVO: se enseña y se compara, nunca cambia la velocidad de la clase. kmh: ahora (sin él: parado); km: desde
+ *   que el entreno empezó a contar, sin pausas; cadence: pasos/min; at: ms de la lectura; source: 'watch'.
  * @typedef {{ run?: string, sessionId?: string, startedAt: number, endedAt: number, uuid?: string,
  *   kcalActive?: number, hrAvg?: number, hrMax?: number, hrMin?: number, samples: number[][],
  *   source: string }} WorkoutSummaryData
@@ -107,6 +113,7 @@ const BACKUP_DELAY_MS = 30000;    // copia 30 s después de un cambio…
 const BACKUP_EVERY_MS = 5 * 60000; // …y como mucho una cada 5 min (salvo al guardar una clase)
 const LIVE_HR_MS = 15000;         // pulso «en directo» si la última lectura llegó hace ≤ 15 s
 const LIVE_HR_AGE_MS = 30000;     // y la lectura no es vieja (las repeticiones tras recargar no cuentan)
+const LIVE_SPEED_AGE_MS = 30000;  // lo mismo para el ritmo estimado por el reloj (speed)
 const SUMMARY_GIVEUP_MS = 15 * 60000;
 const CMD_MEMORY = 64;
 const MAX_SAMPLES = 20000;
@@ -218,7 +225,7 @@ const noop = () => {};
 const NOOP_ADAPTER = Object.freeze({
   ready: noop, prepare: noop, resumed: noop, started: noop, countdown: noop, tick: noop, segment: noop, event: noop,
   record: noop, hrFields: () => ({}), finish: noop, discard: noop, samples: () => [], restore: noop, liveHr: () => null,
-  watchManaged: () => false, healthMissing: () => null, detach: noop,
+  liveSpeed: () => null, watchManaged: () => false, healthMissing: () => null, detach: noop,
 });
 
 /**
@@ -416,6 +423,10 @@ export function createNativeBridge(opts = {}) {
       case 'hr':
         onHr(data);
         return 'hr';
+      case 'speed':
+        // Build 24: lo que el reloj calcula que corres. Solo en directo y solo para la clase en marcha.
+        if (adapter && adapter.acceptsRun(data.run)) adapter.addSpeed(data);
+        return 'speed';
       case 'audio.kick':
         // El iPhone avisa de algo que pudo dejar mudo el audio (audio-engine.js lo comprueba y lo despierta)
         dispatch('br:audio-kick', { reason: String(data.reason || '') });
@@ -815,6 +826,7 @@ export function createNativeBridge(opts = {}) {
     let beatenSent = false;
     let usual = { key: '', val: null };
     let lastTrack = '';
+    let lastSpeed = null;         // última lectura del ritmo estimado por el reloj: { kmh, km, cadence, source, at, rx }
     let gated = !libs;            // categorías (templates.js) aún cargando: los envíos esperan, en orden
     const gateQ = [];
 
@@ -944,6 +956,9 @@ export function createNativeBridge(opts = {}) {
       }
       d.voice = !x.muted;
       d.music = musicState(x, st);
+      // Tu corrección personal reloj → cinta (si ya se ha aprendido): el reloj la aplica a lo que enseña
+      const sf = num(x.speedFactor, NaN);
+      if (sf >= FACTOR_MIN && sf <= FACTOR_MAX) d.speedFactor = r3(sf);
       return d;
     }
 
@@ -1036,6 +1051,16 @@ export function createNativeBridge(opts = {}) {
         last = fresh;
         try { o.onHr?.(last); } catch { /* nada */ }
       }
+    }
+
+    /** Lectura del ritmo estimado por el reloj (speed): saneada, solo si es de ahora, y al reproductor (onSpeed). */
+    function addSpeed(data) {
+      const t = num(now());
+      const smp = cleanSpeed(data);
+      if (!smp || t - smp.at > LIVE_SPEED_AGE_MS || (lastSpeed && smp.at <= lastSpeed.at)) return false;
+      lastSpeed = { ...smp, rx: t };
+      try { o.onSpeed?.(smp); } catch { /* nada */ }
+      return true;
     }
 
     /* ───────── Órdenes ───────── */
@@ -1316,6 +1341,15 @@ export function createNativeBridge(opts = {}) {
         if (!last || num(now()) - last.rx > LIVE_HR_MS) return null;
         return { bpm: last.bpm, at: last.at };
       },
+      /**
+       * Lo que el reloj calcula que corres AHORA (lectura de hace ≤ 15 s): { kmh | null (parado), km, cadence | null,
+       * source: 'watch', at }; si no, null. Orientativo: sale del braceo, no de la cinta.
+       */
+      liveSpeed() {
+        if (!lastSpeed || num(now()) - lastSpeed.rx > SPEED_FRESH_MS) return null;
+        const { kmh, km, cadence, source, at } = lastSpeed;
+        return { kmh, km, cadence, source, at };
+      },
       /** ¿El reloj lo lleva la app nativa? (emparejado y con BestRunning instalada) */
       watchManaged() {
         const w = status?.watch;
@@ -1354,6 +1388,7 @@ export function createNativeBridge(opts = {}) {
       command,
       pushState,
       addSamples,
+      addSpeed,
       samples: () => api.samples(),
       detached: () => detached,
       acceptsRun: (r) => {
@@ -1375,6 +1410,8 @@ export function createNativeBridge(opts = {}) {
     requestBackup,
     sendToday,
     nativeStatus: () => (status ? { ...status } : null),
+    /** Ritmo estimado por el reloj de la clase en marcha (ver el adaptador); null sin reproductor o sin lectura. */
+    liveSpeed: () => (adapter ? adapter.api.liveSpeed() : null),
     isNative: native,
     /** Para tests: espera a que carguen planner/templates y al último «today». */
     ready: () => loadLibs().then(() => todayP),
@@ -1435,6 +1472,15 @@ export function on(type, cb) {
 export function nativeStatus() {
   if (!isNative() || !bridge) return null;
   return bridge.nativeStatus();
+}
+
+/**
+ * Lo que el Apple Watch calcula que corres ahora mismo en la cinta (app nativa, build 24): { kmh | null, km, cadence |
+ * null, source: 'watch', at } con una lectura de hace ≤ 15 s; null en Safari, sin clase en marcha o sin lectura.
+ */
+export function liveSpeed() {
+  if (!isNative() || !bridge) return null;
+  return bridge.liveSpeed();
 }
 
 /** Publica un mensaje para la app nativa. false en Safari. */

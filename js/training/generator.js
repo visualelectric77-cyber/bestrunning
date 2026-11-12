@@ -159,7 +159,7 @@ export function buildWorkout(templateId, {
   const load = round2(clamp(Number(loadFactor) || 1, 0.3, 2));
   const isTest = t.category === 'test';
   const ctx = {
-    minutes: mins, levels: lv, load, rng: makeRng(hashStr(`${templateId}|${sd}|${mins}`)),
+    minutes: mins, levels: lv, load, seed: sd, rng: makeRng(hashStr(`${templateId}|${sd}|${mins}`)),
     hasIncline: !!hasIncline, treadmill: tm, weekInCycle, cycleIndex,
   };
   let segs = normalizeSegments(t.build(ctx) || [], tm, !!hasIncline);

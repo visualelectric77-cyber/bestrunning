@@ -21,14 +21,17 @@ const RACE_RE = /^race-(5k|10k|15k|21k)$/;
 /** ¿Es una plantilla de carrera? ('race-5k'…) */
 export const isRaceTemplate = (templateId) => typeof templateId === 'string' && RACE_RE.test(templateId);
 
-/** Velocidad de carrera (km/h, 1 decimal): la del tiempo objetivo o, sin objetivo, la marca prevista por tu VAM. */
-export function raceSpeedFor(distanceKey, { targetSec = null, levels = null } = {}) {
+/**
+ * Velocidad de carrera (km/h, 1 decimal): la del tiempo objetivo o, sin objetivo, la marca prevista por tu VAM.
+ * `vam`: la de levels.vamNow(state) (la de tu test o tu última carrera real); sin ella, la de las velocidades.
+ */
+export function raceSpeedFor(distanceKey, { targetSec = null, levels = null, vam: vam0 = null } = {}) {
   const d = goalDistance(distanceKey);
   if (!d) return null;
   // con tiempo objetivo, la décima se redondea HACIA ARRIBA: a 10,9 km/h un 10K en 55:00 acababa en 55:03 y el objetivo no se cumplía
   if (Number(targetSec) > 0) return clamp(Math.ceil(((d.km / Number(targetSec)) * 3600 - 1e-9) * 10) / 10, 5, 22);
   const lv = levels || {};
-  const vam = Number(lv.jog) > 0 ? vamFromLevels(lv) : 0;
+  const vam = Number(vam0) > 0 ? Number(vam0) : Number(lv.jog) > 0 ? vamFromLevels(lv) : 0;
   const p = predictRaces(vam).find((r) => r.key === d.key);
   if (p) return round1(clamp(3600 / p.paceSec, 5, 22));
   return round1(Number(lv.run) || 10);

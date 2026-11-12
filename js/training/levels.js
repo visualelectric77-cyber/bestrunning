@@ -1,5 +1,6 @@
 // BestRunning · zonas de velocidad, fisiología y estimaciones (sin DOM).
 import { round1, clamp, pad2, addDays, daysBetween, fmt } from '../core/utils.js';
+import { lastRace } from './race-predict.js';
 
 /** Zonas de un segmento. El color se usa en gráficos, fondos del reproductor y chips. */
 export const ZONES = {
@@ -118,11 +119,30 @@ export function hrZones(hrMax, hrRest = null) {
   });
 }
 
-/** Rango de FC objetivo de una zona de segmento, p. ej. { zone: 4, min: 141, max: 158 }. */
+/** ¿Ha elegido esta persona el entreno exigente? (Ajustes › Sobre ti › Exigencia: profile.effort === 'hard') */
+export const isHardEffort = (profile) => profile?.effort === 'hard';
+export const HARD_FAST_MARGIN = 5;   // «rápido» exigente: techo a (FC máx. − 5)
+
+/**
+ * Rango de FC objetivo de una zona de segmento, p. ej. { zone: 4, min: 141, max: 158 }.
+ * Con el entreno exigente (isHardEffort) lo duro puede ser más duro y lo suave sigue igual de suave:
+ *   · «rápido»: el techo sube de Z4 a (FC máx. − 5), es decir, deja entrar en Z5, que es donde se entrena un 5K;
+ *   · «correr»: el techo sube media zona (hasta mitad de Z4, el umbral);
+ *   · trote, calentamiento y calma no cambian.
+ * `pushed: true` marca un techo ampliado.
+ */
 export function hrTargetForZone(zoneKey, profile) {
   const hrMax = profile.hrMax || hrMaxFromAge(profile.age || 46);
-  const z = hrZones(hrMax, profile.hrRest)[(ZONES[zoneKey]?.hrZone || 1) - 1];
-  return { zone: z.zone, min: z.min, max: z.max, name: z.name };
+  const zones = hrZones(hrMax, profile.hrRest);
+  const z = zones[(ZONES[zoneKey]?.hrZone || 1) - 1];
+  const t = { zone: z.zone, min: z.min, max: z.max, name: z.name };
+  if (isHardEffort(profile)) {
+    let max = t.max;
+    if (zoneKey === 'fast') max = Math.max(t.max, hrMax - HARD_FAST_MARGIN);
+    else if (zoneKey === 'run') max = Math.max(t.max, Math.round((zones[3].min + zones[3].max) / 2));
+    if (max > t.max) { t.max = max; t.pushed = true; }
+  }
+  return t;
 }
 
 /** Segundos por km a una velocidad. */
@@ -153,10 +173,12 @@ export const VAM_TOL = 0.2;
  * La VAM (y el VO₂máx) que enseña la app y de dónde sale: una sola regla para todas las pantallas, el coach, las
  * marcas estimadas y el objetivo.
  *   · source 'test'   → la que midió tu último test VAM (progression.lastTest), con su fecha.
- *   · source 'levels' → la de tus velocidades actuales: sin test, o cuando ya corres por encima de lo que midió.
+ *   · source 'race'   → la que implica tu última carrera real en la cinta (race-predict.vamFromRace), si es más
+ *                       reciente que el test: una marca de verdad manda sobre lo que se deduce de las velocidades.
+ *   · source 'levels' → la de tus velocidades actuales: sin test ni carrera, o cuando ya corres por encima del test.
  * `levelsVam` es siempre la de las velocidades y `behind`, lo que les falta para la del test: tras un test con tope
  * de subida las velocidades quedan por debajo, y eso se dice con palabras, no enseñando otra VAM.
- * → { vam, vo2, source, testVam, testDate, levelsVam, behind }
+ * → { vam, vo2, source, testVam, testDate, levelsVam, behind, race }   (race: la carrera usada, o null)
  */
 export function vamNow(state) {
   const lv = state?.levels;
@@ -164,12 +186,18 @@ export function vamNow(state) {
   const t = state?.progression?.lastTest;
   const testVam = Number(t?.vam) > 0 ? round1(Number(t.vam)) : 0;
   const day = String(t?.date || '').slice(0, 10);
-  const fromTest = testVam > 0 && levelsVam <= testVam + VAM_TOL + 1e-9;
-  const vam = fromTest ? testVam : levelsVam;
+  // Carrera real más reciente que el test (o sin test): su marca es la medida
+  let race = null;
+  try { race = lastRace(state?.history); } catch { race = null; }
+  if (race && day && race.date <= day) race = null;
+  const fromRace = !!race;
+  const fromTest = !fromRace && testVam > 0 && levelsVam <= testVam + VAM_TOL + 1e-9;
+  const vam = fromRace ? race.vam : fromTest ? testVam : levelsVam;
   return {
+    race,
     vam,
     vo2: vam > 0 ? estimateVo2max(vam) : 0,
-    source: fromTest ? 'test' : 'levels',
+    source: fromRace ? 'race' : fromTest ? 'test' : 'levels',
     testVam,
     testDate: testVam > 0 && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null,
     levelsVam,
@@ -181,6 +209,7 @@ const vamDay = (key) => (key ? ` del ${fmt.dateShort(key).split(' ').slice(1).jo
 
 /** De dónde sale la VAM de `vamNow`, con las mismas palabras en todas las pantallas. */
 export function vamSourceLabel(v) {
+  if (v?.source === 'race') return `Según tu ${v.race?.label || 'carrera'}${vamDay(v.race?.date)}`;
   if (v?.source === 'test') return `Medida en tu test${vamDay(v.testDate)}`;
   return v?.testVam > 0 ? 'Según tus velocidades actuales' : 'Estimada por tus velocidades';
 }
@@ -188,6 +217,11 @@ export function vamSourceLabel(v) {
 /** Frase que explica la diferencia entre el test y las velocidades cuando la hay ('' si van a la par). */
 export function vamGapNote(v) {
   if (!v) return '';
+  if (v.source === 'race') {
+    return v.levelsVam - v.vam > VAM_TOL + 1e-9
+      ? `Tus velocidades darían ${fmt.speed(v.levelsVam)} km/h, pero una carrera real cuenta más. El Test VAM la afinará.`
+      : '';
+  }
   if (v.source === 'test') return v.behind > 0 ? 'Tus velocidades aún van por debajo: suben poco a poco.' : '';
   return v.testVam > 0 ? `Tus velocidades van por encima de lo que midió tu test${vamDay(v.testDate)} (${fmt.speed(v.testVam)} km/h).` : '';
 }

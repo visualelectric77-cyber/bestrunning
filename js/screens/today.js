@@ -12,7 +12,7 @@ import { CATEGORIES, templatesFor, getTemplate } from '../training/templates.js'
 import { buildWorkout } from '../training/generator.js';
 import * as progression from '../training/progression.js';
 import * as stats from '../training/stats.js';
-import { ZONES, LEVEL_KEYS, levelReference, levelReferenceLabel } from '../training/levels.js';
+import { ZONES, LEVEL_KEYS, levelReference, levelReferenceLabel, vamNow } from '../training/levels.js';
 import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, round1,
 } from '../core/utils.js';
@@ -268,7 +268,7 @@ function raceHero(day, state, today, animate) {
       ? 'Calienta 10–15 minutos muy suave, sal contenido el primer kilómetro y guarda fuerzas para el final. ¡A disfrutarla!'
       : 'El día de tu carrera. Llega descansado: la semana es suave y la víspera, descanso.';
   // En la cinta: la clase de carrera al ritmo del objetivo (o al de tu marca prevista)
-  const beltKmh = onBelt ? raceSpeedFor(r.distance, { targetSec: r.targetSec, levels: state.levels }) : null;
+  const beltKmh = onBelt ? raceSpeedFor(r.distance, { targetSec: r.targetSec, levels: state.levels, vam: safe(() => vamNow(state).vam, null) }) : null;
   const beltId = beltKmh ? raceWorkoutId(r.distance, beltKmh) : null;
   const pace = r.targetSec ? Math.round(r.targetSec / r.km) : null;
   const grid = pace

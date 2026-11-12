@@ -1233,6 +1233,28 @@
 .ca-moment__value b { font-size: 24px; line-height: 29px; font-weight: 700; letter-spacing: -0.025em; }
 .ca-moment__value small { font-size: 11px; color: var(--text-2); }
 .ca-moment__note { font-size: 12px; line-height: 15px; color: var(--text-2); text-wrap: pretty; }
+
+/* Carrera en la cinta: parciales por kilómetro y, aparte, el calentamiento y la vuelta a la calma */
+.ca-race { display: flex; flex-direction: column; }
+.ca-race__row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 52px 44px; align-items: center; column-gap: var(--s-3); min-height: 34px; }
+.ca-race.has-hr .ca-race__row { grid-template-columns: 22px minmax(0, 1fr) 52px 44px 40px; }
+.ca-race__row + .ca-race__row { border-top: var(--hairline) solid var(--sep); }
+.ca-race__head { min-height: 22px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); }
+.ca-race__head + .ca-race__row { border-top: 0; }
+.ca-race__head span, .ca-race__t, .ca-race__v, .ca-race__hr { text-align: right; }
+.ca-race__head span:first-child { text-align: left; }
+.ca-race__km { font-size: var(--fs-sub); font-weight: 700; color: var(--text-2); }
+.ca-race__bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.ca-race__bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.ca-race__t { font-size: 17px; line-height: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.ca-race__v, .ca-race__hr { font-size: var(--fs-sub); color: var(--text-2); }
+.ca-race__facts { margin-top: var(--s-4); padding-top: var(--s-4); border-top: var(--hairline) solid var(--sep); }
+.ca-race__parts { margin-top: var(--s-4); padding-top: var(--s-4); border-top: var(--hairline) solid var(--sep); display: flex; flex-direction: column; gap: 6px; }
+.ca-race__parts .ca-card__head { margin-bottom: 2px; }
+.ca-race__part { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-3); font-size: var(--fs-sub); line-height: 20px; color: var(--text-2); }
+.ca-race__part b { font-weight: 600; color: var(--text); }
+.ca-race__part.is-total { color: var(--text-3); }
+.ca-race__part.is-total b { color: var(--text-2); }
 .ca-moment__note.is-good { color: var(--ok); }
 .ca-moment__note.is-warn { color: var(--z-fast); }
 

@@ -1,8 +1,9 @@
 // BestRunning · Historial: lista por meses (buscar, filtrar, deslizar para borrar) y detalle de sesión.
 // El detalle incluye el pulso del Apple Watch (importación vía Atajo, línea sobre el perfil, zonas de FC y
 // pulso por velocidad) y la música que sonó en la sesión.
-import { classAnalysis } from '../training/class-analysis.js';
+import { classAnalysis, segmentsOfSession } from '../training/class-analysis.js';
 import { classDebrief } from '../training/class-debrief.js';
+import { raceReport } from '../training/race-report.js';
 import { classAnalysisHtml } from '../ui/analysis-view.js';
 import { getState, setState, subscribe } from '../core/store.js';
 import { navigate, back } from '../core/router.js';
@@ -342,6 +343,8 @@ function rowHtml(h, feel, { extra = false, sameDay = false } = {}) {
   const f = feel[h.feeling];
   const pct = Math.round((Number(h.completionPct) || 0) * 100);
   const partial = !h.completed && pct > 0 && pct < 100;
+  // una carrera en la cinta se cuenta por su marca, no por lo que duró la sesión con el calentamiento
+  const raced = h.race && Number(h.race.sec) > 0;
   const meta = [cat?.name || (h.isTest ? 'Test' : ''), timeOf(h.startedAt), fmt.clock(h.elapsedSec || 0)].filter(Boolean).map(esc).join(' · ');
   return `<div class="hs-row${sameDay ? ' hs-row--sameday' : ''}" data-id="${esc(h.id)}">
     <div class="hs-row__actions">
@@ -354,7 +357,9 @@ function rowHtml(h, feel, { extra = false, sameDay = false } = {}) {
         <div class="hs-row__meta"><span class="hs-row__metatxt">${meta}</span>${h.hrAvg ? `<span class="whr-rowhr" aria-label="Pulso medio ${Number(h.hrAvg) || ''} ppm">${icon('heart', 11)}${Number(h.hrAvg) || ''}</span>` : ''}</div>
       </div>
       <div class="hs-row__side">
-        <div class="hs-row__km"><b class="num">${fmt.km(h.distanceKm || 0)}</b><span class="unit">km</span></div>
+        ${raced
+          ? `<div class="hs-row__km"><b class="num">${esc(fmt.clock(h.race.sec))}</b><span class="unit">${esc(h.race.label || '')}</span></div>`
+          : `<div class="hs-row__km"><b class="num">${fmt.km(h.distanceKm || 0)}</b><span class="unit">km</span></div>`}
         <div class="hs-row__feel">${partial ? `<span class="hs-row__pct num">${pct}\u202F%</span>` : f ? `<span class="hs-row__feeltxt">${esc(f.label)}</span>` : ''}</div>
       </div>
       <span class="hs-row__chev">${icon('chevron-right', 14)}</span>
@@ -566,13 +571,17 @@ function detailHtml(ses, s, segments) {
   const parts = [];
 
   const done = pct >= 1 || ses.completed;
+  // Carrera en la cinta: las cifras son las de la CARRERA; el calentamiento y la vuelta a la calma van aparte
+  const rr = safe(() => (ses.race ? raceReport(ses, segments && segments.length ? segments : segmentsOfSession(s, ses)) : null), null);
   const eyebrow = [cat?.name, ses.isTest ? 'Test VAM' : ''].filter(Boolean).join(' · ');
   parts.push(`<section class="hs-hero">
     <div class="hs-hero__top">
       ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
       <div class="hs-hero__date">${esc(capitalize(fmt.dateLong(key)))}${timeOf(ses.startedAt) ? ` · ${timeOf(ses.startedAt)}` : ''}</div>
     </div>
-    <div class="hs-hero__km"><span class="num">${fmt.km(ses.distanceKm || 0)}</span><span class="unit">km</span></div>
+    ${rr
+      ? `<div class="hs-hero__km"><span class="num">${esc(fmt.clock(rr.sec))}</span><span class="unit">tu ${esc(rr.label)}</span></div>`
+      : `<div class="hs-hero__km"><span class="num">${fmt.km(ses.distanceKm || 0)}</span><span class="unit">km</span></div>`}
     <div class="hs-hero__status">${done
       ? `<span class="hs-hero__ok">${icon('check', 14)}</span><span>Completada</span>`
       : `<span>Completada al <b class="num">${Math.round(pct * 100)}\u202F%</b></span>`}${ses.plannedSec ? `<span class="hs-hero__plan">· plan ${esc(fmt.minutes(ses.plannedSec))}</span>` : ''}</div>
@@ -581,19 +590,25 @@ function detailHtml(ses, s, segments) {
 
   parts.push(`<section class="card hs-stats">
     <div class="stat-grid">
-      ${stat({ label: 'Tiempo', value: fmt.clock(elapsed) })}
+      ${rr ? `${stat({ label: 'Ritmo', value: fmt.clock(rr.paceSec), unit: '/km' })}
+      ${stat({ label: 'Vel. media', value: fmt.speed(rr.speed), unit: 'km/h' })}
+      ${rr.hr ? stat({ label: 'Pulso medio', value: fmt.int(rr.hr.avg), unit: 'ppm' }) : stat({ label: 'Distancia', value: fmt.km(rr.km), unit: 'km' })}
+      ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h' })}
+      ${stat({ label: kcalOf(ses).label, value: fmt.int(kcalOf(ses).value) })}
+      ${stat({ label: 'Sesión', value: fmt.clock(elapsed) })}` : `${stat({ label: 'Tiempo', value: fmt.clock(elapsed) })}
       ${stat({ label: 'Vel. media', value: fmt.speed(avg), unit: 'km/h' })}
       ${stat({ label: 'Ritmo', value: avg > 0 ? fmt.pace(avg) : '–:––', unit: '/km' })}
       ${stat({ label: 'Vel. máx.', value: fmt.speed(ses.maxSpeed || 0), unit: 'km/h' })}
       ${stat({ label: kcalOf(ses).label, value: fmt.int(kcalOf(ses).value) })}
-      ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)) })}
+      ${stat({ label: 'Intenso', value: fmt.clock((ses.timeInZone?.fast || 0) + (ses.timeInZone?.sprint || 0)) })}`}
     </div>
   </section>`);
 
   // El mismo análisis que al terminar la clase, comparado solo con las clases anteriores a esta
   const analysis = safe(() => classAnalysis(ses, {
     state: s, segments: segments || null,
-    debrief: ses.debrief || classDebrief(ses, { segments: segments || null, model: null, profile: s.profile }),
+    debrief: (ses.debrief && !(ses.race && ses.debrief.kind !== 'race') ? ses.debrief : null)
+      || classDebrief(ses, { segments: segments || null, model: null, profile: s.profile }),
   }), null);
   if (analysis) parts.push(classAnalysisHtml(analysis));
 

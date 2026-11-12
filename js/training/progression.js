@@ -8,8 +8,7 @@ import { isHills } from './hr-model.js';
 import { clamp, todayKey, addDays, daysBetween, weekdayOf, hashStr, makeRng, fmt, parseKey, DAY_MS } from '../core/utils.js';
 import {
   ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, levelsFromVam, vamFromLevels, estimateVo2max, vo2Category, vamNow, VAM_TOL,
-  hrMaxFromAge,
-} from './levels.js';
+  hrMaxFromAge, isHardEffort } from './levels.js';
 import { cycleInfo, nextTestDate, seasonInfo } from './planner.js';
 import { streakWeeks, weekProgress, totals, sessionDay, sessionCounts } from './stats.js';
 import { hrAtLevels, hasHrSeries } from '../integrations/watch-hr.js';
@@ -27,6 +26,7 @@ const BUMP_GAP_DAYS = 6;          // máx. una subida por nivel cada 6 días
 const CAP_WINDOW_DAYS = 28;       // ventana del tope de subida
 const CAP_GAIN = 0.6;             // tope +0,6 km/h por nivel en 28 días
 const OK_STREAK = 3;              // sesiones cómodas seguidas para subir
+const SOLID_STREAK = 4;      // entreno exigente: clases «exigentes» seguidas bien hechas para subir +0,1
 const LOAD_MIN = -0.15;
 const LOAD_MAX = 0.15;
 const TEST_STEP = 0.5;            // km/h por escalón del test
@@ -170,6 +170,7 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
     ...prog0,
     lastBump: { ...(prog0.lastBump || {}) },
     okStreak: { ...(prog0.okStreak || {}) },
+    solidStreak: { ...(prog0.solidStreak || {}) },   // clases «exigentes» seguidas bien hechas, por nivel (entreno exigente)
     hardStreak: num(prog0.hardStreak),
     loadAdjust: clamp(num(prog0.loadAdjust), LOAD_MIN, LOAD_MAX),
     lastTest: prog0.lastTest ?? null,
@@ -267,10 +268,33 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
     p.loadAdjust = p.loadAdjust > 0 ? Math.max(0, p.loadAdjust - 0.02) : Math.min(0, p.loadAdjust + 0.02);
   } else if (eff === 'hard') {
     for (const k of used) p.okStreak[k] = 0;
+    // «Exigente» no es «al límite»: corta la racha de sesiones al límite (antes, dos separadas por semanas contaban como seguidas)
+    p.hardStreak = 0;
+    // Entreno exigente: quien entrena duro y lo dice no se queda parado. Sube con pruebas, no con ganas:
+    //   · a la misma velocidad, tu pulso va claramente más bajo que en tus últimas sesiones (como con «Cómodo»), o
+    //   · SOLID_STREAK clases exigentes seguidas completas, sin que el modo pulso tuviera que bajarte ese nivel.
+    if (isHardEffort(st.profile) && !incomplete && !hr.block) {
+      for (const k of used) {
+        if (hr.easy.includes(k)) {
+          if (canBump(k)) raise(k, STEP, 'hr');
+          else blocked.push(k);
+          p.solidStreak[k] = 0;
+          continue;
+        }
+        if (num(session.hrCoachAdj?.[k]) < 0 || num(session.adjustments?.[k]) < 0) { p.solidStreak[k] = 0; continue; }
+        p.solidStreak[k] = num(p.solidStreak[k]) + 1;
+        if (p.solidStreak[k] >= SOLID_STREAK) {
+          if (canBump(k)) { raise(k, STEP, 'solid'); p.solidStreak[k] = 0; } else blocked.push(k);
+        }
+      }
+    }
   } else if (eff === 'max') {
     for (const k of used) p.okStreak[k] = 0;
-    p.hardStreak += 1;
-    if (p.hardStreak >= 2 && top) { drop(top, 'fatigue'); p.loadAdjust -= 0.05; }
+    // Una carrera se corre al límite por definición: no es señal de fatiga y no baja velocidades
+    if (!(session.race && num(session.race.sec) > 0)) {
+      p.hardStreak += 1;
+      if (p.hardStreak >= 2 && top) { drop(top, 'fatigue'); p.loadAdjust -= 0.05; }
+    }
   } else if (eff === 'fail') {
     for (const k of used) p.okStreak[k] = 0;
     p.hardStreak += 1;
@@ -286,7 +310,8 @@ export function applyFeedback(state, session, { feeling, rpe } = {}) {
   // (hrCoachAdj): sus subidas salían a veces de que el pulso aún no había llegado, y no son una pista tuya.
   if (session.completed && eff !== 'fail' && eff !== 'max') {
     for (const k of LEVEL_KEYS) {
-      const adj = r1(num(session.adjustments?.[k]) - num(session.hrCoachAdj?.[k]));
+      // Solo cuenta lo que subiste POR ENCIMA de lo planeado: si el modo pulso bajó y tú lo deshiciste, no has subido nada
+      const adj = r1(num(session.adjustments?.[k]) - Math.max(0, num(session.hrCoachAdj?.[k])));
       if (adj >= 0.2 - 1e-9) raise(k, Math.max(STEP, r1(adj / 2)), 'adjust');
     }
   }
@@ -351,6 +376,8 @@ function feedbackMessage({ changes, eff, fb, incomplete, reachedEnd = false, blo
   if (ups.length) {
     const tail = ups.some((c) => c.reason === 'adjust')
       ? 'Tu ajuste en la cinta nos ha dado la pista.'
+      : ups.some((c) => c.reason === 'solid')
+        ? 'Varias clases exigentes seguidas, completas y sin tener que bajarte: toca dar un paso.'
       : rng.pick(['Te lo has ganado.', 'Tu cuerpo está listo para más.', 'Así se progresa: poco a poco y sin parar.']);
     if (ups.length === 1) return `¡Subimos tu ${noun(ups[0].level)} a ${fmt.speed(ups[0].to)} km/h! ${tail}`;
     return `¡Suben tus velocidades ${listJoin(ups.map((c) => `«${label(c.level)}»`))}: ${ups.map((c) => fmt.speed(c.to)).join(' · ')} km/h! ${tail}`;
@@ -585,9 +612,11 @@ export function coachInsight(state, now = new Date(), { skipWeek = false } = {})
   // VAM y forma física
   // La misma VAM que Progreso y Perfil (levels.vamNow), y solo si ya has hecho un test
   const v = vamNow(st);
-  if (v.testVam > 0 && v.vam > 0) {
+  if ((v.testVam > 0 || v.source === 'race') && v.vam > 0) {
     const cat = vo2Category(v.vo2, num(st.profile?.age) || 46, st.profile?.sex || 'm');
-    add(2, v.source === 'test'
+    add(2, v.source === 'race'
+      ? `Tu ${v.race?.label || 'carrera'} da una VAM de ${fmt.speed(v.vam)} km/h, un VO₂máx estimado de ${fmt.dec1(v.vo2)}: nivel «${cat.label.toLowerCase()}» para tu edad.`
+      : v.source === 'test'
       ? `Tu VAM es ${fmt.speed(v.vam)} km/h, un VO₂máx estimado de ${fmt.dec1(v.vo2)}: nivel «${cat.label.toLowerCase()}» para tu edad.`
       : `Tus velocidades ya dan una VAM de ${fmt.speed(v.vam)} km/h, por encima de tu último test: un VO₂máx estimado de ${fmt.dec1(v.vo2)}, nivel «${cat.label.toLowerCase()}» para tu edad.`);
   }

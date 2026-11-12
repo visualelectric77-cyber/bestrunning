@@ -35,7 +35,8 @@ export function defaultState() {
     onboarded: false,
     createdAt: null,
     // hrRestSource: 'health' (la pone Salud y se actualiza sola) | 'manual' (escrita a mano) | null (automática)
-    profile: { name: '', age: null, weightKg: null, sex: null, hrMax: null, hrRest: null, hrRestSource: null },
+    // effort: 'hard' = entreno exigente (techos de pulso ampliados en lo duro; ver levels.hrTargetForZone) | null
+    profile: { name: '', age: null, weightKg: null, sex: null, hrMax: null, hrRest: null, hrRestSource: null, effort: null },
     levels: { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13.0 },
     levelHistory: [],
     progression: {

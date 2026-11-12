@@ -231,6 +231,8 @@ const HIGH_ON_MAX = 10;
 const HIGH_FROM = 180;      // s desde la primera lectura
 const FORECAST_K = 1.8;
 const FORECAST_MAX = 15;
+const SETTLED = 12;     // lecturas a partir de las que el seguidor sabe ya cómo va tu día
+const ODD_PPM = 30;     // lectura a más de 30 ppm de lo esperable: fallo del reloj, no tu corazón
 
 export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, gain = 0.04, fastReadings = 36 } = {}) {
   let core = null;    // pulso simulado con a0
@@ -247,6 +249,28 @@ export function createTracker(model, { a0 = model?.aTypical, fastGain = 0.15, ga
     get bias() { return bias; },
     get highDay() { return high; },
     get forecastA() { return a0 + (high ? Math.max(bias, Math.min(FORECAST_MAX, bias * FORECAST_K)) : bias); },
+    /** Lecturas aceptadas hasta ahora. */
+    get seen() { return seen; },
+    /**
+     * ¿Es creíble esta lectura? Con el seguidor ya asentado (≥ 12 lecturas), una que se aparta más de 30 ppm de lo que
+     * toca a esta velocidad no es tu corazón: es el reloj leyendo mal (se queda en 80 corriendo, o se engancha a la
+     * cadencia). No debe entrar al seguidor ni mover ninguna velocidad.
+     */
+    plausible(hr) {
+      if (!(hr >= 40 && hr <= 230)) return false;
+      if (core == null || seen < SETTLED) return true;
+      return Math.abs(hr - (core + bias)) <= ODD_PPM;
+    },
+    /**
+     * Tras una pausa o un salto de tramo el pulso real ya no es el que seguía el modelo: se vuelve a enganchar a la
+     * lectura sin tocar lo aprendido del día (si no, una parada de 2 min parecía «vas sobrado»).
+     */
+    resync(t, hr) {
+      if (hr == null || core == null) return;
+      core = hr - bias;
+      obs = hr;
+      lastT = t;
+    },
     /** Avanza al instante t (s de clase) con la velocidad, inclinación y carga actuales; hr: lectura real o null. */
     step(t, v, g, load, hr) {
       if (core == null) { if (hr == null) return; core = hr; obs = hr; lastT = t; firstT = t; return; }

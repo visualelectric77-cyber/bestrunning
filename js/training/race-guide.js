@@ -3,7 +3,9 @@
 // llegar a la meta lo antes posible SIN reventar. Con el modelo de tu pulso (hr-dynamics.js) se calcula con qué
 // pulso cruzarías la meta si mantienes esta velocidad, y de ahí sale si puedes apretar o si tienes que aflojar:
 //
-// · «te pasas»: cruzarías la meta por encima de tu pulso máximo → baja lo justo (0,1–0,3 km/h) para llegar a tope;
+// · «te pasas»: cruzarías la meta claramente por encima de tu pulso máximo (más de 3 ppm: el modelo se equivoca en
+//   eso) → baja lo justo (0,1–0,3 km/h) para llegar a tope. En los primeros 4 min o el primer kilómetro el pulso
+//   aún no dice lo que cuesta el ritmo: ahí solo baja si la previsión se pasa de largo (más de 8 ppm);
 // · «tienes margen»: llegarías lejos de tu máximo → sube 0,1–0,2 km/h (nunca en el primer kilómetro);
 // · último kilómetro: ya no te baja (solo la alarma); si tienes margen, te lo dice;
 // · alarma: pulso real por encima de tu máximo → baja 0,3 sin esperar.
@@ -23,8 +25,11 @@ const GAP_AFTER_UP = 120;     // y tras subir
 const GAP_AFTER_MANUAL = 120; // después de un cambio tuyo, la guía espera
 const GAP_ALARM = 60;
 const MAX_ACTIONS = 10;
-const OVER = 0;               // «te pasas»: meta prevista por encima de tu máxima
-const FINISH_AT = 3;          // al bajar, se apunta a llegar a (máxima − 3)
+const OVER = 3;               // «te pasas»: meta prevista más de 3 ppm por encima de tu máxima (el error del modelo)
+const EARLY_OVER = 8;         // al principio (antes de 4 min o de 1 km) hace falta pasarse de largo para bajar
+const EARLY_SEC = 240;
+const EARLY_KM = 1;
+const FINISH_AT = 0;          // al bajar, se apunta a llegar a tu máxima, no por debajo
 const ROOM = 8;               // «tienes margen»: meta prevista por debajo de (máxima − 8)
 const ROOM_TO = 4;            // al subir, sin pasar de (máxima − 4)
 const ALARM_OVER = 4;         // pulso real ≥ máxima + 4
@@ -102,7 +107,8 @@ export function createRaceGuide({ hrMax } = {}) {
       if (since < (lastDir > 0 ? GAP_AFTER_UP : GAP_AFTER_DOWN) * 1000) return null;
       if (Number.isFinite(Number(o.manualAtMs)) && now - Number(o.manualAtMs) < GAP_AFTER_MANUAL * 1000) return null;
       // Te pasas: lo justo para llegar a tope (nunca en el último km: ahí decides tú)
-      if (predicted > max + OVER && remKm > LAST_KM) {
+      const early = (Number(o.raceSec) || 0) < EARLY_SEC || (Number(o.doneKm) || 0) < EARLY_KM;
+      if (predicted > max + (early ? EARLY_OVER : OVER) && remKm > LAST_KM) {
         let tenths = Math.round(MAX_DOWN * 10);
         for (let k = 1; k <= Math.round(MAX_DOWN * 10); k++) {
           if (at(speed - k / 10) <= max - FINISH_AT) { tenths = k; break; }

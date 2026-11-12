@@ -4,8 +4,9 @@
 // 2. En la clase, antes de cada tramo: con el pulso con el que vas a llegar, la velocidad del que viene (sobre todo
 //    recuperaciones: si no te va a dejar bajar a su zona, más suave).
 // 3. En la pantalla: si vas por debajo pero vas a llegar a la zona antes de acabar el tramo, «Subiendo», no «Bajo».
-// Siempre con límites: antes de la clase −0,6 / +0,3 km/h sobre lo planeado, en directo hasta −0,8; los arreones
-// cortos (rápido o sprint de < 3 min) se definen por velocidad y nunca se suben por pulso.
+// Siempre con límites: antes de la clase −0,6 / +0,3 km/h sobre lo planeado; en directo, pasos de ±0,5 y como mucho
+// −0,8 / +0,5 en todo el tramo sobre la velocidad con la que empezó; los arreones cortos (rápido o sprint de < 3 min)
+// se definen por velocidad y nunca se suben por pulso.
 import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, starterModel, HR_DT } from './hr-dynamics.js';
 
 const WORK = new Set(['jog', 'run', 'fast']);
@@ -16,6 +17,8 @@ const PRE_MAX = 0.6;        // antes de la clase: bajar hasta −0,6…
 const PRE_MAX_UP = 0.3;     // …pero subir como mucho +0,3 (pasarse de optimista sale peor que quedarse corto)
 const LIVE_MAX_DOWN = 0.8;
 const LIVE_MAX_UP = 0.5;
+const LATE_SEC = 90;        // con menos de 90 s de tramo por delante…
+const LATE_PPM = 6;         // …solo se toca si lo previsto se sale de la zona 6 ppm o más
 const r1 = (v) => Math.round(v * 10) / 10;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const REF_JOG = 8.5;
@@ -59,7 +62,11 @@ export function calibrateClass(model, a, segments, targetOf, { hr0 = null, minSp
         const v = r1(clamp(planned + d, minSpeed, maxSpeed));
         const { inp } = segInputs([{ ...s, speed: v }], load);
         const sim = simulate(model, a, { ...inp }, hr);
-        const err = Math.abs(mean(sim.slice(Math.floor(sim.length / 2))) - mid) + Math.abs(d) * 0.8; // pequeño coste por moverse
+        const m2 = mean(sim.slice(Math.floor(sim.length / 2)));
+        // Zona normal: al centro. Techo ampliado (entreno exigente, tgt.pushed): vale toda la franja hasta 3 ppm bajo
+        // el techo, así que un tramo duro no se rebaja de antemano por ir «por encima del centro».
+        const off = tgt.pushed ? (m2 < tgt.min ? tgt.min - m2 : m2 > tgt.max - 3 ? m2 - (tgt.max - 3) : 0) : Math.abs(m2 - mid);
+        const err = off + Math.abs(d) * 0.8; // pequeño coste por moverse
         if (err < bestErr) { bestErr = err; best = v; }
       }
       if (Math.abs(best - planned) >= 0.1 - 1e-9) { changes.push({ i, from: planned, to: best }); s.speed = best; }
@@ -110,18 +117,27 @@ export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, highDa
 /**
  * Durante un tramo largo de trabajo: ¿la velocidad actual te deja en la zona al final (o en 4 min)? Si no, la que sí.
  * → { speed, predicted } o null. Pasos de ±0,5 como mucho; los arreones cortos nunca suben.
+ * `base`: la velocidad con la que empezó el tramo (si se da, el tramo entero no se aparta de ella más de −0,8 / +0,5).
+ * Nunca mueve la velocidad al revés de lo que pide el pulso (con poco tramo por delante el despeje podía pedir subir
+ * yendo alto) y, con menos de 90 s por delante, no toca nada por unas pocas pulsaciones.
  */
-export function liveSpeed(model, a, { seg, hrNow, remaining, speed, load = 0, target, minSpeed = 1, maxSpeed = 20 } = {}) {
+export function liveSpeed(model, a, { seg, hrNow, remaining, speed, load = 0, target, minSpeed = 1, maxSpeed = 20, base = null } = {}) {
   if (!model || !seg || !target || hrNow == null || !(target.max > target.min) || !WORK.has(seg.zone)) return null;
   const horizon = clamp(remaining, 45, 240);
   const g = Number(seg.incline) || 0;
   const p = hrAfter(model, a, hrNow, horizon, speed, g, load);
   const short = seg.sec < LONG_SEC;
   let want = null;
-  if (p > target.max + 2) want = speedForHr(model, a, hrNow, horizon, target.max - 3, g, load);
-  else if (!short && p < target.min - 3) want = speedForHr(model, a, hrNow, horizon, (target.min + target.max) / 2, g, load);
+  let dir = 0;
+  if (p > target.max + 2) { want = speedForHr(model, a, hrNow, horizon, target.max - 3, g, load); dir = -1; }
+  else if (!short && p < target.min - 3) { want = speedForHr(model, a, hrNow, horizon, (target.min + target.max) / 2, g, load); dir = 1; }
   if (want == null) return null;
-  const v = r1(clamp(clamp(want, speed - 0.5, speed + 0.5), minSpeed, maxSpeed));
+  if (remaining < LATE_SEC && (dir < 0 ? p - target.max : target.min - p) < LATE_PPM) return null;
+  let v = clamp(want, speed - 0.5, speed + 0.5);
+  v = dir < 0 ? Math.min(v, speed) : Math.max(v, speed);
+  if (Number.isFinite(Number(base)) && base != null) v = clamp(v, Number(base) - LIVE_MAX_DOWN, Number(base) + LIVE_MAX_UP);
+  v = r1(clamp(v, minSpeed, maxSpeed));
+  if ((dir < 0 && v > speed) || (dir > 0 && v < speed)) return null;
   return Math.abs(v - speed) >= 0.2 - 1e-9 ? { speed: v, predicted: Math.round(p) } : null;
 }
 
