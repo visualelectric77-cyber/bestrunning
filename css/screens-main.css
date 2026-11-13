@@ -2701,3 +2701,6 @@ body.is-pushed .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12px); 
 .td-ready__txt span { font-size: var(--fs-sub); line-height: var(--lh-sub); color: var(--text-2); text-wrap: pretty; }
 .td-ready__txt small { margin-top: 4px; font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-3); }
 .td-ready__d { color: var(--text-3); }
+/* Cambio automático del plan (js/training/day-fix.js): misma tarjeta que el semáforo, con «Deshacer» */
+.td-fix__undo { align-self: flex-start; margin-top: 8px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--fill-2, rgba(120, 120, 128, 0.24)); color: var(--text); font: inherit; font-size: var(--fs-sub); font-weight: 600; }
+.td-fix__undo:active { opacity: 0.7; }

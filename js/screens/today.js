@@ -23,6 +23,8 @@ import { eventOn } from '../training/season.js';
 import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
 import { raceSpeedFor, raceWorkoutId } from '../training/race.js';
 import { readiness } from '../training/readiness.js';
+import { dayState, planFix, applyFix, undoFix, fixOn } from '../training/day-fix.js';
+import { diagMark } from '../core/diag.js';
 import { syncFocus } from '../training/focus-sync.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
@@ -144,7 +146,7 @@ function trainHero(day, state, today, animate) {
     : isTest
       ? '<span class="td-hero__status">Test VAM</span>'
       : day.isOverride
-        ? '<span class="td-hero__status">Editada</span>'
+        ? `<span class="td-hero__status">${day.auto ? 'Ajustada' : 'Editada'}</span>`
         : day.event
           ? `<span class="td-hero__status is-event">${icon('star', 12)} ${esc(day.event.name || 'Especial')}</span>`
           : day.surprise
@@ -179,7 +181,7 @@ function trainHero(day, state, today, animate) {
     <div class="td-hero__actions">
       <button type="button" class="btn btn--primary btn--lg td-go" data-href="${play}" aria-label="${esc(`${goLabel}: ${w.title}`)}">${icon('play', 18)}<span>${goLabel}</span></button>
       <button type="button" class="btn btn--secondary btn--lg td-view" data-href="${detail}">Ver clase</button>
-      <button type="button" class="btn-icon td-swap" data-swap="${day.date}" aria-label="Cambiar clase">${icon('shuffle', 20)}</button>
+      <button type="button" class="btn-icon td-swap" data-swap="${day.date}" aria-label="Cambiar clase o moverla a otro día">${icon('shuffle', 20)}</button>
     </div>
   </article>`;
 }
@@ -504,6 +506,25 @@ function readinessBlock(today) {
   </section>`;
 }
 
+/**
+ * Corrección automática del plan (js/training/day-fix.js): qué ha cambiado hoy y por qué, con «Deshacer». Sale en el
+ * día en que se decidió y en el día al que se movió la sesión fuerte.
+ */
+function fixBlock(state, dateKey, today) {
+  const f = safe(() => fixOn(state, dateKey, today), null);
+  if (!f) return '';
+  const title = f.kind === 'move' ? (dateKey === today ? 'He movido tu sesión fuerte' : 'Sesión fuerte movida a este día')
+    : f.kind === 'trim' ? 'Hoy, la sesión más corta'
+      : f.kind === 'soft' ? 'Hoy, suave'
+        : 'He recolocado la sesión que te saltaste';
+  return `<section class="card td-ready td-fix td-ready--${f.kind === 'relocate' ? 'green' : f.level === 'red' ? 'red' : 'amber'}" aria-label="Cambio en tu plan">
+    <span class="td-ready__dot" aria-hidden="true"></span>
+    <div class="td-ready__txt"><b>${esc(title)}</b><span>${esc(f.text)}</span>
+      ${f.canUndo ? `<button type="button" class="td-fix__undo" data-undo-fix="${esc(f.id)}">Deshacer</button>` : ''}
+    </div>
+  </section>`;
+}
+
 function sessionsBlock(state, day, dateKey, today) {
   const list = sessionsOn(state, dateKey);
   if (!list.length) return '';
@@ -614,6 +635,7 @@ export function mount(el) {
       list ? `<section class="td-week">${seasonBar(si)}${weekStrip(list, today, selected, state)}</section>` : seasonBar(si),
       eventBanner(si, today),
       selected === today ? readinessBlock(today) : '',
+      fixBlock(state, selected, today),
       heroBlock(day, state, today, heroAnim),
       safe(() => sessionsBlock(state, day, selected, today), ''),
       goalCard(state, today),
@@ -645,6 +667,14 @@ export function mount(el) {
       render();
       return;
     }
+    const undo = e.target.closest('[data-undo-fix]');
+    if (undo) {
+      let ok = false;
+      setState((d) => { ok = undoFix(d, undo.dataset.undoFix); });
+      if (ok) { diagMark('plan.deshecho', { id: undo.dataset.undoFix }); haptic('light'); }
+      render();
+      return;
+    }
     const swap = e.target.closest('[data-swap]');
     if (swap) {
       haptic('light');
@@ -665,9 +695,21 @@ export function mount(el) {
   };
   root.addEventListener('click', onClick);
 
-  // Semáforo de fatiga: pide las métricas de Salud al iPhone (si las ofrece) y repinta si han cambiado
+  // Semáforo de fatiga: pide las métricas de Salud al iPhone (si las ofrece) y repinta si han cambiado.
+  // Con ellas recién llegadas se corrige el día (js/training/day-fix.js): si hoy tocaba fuerte y llegas mal, se
+  // recorta o se mueve; y si te saltaste la sesión fuerte, se recoloca. Una vez al día; se explica en Hoy y se deshace.
   let gone = false;
-  fetchHealthMetrics().then((m) => { if (m && !gone) render(); }).catch(() => {});
+  const fixDay = (m) => {
+    if (gone) return;
+    const st = getState();
+    const fix = safe(() => planFix(st, today, safe(() => dayState(m, today, st.history), null)), null);
+    if (!fix) return;
+    let ok = false;
+    setState((d) => { ok = applyFix(d, fix); });
+    if (ok) diagMark('plan.corrige', { tipo: fix.kind, nivel: fix.level, de: fix.from, a: fix.to || '-' });
+  };
+  const refreshHealth = () => fetchHealthMetrics().then((m) => { if (gone) return; fixDay(m); if (m) render(); }).catch(() => {});
+  refreshHealth();
 
   // Si la app sigue abierta al cambiar de día (o vuelve de segundo plano), se actualiza sola.
   const checkDay = () => {
@@ -676,6 +718,7 @@ export function mount(el) {
     if (selected === today) selected = k;
     today = k;
     render();
+    refreshHealth();
   };
   const onVis = () => document.visibilityState === 'visible' && checkDay();
   const timer = setInterval(checkDay, 60000);

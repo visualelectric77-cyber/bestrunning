@@ -226,6 +226,21 @@ export function openSwapSheet(dateKey, { onDone = null } = {}) {
       });
     },
     actions: [
+      // Mover la sesión entera a otro día de la semana (lo mismo que arrastrar un día en Mi plan). Lo que mueves tú
+      // manda: la corrección automática del plan no vuelve a tocar esos días.
+      ...(isRest || day.status === 'done' || day.race ? [] : [{
+        label: 'Mover a otro día',
+        kind: 'secondary',
+        onClick: (close) => {
+          close();
+          chooseMoveTarget(day, (a, b) => {
+            setState((d) => { swapDays(d, a, b); });
+            haptic('success');
+            toast(`Intercambiado: ${dayName(a)} ⇄ ${dayName(b)}`, { icon: 'shuffle', kind: 'success' });
+            onDone?.(null);
+          });
+        },
+      }]),
       {
         label: 'Ver todas las clases',
         kind: 'secondary',
@@ -381,7 +396,7 @@ function dayRow(day, today, i, createdKey, state) {
           <div class="pn-card__title">Descanso</div>
           <div class="pn-card__meta"><span>${sub}</span></div>
         </div>
-        ${day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}
+        ${day.isOverride ? `<span class="pn-badge">${day.auto ? 'Ajustado' : 'Editado'}</span>` : ''}
         ${more}
       </div>${extras}</li>`;
   }
@@ -402,7 +417,7 @@ function dayRow(day, today, i, createdKey, state) {
     day.event && !day.isOverride ? `<span class="br-chip br-chip--event">${esc(day.event.name || 'Especial')}</span>` : ''}${
     day.surprise && !day.event && !day.isOverride ? '<span class="br-chip br-chip--surprise">Sorpresa</span>' : ''}${
     day.focus && !day.event ? '<span class="br-chip br-chip--focus">Tu enfoque</span>' : ''}${
-    day.isOverride ? '<span class="pn-badge">Editado</span>' : ''}`;
+    day.isOverride ? `<span class="pn-badge">${day.auto ? 'Ajustado' : 'Editado'}</span>` : ''}`;
   const label = `${capitalize(fmt.weekdayName(wd))} ${dnum}: ${w.title}, ${catName(w.category)}, ${mins(w)} minutos.${
     status === 'done' ? ' Hecho.' : status === 'missed' ? ' No realizada.' : ''
   }${locked ? '' : ' Mantén pulsado para moverlo.'}`;

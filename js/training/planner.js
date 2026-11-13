@@ -857,7 +857,9 @@ function resolveDay(state, dateKey, { ignoreOverride = false } = {}) {
     surprise: !isOverride && !!def.surprise,
     focus: !isOverride && kind !== 'rest' && def.focus ? def.focus : null,   // la sesión de la semana que trabaja tu enfoque
     event: !isOverride && def.event ? { key: def.event.key, name: def.event.name } : null,
-    intro: kind === 'rest' ? '' : isOverride && !def.role ? ''
+    // (un cambio automático del plan —js/training/day-fix.js— trae su propia frase: por qué hoy toca esto)
+    auto: isOverride && ov?.auto === true,
+    intro: kind === 'rest' ? '' : isOverride && typeof ov?.intro === 'string' && ov.intro ? ov.intro : isOverride && !def.role ? ''
       : pace ? `Hoy, tu ritmo de ${PACE_LABEL[pace.distance]}: ${String(pace.speed.toFixed(1)).replace('.', ',')} km/h. Apréndetelo: tiene que salir igual el primer bloque que el último.`
         : introFor(info, def, week.adapt),
   };
@@ -938,6 +940,7 @@ export function planDay(state, dateKey, now = new Date()) {
     status,
     session: session || null,
     isOverride: r.isOverride,
+    auto: r.auto === true,
     role: r.role,
     surprise: r.surprise,
     focus: r.focus || null,
@@ -1088,6 +1091,34 @@ export function easierNext(state, fromKey) {
     return { date, minutes: r.minutes, from: r.templateId, fromTitle: cur.title, to, toTitle: alt.title };
   }
   return null;
+}
+
+/**
+ * Lo que toca un día tal como lo resuelve el plan, con su semilla (para mover una clase intacta a otro día) y su
+ * intensidad. → { date, kind, templateId, minutes, seed, isOverride, auto, race, event, pace, intensity, test }
+ */
+export function dayPick(state, dateKey, opts = {}) {
+  const r = resolveDay(state, dateKey, opts);
+  const t = r.templateId ? getTemplate(r.templateId) : null;
+  return {
+    date: r.date, kind: r.kind, templateId: r.templateId, minutes: r.minutes, seed: r.seed, isOverride: r.isOverride,
+    auto: r.auto === true, race: !!r.race, event: !!r.event, pace: !!r.pace, test: r.templateId === TEST_ID,
+    intensity: r.kind === 'rest' || !t ? null : templateMeta(t).intensity,
+    title: t?.title || '', durations: t ? [...t.durations] : [],
+  };
+}
+
+/** Un trote suave conocido de esa duración para ese día (distinto de `exclude`), o null. */
+export function easyPick(state, dateKey, minutes, exclude = null) {
+  const soft = EASY_RUNS.filter((id) => id !== exclude && getTemplate(id) && allows(getTemplate(id), minutes));
+  const to = soft.length ? soft[hashStr(`easy|${dateKey}`) % soft.length] : fallbackPick(state, dateKey, minutes, { intensity: 'easy', exclude });
+  const alt = getTemplate(to);
+  return alt && templateMeta(alt).intensity === 'easy' ? { templateId: to, title: alt.title } : null;
+}
+
+/** ¿Hecha la sesión de ese día? (misma regla que el resto de la app) */
+export function dayDone(state, dateKey) {
+  return isDone(sessionFor(state?.history, dateKey));
 }
 
 /** Próximo día con test VAM (desde `fromKey` incluido) que aún no se ha hecho. */
