@@ -32,6 +32,7 @@ import {
 import { isNative, nativeStatus, healthMissingOf } from '../integrations/native-bridge.js';
 import { diagMark } from '../core/diag.js';
 import { showWatchSync } from '../ui/watch-sync.js';
+import { watchSpeedCardHtml } from '../ui/watch-speed-card.js';
 import { aiAvailable, aiRequest, numbersAreGrounded } from '../integrations/ai.js';
 
 const CAT_NAMES = {
@@ -338,6 +339,8 @@ export function mount(el, { params = {} } = {}) {
             </section>
 
             ${hasHrSeries(s) ? hrAnalysis(s, st) : ''}
+
+            ${watchSpeedCardHtml(s)}
 
             ${form ? formSections(s, st) : readOnlySections(s, st)}
             </div>

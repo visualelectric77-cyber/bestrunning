@@ -60,6 +60,19 @@ const GROUPS = {
   hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
   hrok: ['Pulso perfecto. Mantén este ritmo.', 'Vas en tu zona. Muy bien.'],
   hron: ['Hoy te guío por tu pulso.'],
+  // Lo que antes solo salía escrito (no da tiempo a leerlo corriendo): día cargado, el tramo que viene cambiado por
+  // tu pulso (antes del pre-aviso, que ya dice la velocidad), consejo en modo «solo aviso» y pulso perdido
+  hrday: ['Hoy tu pulso va más alto de lo normal. Si no te encuentras bien, baja el ritmo.'],
+  hrnextdown: ['Llegas alto de pulso. El siguiente tramo, más suave.', 'Hoy tu pulso va alto. El siguiente tramo, más suave.'],
+  hrnextup: ['Vas sobrado. El siguiente tramo, un poco más rápido.'],
+  hrrec: ['Pulso alto. La recuperación, más suave.'],
+  hrsugdown: ['Vas a acabar por encima de tu zona. Te conviene bajar a…'],
+  hrsugup: ['Vas a acabar por debajo de tu zona. Puedes subir a…'],
+  hrlost: ['No me llega tu pulso. Revisa el reloj.'],
+  // Velocidad real que estima el reloj frente a la de la clase (js/training/watch-speed.js): seguido de la de la clase
+  wslow: ['Parece que vas más lento que la clase. Pon la cinta a…', 'El reloj te ve por debajo de la clase. Sube la cinta a…'],
+  wfast: ['Parece que vas más rápido que la clase. Pon la cinta a…', 'El reloj te ve por encima de la clase. Baja la cinta a…'],
+  wok: ['Vas clavado a la velocidad de la clase.'],
   // Test VAM asistido (js/training/vam-assist.js): cómo vas; las velocidades del test nunca cambian
   vamsafe: ['Si notas dolor en el pecho o mareo, para enseguida.'],
   vamhigh: ['Hoy tu pulso va alto. La prueba puede salir peor de lo normal.'],
@@ -109,6 +122,12 @@ const GROUPS = {
   racehalf: ['¡Mitad de carrera! Mantén el ritmo, vas muy bien.', 'Ya llevas la mitad. Cabeza fría y piernas firmes.'],
   racelastkm: ['¡Último kilómetro! Ahora es tuyo: dalo todo.', '¡Último kilómetro! Si te queda algo, este es el momento.'],
   racefinish: ['¡Meta! ¡Lo has conseguido! Enhorabuena, qué carrera.', '¡Cruzas la meta! Disfrútalo: te lo has ganado.'],
+  // Guía de carrera por pulso (js/training/race-guide.js): cambia la velocidad (o lo aconseja) y dice cómo vas
+  racehigh: ['A este ritmo llegas a meta pasado de pulso. Bajamos a…'],
+  racelow: ['Vas con margen para la meta. Subimos a…'],
+  racesugdown: ['A este ritmo llegas a meta pasado de pulso. Te conviene bajar a…'],
+  racesugup: ['Vas con margen para la meta. Puedes subir a…'],
+  raceok: ['Vas bien para tu meta. Mantén este ritmo.', 'Ritmo perfecto para llegar. Sigue así.'],
   // Halloween (clases con event 'halloween'): intro, ánimos en los tramos duros y final
   intro_halloween: ['Es noche de Halloween. Hoy se corre en la oscuridad, y sin mirar atrás.'],
   halloween: ['¡Corre, que te alcanzan!', 'Algo se mueve en la niebla. ¡Acelera!', 'No mires atrás. ¡Sigue corriendo!', 'Las calabazas te observan. ¡Vamos!'],
@@ -142,7 +161,8 @@ export const MUSIC_CUES = {
 };
 
 /** Portadoras: conservar un poco de cola al recortar para que la pausa antes del número suene natural. */
-const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set', 'hrhigh', 'hrlow', 'inclup', 'incldown', 'inclnow', 'speedalso']);
+const SUSPENDED = new Set(['up', 'down', 'sprintpre', 'recoverpre', 'set', 'hrhigh', 'hrlow', 'inclup', 'incldown', 'inclnow', 'speedalso',
+  'hrsugdown', 'hrsugup', 'wslow', 'wfast', 'racehigh', 'racelow', 'racesugdown', 'racesugup']);
 
 function buildScript() {
   const out = [];

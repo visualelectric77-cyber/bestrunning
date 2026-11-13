@@ -293,6 +293,25 @@
   "vamnear_1",
   "vamplateau_1",
   "vamover_1",
-  "vamodd_1"
+  "vamodd_1",
+  "hrday_1",
+  "hrlost_1",
+  "hrnextdown_1",
+  "hrnextdown_2",
+  "hrnextup_1",
+  "hrrec_1",
+  "hrsugdown_1",
+  "hrsugup_1",
+  "racehigh_1",
+  "racelow_1",
+  "raceok_1",
+  "raceok_2",
+  "racesugdown_1",
+  "racesugup_1",
+  "wfast_1",
+  "wfast_2",
+  "wok_1",
+  "wslow_1",
+  "wslow_2"
  ]
 }

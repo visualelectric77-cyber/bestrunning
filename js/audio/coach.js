@@ -1031,6 +1031,28 @@ const PACK_SAY = {
   raceFinish: ['raceFinish', {}], halloween: ['halloween', {}], halloweenFinish: ['halloweenFinish', {}],
 };
 
+/** Avisos sueltos de `say('hrNote', { cue })`: clip fijo, o grupo con variantes si acaba en «_». */
+const NOTE_CLIPS = {
+  day: 'hrday_1', rec: 'hrrec_1', nextdown: 'hrnextdown_1', nextdownday: 'hrnextdown_2', nextup: 'hrnextup_1',
+  lost: 'hrlost_1', raceok: 'raceok_', watchok: 'wok_1',
+};
+/** Voz del desvío del reloj: mínimo 4 min entre dos y 4 por hora (vale para toda la página, aunque el coach se rehaga). */
+const DRIFT_GAP_MS = 240000;
+const DRIFT_MAX_HOUR = 4;
+const driftTimes = [];
+function driftVoiceAllowed(now) {
+  while (driftTimes.length && now - driftTimes[0] > 3600000) driftTimes.shift();
+  if (driftTimes.length >= DRIFT_MAX_HOUR) return false;
+  if (driftTimes.length && now - driftTimes[driftTimes.length - 1] < DRIFT_GAP_MS) return false;
+  driftTimes.push(now);
+  return true;
+}
+
+/** Consejos con cifra de `say('advise', { cue, speed })`: grupo de la portadora, seguido de la velocidad. */
+const ADVISE_GROUPS = {
+  hrdown: 'hrsugdown', hrup: 'hrsugup', racedown: 'racesugdown', raceup: 'racesugup', wslow: 'wslow', wfast: 'wfast',
+};
+
 /**
  * Coach para una sesión. settings = state.audio + { name, announceLead } (+ opcionales: onCue(cue) para subtítulos,
  * watchReminder (si falta, el guardado en el estado), music: true si suena la música de la app). Si settings.packId
@@ -1384,6 +1406,11 @@ export function createCoach(workout, settings = {}) {
 
   function sayPack(kind, v, seg) {
     const speedOf = (x) => { const s = speedClip(toNumber(x)); return s && avail.has(s) ? s : null; };
+    // una variante grabada del grupo, al azar (null si el pack no trae ninguna)
+    const oneOf = (g) => {
+      const ids = [1, 2, 3].map((i) => `${g}_${i}`).filter((id) => avail.has(id));
+      return ids.length ? ids[Math.floor(Math.random() * ids.length)] : null;
+    };
     switch (kind) {
       case 'km': {
         const km = Math.round(toNumber(v.km));
@@ -1404,11 +1431,37 @@ export function createCoach(workout, settings = {}) {
       case 'hrAdjust': {
         // Modo pulso: «Vas alto de pulso. Bajamos a…» / «Vas sobrado. Sube a…» + la velocidad nueva. Sin la frase
         // grabada, solo la velocidad (como «adjust»).
-        const g = v.alarm ? 'hralarm' : toNumber(v.dir) < 0 ? 'hrhigh' : 'hrlow';
-        const ids = [1, 2].map((i) => `${g}_${i}`).filter((id) => avail.has(id));
-        const c = ids.length ? ids[Math.floor(Math.random() * ids.length)] : null;
+        // En carrera (v.race) el motivo es la meta: «A este ritmo llegas a meta pasado de pulso. Bajamos a…».
+        const down = toNumber(v.dir) < 0;
+        const g = v.alarm ? 'hralarm' : down ? 'hrhigh' : 'hrlow';
+        const c = (!v.alarm && v.race ? oneOf(down ? 'racehigh' : 'racelow') : null) || oneOf(g);
         const s = speedOf(v.speed);
         return go(packItem('adjust', c ? [c, ...(s ? [s] : [])] : (s ? [s] : null), 2, { replace: true }));
+      }
+      case 'hrNote': {
+        // Lo que antes solo salía escrito y corriendo no da tiempo a leer. Una frase grabada; sin ella, nada.
+        // cue: day (día cargado) · rec (recuperación más suave) · nextdown / nextdownday / nextup (el tramo que
+        // viene, cambiado por tu pulso: el pre-aviso dice después la velocidad) · lost (no llega el pulso) ·
+        // raceok (vas bien para tu meta) · watchok (vas a la velocidad de la clase)
+        const id = NOTE_CLIPS[String(v.cue || '')];
+        const c = id ? (id.endsWith('_') ? oneOf(id.slice(0, -1)) : (avail.has(id) ? id : null)) : null;
+        if (!c) return Promise.resolve();
+        return go(packItem('hrNote', [c], 2, { replace: true }));
+      }
+      case 'watchDrift':
+      case 'advise': {
+        // Consejo con cifra: la app no toca la velocidad, te dice a cuál ir. cue: hrdown / hrup (modo «solo aviso»),
+        // racedown / raceup (carrera), wslow / wfast (el reloj te ve por debajo / por encima de la clase).
+        // 'watchDrift' { dir, speed } es lo mismo dicho por la sesión del reloj. Sin frase o sin cifra grabada, nada.
+        const cue = kind === 'watchDrift' ? (toNumber(v.dir) < 0 ? 'wslow' : 'wfast') : String(v.cue || '');
+        const g = ADVISE_GROUPS[cue];
+        const c = g ? oneOf(g) : null;
+        const s = speedOf(v.speed);
+        if (!c || !s) return Promise.resolve();
+        // El desvío del reloj puede repetirse en cada tramo (si la calibración aún va corta): con la voz, como mucho
+        // una vez cada 4 min y 4 por hora. El rótulo en pantalla sigue saliendo siempre.
+        if (kind === 'watchDrift' && !driftVoiceAllowed(Date.now())) return Promise.resolve();
+        return go(packItem('advise', [c, s], 2, { replace: true }));
       }
       case 'hrOk':
       case 'hrOn': {

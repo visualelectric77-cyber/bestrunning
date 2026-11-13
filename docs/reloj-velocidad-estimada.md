@@ -84,6 +84,63 @@ Arreglo:
 Demostración: `?debug=speed&cinta=parado` (reloj simulado quieto moviendo la mano: el chip se queda en `≈–`).
 Pruebas: `tools/test-watch-speed.mjs` (73), `logic-check` (216).
 
+## Primera clase real (13 nov) → corrección por franjas, serie, cadencia y tarjeta — hecho en local, sin publicar
+
+En la primera clase corrida de verdad (20 min, sin tocar la velocidad) el reloj midió de media algo menos que la clase,
+pero bastante menos en el bloque rápido: el error del reloj no es un factor único, se queda más corto cuanto más
+rápido. Y la sesión solo guardaba el total, así que no se podía comparar por velocidades. Cambios (solo web; el reloj
+no necesita build nueva):
+
+1. **Serie en la sesión** — `session.watchSeries = [[s de clase, km/h del reloj sin corregir | null, cadencia | null,
+   km/h de la clase], …]`, un punto cada 10 s (≈ 2 KB por 20 min), como mucho 720 puntos (si se llena, se juntan de
+   dos en dos). `seriesCompare(serie)` la compara por franjas usando solo tramos estables.
+2. **Corrección por franjas** — franjas fijas de 2 km/h de la velocidad de la clase (menos de 6, 6–8, 8–10, 10–12,
+   12–14, 14 o más), iguales para todos. `state.watchCal.bands = { '8': { factor, n, ratios }, … }` junto a la
+   corrección única de siempre, que sigue valiendo tal cual (lo ya aprendido no se pierde). Una franja se usa con 2
+   clases que tengan al menos 2 min estables en ella (esto cambió el mismo día: ver «Ampliación» más abajo); entre dos
+   franjas con datos, la recta que las une (sin saltos);
+   más allá, vuelve en 2 km/h a la corrección única. `correctSpeed(cal, lectura)` pasa de lo que marca el reloj a
+   km/h de cinta. El margen de la corrección pasa de 0,85–1,15 a 0,8–1,25.
+   Al reloj le va, cada segundo, la corrección de la velocidad que llevas (`state.speedFactor`): su pantalla Ritmo
+   marca lo mismo que el chip sin tocar la app nativa.
+3. **Cadencia y zancada** — `session.watchSpeed` gana `cadence` (pasos/min), `stride` (m: velocidad de la clase ÷
+   cadencia, en tramos estables), `pairKm` y `bands: { franja: { sec, appKm, km, ratio, cadence, stride } }`.
+4. **Tarjeta «Reloj frente a clase» en el Resumen** (`js/ui/watch-speed-card.js`, una línea en `summary.js`): clase,
+   reloj y diferencia en total; una línea por franja (velocidad de la clase, lo que marcó el reloj, diferencia,
+   pasos/min · zancada); cadencia y zancada medias. Solo sale si la sesión tiene datos del reloj. Las sesiones de
+   antes enseñan solo el total.
+
+Demostración: `?debug=speed` — el reloj simulado ahora se queda corto cuanto más rápido (clavado a 7 km/h, un 3,5 %
+menos por cada km/h de más) y trae su corrección por franjas; la sesión se guarda marcada como simulada
+(`watchSpeed.sim`) para ver la tarjeta, y no enseña nada a la corrección.
+Pruebas: `tools/test-watch-speed.mjs` (128).
+
+### Ampliación del mismo día: aprende de TODAS las clases desde la primera, y avisa de viva voz
+
+El usuario pidió que aprenda de verdad, de todas las clases desde ya, y que los avisos se oigan (corriendo no da tiempo
+a leerlos). Sustituye a lo de «2 clases sin tocar la velocidad»:
+
+- **Qué cuenta:** los tramos estables de cualquier clase (pasados 30 s de cualquier cambio de velocidad, lo haga la
+  clase o lo hagas tú a mano), a partir de 6 km/h y con lecturas que cuadren con la clase. Una clase enseña la
+  corrección única con 1 min estable y una franja con 30 s.
+- **Con qué peso:** cada clase pesa por sus segundos estables (15 min como mucho) y la corrección se encoge hacia «sin
+  corregir» mientras haya poco: con W segundos se aplica W / (W + W0) de lo medido, con W0 = 10 min para la única y
+  4 min para cada franja (que se encoge hacia la única). Se guarda la mediana ponderada de las 12 últimas clases.
+  `watchCal` gana `secs` junto a `ratios`; lo guardado antes (sin segundos) cuenta como 5 min.
+- **El margen del aviso** depende de cuánta calibración hay detrás (`conf`, 0…1): 0,5 km/h con toda; hasta el 8 % de
+  la velocidad con ninguna.
+- **Queda escrito:** `session.watchSpeed.learn` (lo que enseñó esa clase) y, en el diagnóstico, una línea
+  `reloj.aprende franja=8–10 km/h min=5 antes=1.009 despues=1.067` por franja (y `franja=todas` para la única).
+  La tarjeta del Resumen dice a qué velocidades ha aprendido la clase.
+- **Voz:** donde sale el aviso de desvío se llama además a `coachCall('say', 'watchDrift', { dir, speed })`; la frase
+  es de la sesión principal (coach.js / pack de Lucía). Si no está grabada, no dice nada.
+- **Para el control por pulso y el análisis:** `speedTrack.real(t)` → `{ kmh, raw, cadence, conf, ok, dev }` o null, y
+  `seriesReal(serie, cal)` para la serie ya corregida.
+
+Pendiente de esta parte: con una sola clase real no se puede afirmar la tendencia; se irá viendo en el diagnóstico.
+Cadencia «por tramo de la clase» (no por franja) se puede sacar de la serie, pero aún no se pinta. Cuándo publicar lo
+decide la sesión principal (encargo del usuario del 13 nov).
+
 ## Qué falta probar con el reloj de verdad en el gimnasio
 
 1. **Permiso de Movimiento.** La primera vez el reloj pedirá «Movimiento y actividad física» (texto nuevo en

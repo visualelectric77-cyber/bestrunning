@@ -7,6 +7,10 @@
 // Siempre con límites: antes de la clase −0,6 / +0,3 km/h sobre lo planeado; en directo, pasos de ±0,5 y como mucho
 // −0,8 / +0,5 en todo el tramo sobre la velocidad con la que empezó; los arreones cortos (rápido o sprint de < 3 min)
 // se definen por velocidad y nunca se suben por pulso.
+// 4. Con «Entreno exigente», las series cortas (correr o rápido de 45 s a 3 min): si a esa velocidad ni manteniéndola
+//    llegarías al centro de la zona con tu pulso de hoy, la siguiente serie sube hasta +0,3 (seriesSpeed).
+// 5. La cuenta de tu pulso se lleva con la velocidad a la que corres de verdad cuando el reloj la sabe con garantías
+//    (effectiveSpeed); y si no vas a la velocidad de la clase (≥ 0,5 km/h), el modo pulso no cambia nada: primero la cinta.
 import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, starterModel, HR_DT } from './hr-dynamics.js';
 
 const WORK = new Set(['jog', 'run', 'fast']);
@@ -121,6 +125,55 @@ export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, highDa
  * Nunca mueve la velocidad al revés de lo que pide el pulso (con poco tramo por delante el despeje podía pedir subir
  * yendo alto) y, con menos de 90 s por delante, no toca nada por unas pocas pulsaciones.
  */
+const REAL_MIN_DEV = 0.3;    // por debajo de esto, el reloj y la clase dicen lo mismo: manda la clase
+const REAL_MAX_DEV = 0.15;   // el reloj nunca mueve la cuenta más de un 15 % de la velocidad de la clase
+export const REAL_HOLD_DEV = 0.5; // desde aquí no vas a la velocidad de la clase: el modo pulso no toca nada (te avisa el reloj)
+
+/**
+ * La velocidad a la que corres de verdad, para llevar la cuenta de tu pulso: la que estima el reloj si se puede decidir
+ * con ella (`real.ok`: calibrada y con la clase asentada, js/training/watch-speed.js) y se aparta de la clase ≥ 0,3;
+ * si no, la de la clase. Así un día con la cinta más lenta de lo que dice la clase no se apunta como «día de pulso
+ * bajo» (ni al revés). → { v, real (¿sale del reloj?), dev (v − clase) }
+ */
+export function effectiveSpeed(classSpeed, real = null) {
+  const v = Number(classSpeed) || 0;
+  if (!(v > 0) || !real || real.ok !== true || !(Number(real.kmh) > 0)) return { v, real: false, dev: 0 };
+  const kmh = r1(clamp(Number(real.kmh), v * (1 - REAL_MAX_DEV), v * (1 + REAL_MAX_DEV)));
+  const dev = r1(kmh - v);
+  if (Math.abs(dev) < REAL_MIN_DEV - 1e-9) return { v, real: false, dev: 0 };
+  return { v: kmh, real: true, dev };
+}
+
+const SERIES_MIN_SEC = 45;   // series de 45 s a 3 min: más cortas son arreones (los define la velocidad)
+const SERIES_MAX_UP = 0.3;   // lo más que se sube una serie sobre lo planeado
+const SERIES_PEAK_ROOM = 5;  // si en la serie anterior de esa zona acabaste a menos de 5 ppm del techo, no se sube
+
+/**
+ * Series cortas con «Entreno exigente» (correr o rápido de 45 s a 3 min, sin cuesta). En una serie corta el pulso no
+ * llega a asentarse, así que mirar el pulso al acabarla no dice si la velocidad es la tuya: se mira el pulso que
+ * tendrías si la mantuvieras (el de equilibrio de tu modelo, con tu pulso de hoy y lo que llevas corrido). Si ni así
+ * llegarías al centro de la zona, la serie se te queda corta hoy y la siguiente sube, como mucho +0,3 km/h.
+ * Nunca con el modelo inicial, ni si en la serie anterior ya rozaste el techo, ni si con la velocidad nueva
+ * acabarías la serie por encima de la zona. Bajar lo sigue decidiendo nextSpeed.
+ * → velocidad nueva o null
+ */
+export function seriesSpeed(model, a, { next, hrEnd, load = 0, target, lastPeak = null, minSpeed = 1, maxSpeed = 20 } = {}) {
+  if (!model || model.starter || !next || !target || !(next.speed > 0) || !(target.max > target.min) || !Number.isFinite(hrEnd)) return null;
+  if (next.zone !== 'run' && next.zone !== 'fast') return null;
+  const sec = Number(next.sec) || 0;
+  const g = Number(next.incline) || 0;
+  if (sec < SERIES_MIN_SEC || sec >= LONG_SEC || g >= HILL_GRADE) return null;
+  if (lastPeak != null && lastPeak > target.max - SERIES_PEAK_ROOM) return null;
+  const planned = next.speed;
+  const mid = (target.min + target.max) / 2;
+  if (equilibrium(model, a, planned, g, load) >= mid - 2) return null;
+  let v = Math.min(planned + SERIES_MAX_UP, (mid - a - model.c * g - model.d * load) / model.b);
+  v = Math.floor(v * 10 + 1e-9) / 10;
+  while (v > planned && hrAfter(model, a, hrEnd, sec, v, g, load) > target.max - 2) v = r1(v - 0.1);
+  v = r1(clamp(v, minSpeed, maxSpeed));
+  return v - planned >= 0.2 - 1e-9 ? v : null;
+}
+
 export function liveSpeed(model, a, { seg, hrNow, remaining, speed, load = 0, target, minSpeed = 1, maxSpeed = 20, base = null } = {}) {
   if (!model || !seg || !target || hrNow == null || !(target.max > target.min) || !WORK.has(seg.zone)) return null;
   const horizon = clamp(remaining, 45, 240);

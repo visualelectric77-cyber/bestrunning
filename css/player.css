@@ -2008,6 +2008,23 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-iz__seg.is-high { background: #ff9f0a; }
 .sm-iz__seg.is-low { background: #64d2ff; }
 .sm-iz__legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font: 600 12px/1.2 var(--font); color: var(--text-2); }
+/* Resumen · «Reloj frente a clase» (js/ui/watch-speed-card.js): total en tres cifras y una línea por franja de velocidad.
+   Discreta: sin gráficos ni colores salvo la diferencia grande (≥ 5 %) en ámbar. */
+.sm-wsp__total { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+.sm-wsp__total span { font: 600 var(--fs-footnote)/1.2 var(--font); color: var(--text-2); }
+.sm-wsp__total small { display: block; margin-bottom: 4px; font: 600 11px/1 var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.sm-wsp__total b { font: 700 22px/1 var(--font-display); letter-spacing: -0.02em; color: var(--text); }
+.sm-wsp__table { margin-top: 14px; border-top: var(--hairline, 1px) solid var(--sep, rgba(255, 255, 255, 0.12)); }
+.sm-wsp__row { display: grid; grid-template-columns: 1.1fr 0.9fr 0.9fr 1.9fr; align-items: baseline; gap: 6px; padding: 8px 0; border-bottom: var(--hairline, 1px) solid var(--sep, rgba(255, 255, 255, 0.12)); font: 600 15px/1.2 var(--font); color: var(--text); }
+.sm-wsp__row--head { padding: 7px 0 6px; font: 600 11px/1 var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.sm-wsp__band small { margin-left: 3px; font: 600 11px/1 var(--font); color: var(--text-2); }
+.sm-wsp__w, .sm-wsp__c { color: var(--text-2); }
+.sm-wsp__d.is-far { color: #ff9f0a; }
+.sm-wsp__c { text-align: right; white-space: nowrap; }
+.sm-wsp__row--head span:last-child { text-align: right; }
+.sm-wsp__cad { margin: 12px 0 0; font: 400 var(--fs-footnote)/1.3 var(--font); color: var(--text-2); }
+.sm-wsp__cad b { font-weight: 700; color: var(--text); }
+.sm-wsp__note { margin-top: 10px; }
 .sm-iz__legend .is-in { color: #30d158; }
 .sm-iz__legend .is-high { color: #ff9f0a; }
 .sm-iz__legend .is-low { color: #64d2ff; }

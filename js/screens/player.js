@@ -22,7 +22,7 @@ import { attachPlayer, isNative, post as nativePost, nativeStatus } from '../int
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
-import { calibrateClass, nextSpeed, liveSpeed, pulseTrend, dynModelFrom } from '../training/hr-control.js';
+import { calibrateClass, nextSpeed, seriesSpeed, liveSpeed, pulseTrend, dynModelFrom, effectiveSpeed, REAL_HOLD_DEV } from '../training/hr-control.js';
 import { createVamAssist, vamPreCheck, VAM_TEXT } from '../training/vam-assist.js';
 import { createTracker, hrAfter } from '../training/hr-dynamics.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
@@ -32,7 +32,7 @@ import { diagMark, diagWatch } from '../core/diag.js';
 import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
 import { createRaceGuide } from '../training/race-guide.js';
-import { createSpeedTracker, createSpeedSim, calFactor, learnFactor } from '../training/watch-speed.js';
+import { createSpeedTracker, createSpeedSim, learnCal, calReport } from '../training/watch-speed.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -510,9 +510,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
   if (race) race.realSec = null;
   let raceResult = null;
   const planKmBefore = (i) => workout.segments.slice(0, i).reduce((a, x) => a + (x.speed * x.sec) / 3600, 0);
-  // El reloj simulado lleva el sesgo de serie (4 %) y la demostración enseña ya la corrección aprendida
+  // Con tu corrección reloj → cinta ya aprendida (única y por franjas de velocidad). El reloj simulado se queda corto
+  // cuanto más rápido vas y trae la corrección que le corresponde: la demostración enseña ya el chip corregido.
   try {
-    speedTrack = createSpeedTracker({ factor: speedSim ? 1 / speedSim.bias : calFactor(state.watchCal), restore: snap?.watchSpeed });
+    speedTrack = createSpeedTracker({ cal: speedSim ? speedSim.cal : state.watchCal, restore: snap?.watchSpeed });
   } catch { speedTrack = createSpeedTracker(); }
   // Reloj: estado de la clase en directo, sus órdenes (cmd) y su pulso. Inerte fuera de la app nativa.
   nb = attachPlayer({
@@ -526,8 +527,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
       ghost, ghostSide, canSkip: typeof music?.skipTrack === 'function',
       // ¿Sonó ya el audio en esta página? Con el iPhone bloqueado solo se reanuda así (tras una recarga, no arrancaría)
       audioLive: !!audioMod?.isUnlocked?.(),
-      // Tu corrección reloj → cinta ya aprendida: el reloj la aplica a lo que enseña en su pantalla Ritmo
-      speedFactor: speedSim ? null : speedTrack.factor(),
+      // Tu corrección reloj → cinta ya aprendida, la de la velocidad que llevas ahora: el reloj la aplica a lo que
+      // enseña en su pantalla Ritmo (así marca lo mismo que el chip del móvil)
+      speedFactor: speedSim ? null : speedTrack.factorNow(Date.now()),
     }),
     commands: {
       start: () => onStartTap(),
@@ -2946,6 +2948,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     return {
       t: Date.now(), appKmh: Number(s?.currentSpeed) || 0, appKm: Number(s?.distanceKm) || 0,
       running: s?.status === 'running' && !countingDown,
+      elapsed: Number(s?.totalElapsed) || 0,   // s de clase: para la serie del reloj que se guarda en la sesión
     };
   }
 
@@ -2970,6 +2973,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (d && s.status === 'running' && liveMounted()) {
       diagMark('reloj.desvio', { app: d.app, reloj: d.watch });
       notify(d.text, { icon: 'watch', duration: 8000 });
+      // …y de viva voz, que corriendo no da tiempo a leerlo. La frase la pone coach.js ('watchDrift': dir −1 si el reloj
+      // te ve por debajo de la clase, +1 por encima); si no está grabada en el pack, no dice nada.
+      coachCall('say', 'watchDrift', { dir: d.watch < d.app ? -1 : 1, speed: fmt.speed(d.app) });
     }
     renderEst();
   }
@@ -3416,7 +3422,33 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (now - st.highSince < 120000) return;
     st.warned = true;
     diagMark('pulso.cargado', { ppm: over });
+    coachCall('say', 'hrNote', { cue: 'day' }); // corriendo no da tiempo a leerlo: también con la voz
     notify(`Hoy tu pulso va ${over} ppm más alto de lo normal a esta velocidad. Si no te encuentras bien, baja el ritmo: hoy cuenta igual.`, { icon: 'heart', duration: 8000 });
+  }
+
+  /**
+   * Pulso perdido: llegaba del reloj y lleva 90 s sin llegar con la clase en marcha. Sin pulso, ni el modo pulso ni la
+   * guía de carrera pueden corregir nada, así que se dice (voz y rótulo), como mucho dos veces por clase.
+   */
+  function hrLostCheck(st, s, now) {
+    if (!engine || countingDown) return;
+    const live = liveHr();
+    const at = Number(live?.at) || 0;
+    if (live && Number(live.bpm) >= 40 && now - at <= 15000) {
+      if (at !== st.hrOkAt) st.hrOkN = (st.hrOkN || 0) + 1;
+      st.hrOkAt = at;
+      st.hrSeenAt = now;
+      st.hrLostSaid = false;
+      return;
+    }
+    if (s.status !== 'running') { if (st.hrSeenAt) st.hrSeenAt = now; return; } // parado no cuenta
+    if ((st.hrOkN || 0) < 6 || !st.hrSeenAt || st.hrLostSaid || (st.hrLostN || 0) >= 2) return;
+    if (now - st.hrSeenAt < 90000) return;
+    st.hrLostSaid = true;
+    st.hrLostN = (st.hrLostN || 0) + 1;
+    diagMark('pulso.perdido', { s: Math.round((now - st.hrSeenAt) / 1000) });
+    coachCall('say', 'hrNote', { cue: 'lost' });
+    notify('No llega tu pulso del reloj. Mira que el entreno siga en marcha en el Watch', { icon: 'heart', duration: 7000 });
   }
 
   /**
@@ -3453,6 +3485,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
       coachCall('seek', s2.totalElapsed);
       lastCoachPos = s2.totalElapsed;
     }
+    coachCall('say', 'hrNote', { cue: 'rec' }); // el porqué, con la voz; la velocidad la dice el pre-aviso
     notify(`Pulso alto (${Math.round(hr)}): la recuperación, más suave · ${fmt.speed(v)} km/h`, { icon: 'heart', duration: 5000 });
   }
 
@@ -3477,7 +3510,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (dt > 6) { dt = 0; st.dynResync = true; }
     st.dynPos = s.totalElapsed;
     st.dynClock = (st.dynClock ?? s.totalElapsed) + dt;
-    st.load += (Math.max(0, (s.currentSpeed || 0) - 8.5) * dt) / 60;
+    // La velocidad a la que corres de verdad: la del reloj si se puede decidir con ella (calibrada, clase asentada) y
+    // se aparta de la clase; si no, la de la clase. Con ella se lleva la carga y la cuenta de tu pulso de hoy.
+    let realNow = null;
+    try { realNow = speedTrack?.real?.(now) || null; } catch { realNow = null; }
+    const eff = effectiveSpeed(s.currentSpeed || seg.speed, realNow);
+    st.dev = eff.dev;
+    if (eff.real && !st.realSaid) { st.realSaid = true; diagMark('pulso.velreal', { clase: s.currentSpeed || seg.speed, real: eff.v }); }
+    st.load += (Math.max(0, eff.v - 8.5) * dt) / 60;
     const fresh = live && Number(live.bpm) >= 40 && now - (Number(live.at) || 0) <= 15000 && live.at !== st.dynAt;
     let bpm = null;
     if (fresh) {
@@ -3502,12 +3542,17 @@ export function mount(el, { params = {}, query = {} } = {}) {
       }
     }
     const incl = Number(seg.incline) || 0;
-    st.tracker.step(st.dynClock, s.currentSpeed || seg.speed, incl, st.load, bpm);
+    st.tracker.step(st.dynClock, eff.v, incl, st.load, bpm);
     return st.tracker.hr == null ? null : st.tracker;
   }
 
   /** ¿Se puede decidir ahora con el pulso? Hace falta una lectura creíble de hace ≤ 15 s y no venir de una pausa. */
-  const dynReady = (st, now) => now - (st.dynSeen || 0) <= 15000 && !(now < (st.dynQuietUntil || 0)) && !st.dynResync;
+  // OJO: tiene que ser `function` (se iza). Esto va después del `return` de mount: un `const` aquí no se inicializa
+  // nunca y usarlo lanza un error en cada tic. Pasó en la 1.30.0 y 1.30.1: el modo pulso con tu modelo y la guía de
+  // carrera se quedaron mudos sin que ninguna prueba lo viera (tools/test-player-scope.mjs lo vigila ahora).
+  function dynReady(st, now) {
+    return now - (st.dynSeen || 0) <= 15000 && !(now < (st.dynQuietUntil || 0)) && !st.dynResync;
+  }
 
   /**
    * Guía de carrera (js/training/race-guide.js): en el tramo de carrera no se busca una zona, sino llegar a la meta
@@ -3527,19 +3572,33 @@ export function mount(el, { params = {}, query = {} } = {}) {
       starter: !!dynModel.starter, minSpeed: tm.minSpeed ?? 1, maxSpeed: tm.maxSpeed ?? 20, manualAtMs: manualAdj.at,
     });
     raceView = { pred: raceRun.guide.predicted, hrMax: pf.hrMax || hrMaxFromAge(pf.age || 40) };
+    // «Vas bien para tu meta»: unos segundos después de pasar cada kilómetro (menos el último), si con este ritmo
+    // llegas dentro de tu margen y la guía no ha tenido que tocar nada en el último minuto y medio. Lo bueno también se dice.
+    const kmDone = Math.floor(done + 1e-6);
+    if (!r && kmDone >= 1 && raceRun.okKm !== kmDone && done - kmDone >= 0.03 && done - kmDone <= 0.15 && race.km - done > 1.05) {
+      raceRun.okKm = kmDone;
+      const p = raceView.pred;
+      if (Number.isFinite(p) && p <= raceView.hrMax && p >= raceView.hrMax - 8 && now - (raceRun.movedAt || 0) > 90000) {
+        diagMark('carrera.bien', { km: kmDone, meta: p });
+        coachCall('say', 'hrNote', { cue: 'raceok' });
+      }
+    }
     if (!r) return;
     const delta = fmt.speed(r.tenths / 10);
     const adviseOnly = manualAdj.n >= 2 && r.reason !== 'alarm';
     if (adviseOnly) {
       diagMark('carrera.aviso', { dir: r.dir, ppm: r.hr, meta: r.predicted });
+      const cur = Number(s.currentSpeed) || s.segment.speed;
+      coachCall('say', 'advise', { cue: r.dir < 0 ? 'racedown' : 'raceup', speed: fmt.speed(Math.round((cur + r.dir * r.tenths / 10) * 10) / 10) });
       notify(r.dir < 0
         ? `A este ritmo cruzarías la meta a ${r.predicted} ppm y tu máxima es ${r.hrMax}. Para llegar, baja ${delta} km/h`
         : `Vas con margen: cruzarías la meta a ${r.predicted} ppm. Puedes subir ${delta} km/h`, { icon: 'heart', duration: 7000 });
       return;
     }
     let applied = 0;
-    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm' })) applied++;
+    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: r.reason === 'alarm', race: true })) applied++;
     if (!applied) return;
+    raceRun.movedAt = now;
     const zone = s.segment.zone;
     hrCoachAdj[zone] = Math.round(((hrCoachAdj[zone] || 0) + r.dir * applied / 10) * 10) / 10;
     diagMark('carrera.guia', { dir: r.dir, kmh: applied / 10, ppm: r.hr, meta: r.predicted, motivo: r.reason });
@@ -3557,6 +3616,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!tr) return;
     // la velocidad con la que empezó este tramo: el control en directo no se aparta de ella más de −0,8 / +0,5
     if (st.baseSeg !== s.segIndex) { st.baseSeg = s.segIndex; st.baseSpeed = s.currentSpeed || seg.speed; }
+    // Pico de pulso de cada serie de trabajo, por zona: la siguiente serie no sube si en la anterior ya rozaste el techo
+    if (st.peakSeg !== s.segIndex) {
+      if (st.peakZone && st.peakHr) (st.zonePeak || (st.zonePeak = {}))[st.peakZone] = st.peakHr;
+      st.peakSeg = s.segIndex;
+      st.peakZone = seg.zone === 'run' || seg.zone === 'fast' ? seg.zone : null;
+      st.peakHr = 0;
+    }
+    if (st.peakZone && Number.isFinite(tr.hr)) st.peakHr = Math.max(st.peakHr, tr.hr);
     // Sin una lectura creíble y reciente (reloj mudo, lectura imposible, recién vuelto de una pausa) no se decide nada
     if (!dynReady(st, now)) return;
     // Si ya has corregido la velocidad dos veces en esta clase, mandas tú: la app deja de tocarla y solo avisa
@@ -3577,11 +3644,20 @@ export function mount(el, { params = {}, query = {} } = {}) {
       st.recSeg = s.segIndex;
       let target = null;
       try { target = segHrTarget(nx); } catch { target = null; }
-      const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, s.currentSpeed || seg.speed, incl, st.load);
-      const v = nextSpeed(dynModel, aDay, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay, ...lims });
+      const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, (s.currentSpeed || seg.speed) + (st.dev || 0), incl, st.load);
+      let v = nextSpeed(dynModel, aDay, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay, ...lims });
+      // Entreno exigente, series cortas: si esa serie se te queda corta para tu pulso de hoy, sube (hr-control.js
+      // seriesSpeed). Hace falta llevar ya unos minutos de pulso creíble hoy; como mucho 8 veces por clase.
+      let series = false;
+      if (v == null && pushy && (tr.seen || 0) >= 24 && (st.seriesN || 0) < 8 && !(manualAdj.at && now - manualAdj.at < 120000)
+        && Math.abs(st.dev || 0) < REAL_HOLD_DEV) {
+        v = seriesSpeed(dynModel, tr.a, { next: nx, hrEnd, load: st.load, target, lastPeak: st.zonePeak?.[nx.zone] ?? null, ...lims });
+        series = v != null;
+      }
       // Con el modelo inicial (tu primera clase con pulso) solo se baja: aún no sabemos lo bastante para pedirte más
       if (v != null && !(dynModel.starter && v > nx.speed) && engine.setSegmentSpeed?.(s.segIndex + 1, v)) {
-        diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a), alto: highDay ? 1 : 0 });
+        if (series) st.seriesN = (st.seriesN || 0) + 1;
+        diagMark('pulso.siguiente', { ppm: Math.round(hrEnd), kmh: v, era: nx.speed, a: Math.round(tr.a), alto: highDay ? 1 : 0, ...(series ? { serie: 1 } : {}) });
         renderNext(engine.getState());
         renderProfile();
         if (coach) {
@@ -3591,7 +3667,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
           coachCall('seek', s2.totalElapsed);
           lastCoachPos = s2.totalElapsed;
         }
-        notify(v < nx.speed
+        // el porqué, con la voz (la velocidad nueva la dice el pre-aviso que viene justo después)
+        // (en las series, el porqué solo la primera vez: después basta con el pre-aviso)
+        if (!series || !st.seriesSaid) coachCall('say', 'hrNote', { cue: v < nx.speed ? (highDay && target && hrEnd <= target.max ? 'nextdownday' : 'nextdown') : 'nextup' });
+        if (series) st.seriesSaid = true;
+        notify(series
+          ? `Esta serie se te queda corta para tu pulso de hoy: la siguiente, a ${fmt.speed(v)} km/h`
+          : v < nx.speed
           ? (highDay && target && hrEnd <= target.max
             ? `Hoy tu pulso va alto: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`
             : `Llegas a ${Math.round(hrEnd)} ppm: el siguiente tramo, más suave · ${fmt.speed(v)} km/h`)
@@ -3602,6 +3684,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // 2 · el tramo de ahora
     if ((st.dynN || 0) >= 10 || now - st.dynLast < 45000 || s.segElapsed < 30 || s.segRemaining < lead + 8) return;
     if (!HR_COACH_ZONES.has(seg.zone) || seg.sec < 120) return;
+    // No vas a la velocidad de la clase (lo dice el reloj, ya calibrado): tu pulso responde a otra velocidad, así que
+    // cambiar la de la clase no arregla nada. Primero la cinta: el aviso del reloj ya te dice a cuál ponerla.
+    if (Math.abs(st.dev || 0) >= REAL_HOLD_DEV) {
+      if (st.holdSeg !== s.segIndex) { st.holdSeg = s.segIndex; diagMark('pulso.espera', { desvio: st.dev }); }
+      return;
+    }
     // Acabas de cambiar tú la velocidad: 2 min sin tocarla (antes la app volvía a corregirte cada 45 s, hasta 10 veces)
     if (manualAdj.at && now - manualAdj.at < 120000) return;
     let target = null;
@@ -3618,6 +3706,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (hands) {
       st.dynN = (st.dynN || 0) + 1;
       diagMark('pulso.aviso', { dir, ppm: Math.round(tr.hr), prev: r.predicted });
+      // mandas tú: la app no toca la velocidad, pero te lo dice (antes solo salía escrito)
+      coachCall('say', 'advise', { cue: dir < 0 ? 'hrdown' : 'hrup', speed: fmt.speed(r.speed) });
       notify(dir < 0
         ? `Vas a acabar a ${r.predicted} ppm, por encima de tu zona. Si quieres, baja ${fmt.speed(tenths / 10)} km/h`
         : `Vas a acabar a ${r.predicted} ppm, por debajo de tu zona. Puedes subir ${fmt.speed(tenths / 10)} km/h`, { icon: 'heart', duration: 6000 });
@@ -3680,6 +3770,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (now - st.last < 1000) return;
     st.last = now;
     try { fatigueCheck(st, s, now); } catch { /* nada */ }
+    try { hrLostCheck(st, s, now); } catch { /* nada */ }
     let off = false;
     try { off = localStorage.getItem('ritmup.hrcoach') === 'off'; } catch { off = false; }
     // Test VAM: asistencia por pulso, pero ninguna velocidad cambia (ni en el calentamiento)
@@ -4285,14 +4376,21 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // App nativa: el pulso que el reloj ha mandado en directo (mismo cálculo que el Atajo); en Safari, nada
     try { Object.assign(session, nb.hrFields(session, st.profile || {})); } catch { /* sin pulso */ }
     // Lo que el Watch ha calculado que corrías (distancia y ritmo medio, orientativos), para compararlo después con la
-    // clase; y, si no has tocado la velocidad, lo que esta clase enseña de tu corrección reloj → cinta (watchCal)
-    let watchRatio = null;
-    if (!speedSim) {
-      try {
-        const ws = speedTrack?.summary();
-        if (ws) { session.watchSpeed = ws; watchRatio = speedTrack.classRatio(); }
-      } catch { watchRatio = null; }
-    }
+    // clase, con su cadencia y su zancada, y la serie compacta (reloj, cadencia y clase cada 10 s) para verlo tramo a
+    // tramo; y lo que esta clase enseña de tu corrección reloj → cinta, única y por franjas de velocidad (watchCal): se
+    // aprende de todas las clases, en sus tramos estables, con más peso cuantos más minutos. Con el reloj simulado
+    // (?debug=speed) se guarda marcado y no enseña nada.
+    let watchLearn = null;
+    let watchReport = null;
+    try {
+      const ws = speedTrack?.summary();
+      if (ws) {
+        session.watchSpeed = speedSim ? { ...ws, sim: true } : ws;
+        const series = speedTrack.series();
+        if (series.length) session.watchSeries = series;
+        if (!speedSim) watchLearn = speedTrack.learned();
+      }
+    } catch { watchLearn = null; }
     // 'playback' hasta que acabe la frase final (el fundido de la música devolvería la sesión a 'auto')
     sessionHoldUntil = performance.now() + SESSION_HOLD_MS;
     stopMusic(3);
@@ -4303,8 +4401,19 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const saved = dup || storageOk(() => setState((d) => {
       if (!Array.isArray(d.history)) d.history = [];
       d.history.push(session);
-      if (watchRatio != null) d.watchCal = learnFactor(d.watchCal, watchRatio);
+      if (watchLearn) {
+        const before = d.watchCal || null;
+        d.watchCal = learnCal(before, watchLearn);
+        watchReport = calReport(before, d.watchCal, watchLearn);
+      }
     }));
+    // Queda escrito en el diagnóstico qué ha aprendido esta clase del reloj (franja, minutos estables y la corrección
+    // antes y después), para poder comprobar en el iPhone que aprende de verdad
+    if (saved && watchReport) {
+      const f3 = (v) => Number(v).toFixed(3);
+      if (watchReport.unico) diagMark('reloj.aprende', { franja: 'todas', min: watchReport.unico.min, antes: f3(watchReport.unico.antes), despues: f3(watchReport.unico.despues) });
+      for (const b of watchReport.franjas) diagMark('reloj.aprende', { franja: `${b.label} km/h`, min: b.min, antes: f3(b.antes), despues: f3(b.despues) });
+    }
     if (saved) saveActiveSession(null);
     else {
       // Sin espacio: la instantánea (ya terminada) se conserva para guardarla al volver a abrir la app

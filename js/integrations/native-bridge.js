@@ -62,7 +62,8 @@ import { diagMark } from '../core/diag.js';
  *   inTestStage?: boolean, seg?: SegState, next?: NextSeg, elapsed?: number, remaining?: number, total?: number,
  *   km?: number, kcal?: number, avgKmh?: number, hrTarget?: HRZoneSpec, hrUsual?: HRUsual, record?: RecordState,
  *   voice?: boolean, music?: MusicState, speedFactor?: number }} StateData   speedFactor (build 24): tu corrección
- *   personal reloj → cinta ya aprendida (0,85…1,15); el reloj la aplica a lo que calcula antes de enseñarlo.
+ *   personal reloj → cinta ya aprendida, la de la velocidad que llevas (0,8…1,25; va por franjas desde la web
+ *   1.31); el reloj la aplica a lo que calcula antes de enseñarlo.
  * @typedef {{ name: string, phase?: string, n?: number, seg?: number, dir?: string, kmh?: number, goAt?: number,
  *   i?: number, prev?: number, reason?: string, zone?: string, delta?: number, total?: number, km?: number,
  *   pace?: string, d?: number, bestKm?: number, title?: string, artist?: string, bpm?: number, vam?: number }} EventData
