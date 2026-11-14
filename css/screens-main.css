@@ -2710,3 +2710,5 @@ body.is-pushed .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12px); 
 .td-bonus__b b { font-size: 24px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
 .td-bonus__b span { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-2); }
 .td-bonus__b:active { background: var(--fill-2); }
+.td-bonus__soon { display: flex; gap: 6px; align-items: baseline; color: var(--text); }
+.td-bonus__soon svg { flex: none; transform: translateY(1px); color: var(--warn); }

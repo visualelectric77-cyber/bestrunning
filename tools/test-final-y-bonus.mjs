@@ -156,6 +156,8 @@ section('Bonus: semana completa y día de descanso');
   ok(!bonusOffer(st, SUN, now), 'falta una sesión: no hay bonus');
   done(train.at(-1));
   ok(weekComplete(st, SUN, now) && bonusOffer(st, SUN, now), 'semana completa y domingo de descanso: bonus');
+  // la víspera, con todo hecho, ya se sabe que el domingo habrá bonus (Hoy lo avisa en la tarjeta de ese día)
+  ok(bonusOffer(st, SUN, new Date(2026, 10, 14, 20, 0, 0)), 'el sábado por la noche ya consta el bonus del domingo');
   ok(!bonusOffer(st, '2026-11-14', now), 'un día de entreno no ofrece bonus');
   // elegir el tiempo
   const picks = BONUS_MINUTES.map((m) => bonusPick(st, SUN, m));

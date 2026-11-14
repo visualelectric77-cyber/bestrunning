@@ -245,6 +245,8 @@ function restHero(day, state, today, animate) {
     </div>
   </article>`;
   }
+  // Un descanso que aún no ha llegado, con la semana ya completa: se avisa de que ese día habrá bonus
+  const bonusSoon = day.date > today && safe(() => bonusOffer(state, day.date), false);
   const next = nextTraining(state, day.date);
   const nextHtml = next
     ? `<button type="button" class="td-rest__next" data-href="#/workout/${enc(next.workout.id)}?date=${next.date}&from=today">
@@ -263,6 +265,7 @@ function restHero(day, state, today, animate) {
     </div>
     <h2 class="td-hero__title">Toca recargar</h2>
     <p class="td-hero__sub">${esc(line)}</p>
+    ${bonusSoon ? `<p class="td-hero__intro td-bonus__soon">${icon('star', 13)} Semana completa: ${rel === 'Mañana' ? 'mañana' : 'ese día'} tendrás aquí un bonus, un entreno sorpresa del tiempo que elijas.</p>` : ''}
     ${nextHtml}
     <div class="td-hero__actions">
       <button type="button" class="btn btn--secondary btn--lg btn--block" data-train-anyway="${day.date}">Entrenar igualmente</button>
