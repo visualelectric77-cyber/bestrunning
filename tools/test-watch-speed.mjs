@@ -58,29 +58,73 @@ section('Lecturas: saneado', () => {
 });
 
 section('Margen clase / reloj', () => {
-  ok(tolerance(10.9, true) === DRIFT_KMH && near(tolerance(10.9, false), 0.872) && tolerance(5, false) === 0.5,
-    'con corrección aprendida 0,5; sin ella, 0,5 o el 8 % de la velocidad');
-  ok(speedStatus(10.9, 10.3, true) === -1 && speedStatus(10.9, 10.3, false) === 0, '10,9 frente a 10,3: desviado solo con la corrección ya aprendida');
-  ok(speedStatus(10, 10.4, true) === 0 && speedStatus(10, 10.6, true) === 1 && speedStatus(10, 9.4, true) === -1, 'por encima, por debajo, en su sitio');
+  ok(tolerance(7.3, true) === DRIFT_KMH && near(tolerance(10, true), 1.8) && near(tolerance(10, false), 2.34) && near(tolerance(10, 0.5), 2.07),
+    'desvío sostenido: 1,5 km/h o el 18 %; sin corrección aprendida, un 30 % más');
+  ok(speedStatus(10, 11.5, true) === 0 && speedStatus(10, 8.5, true) === 0 && speedStatus(10, 12, true) === 1 && speedStatus(10, 8, true) === -1, 'por encima, por debajo, en su sitio');
   ok(driftText(10.9, 10.31) === 'La app marca 10,9 y el Watch calcula unos 10,3: ¿has cambiado la cinta?', `texto del aviso (${driftText(10.9, 10.31)})`);
 });
 
-section('Aviso de desvío: 20 s o más, 0,5 km/h o más, con la velocidad ya estable', () => {
-  // Cinta 0,6 por debajo, corrección aprendida: avisa una vez, pasados el asentamiento (20 s) y 20 s desviado
+section('Aviso de desvío: solo lo que el reloj distingue de verdad (14 nov: 5 avisos falsos en 50 min)', () => {
+  // (b) Desvío grande y sostenido: cinta 2 km/h por debajo → un aviso, pasado 1 min de asentamiento y 45 s desviado
   const tr = createSpeedTracker({ factor: 1 });
   const S = fresh();
-  const a = run(tr, S, { sec: 180, appKmh: 10.9, beltKmh: 10.3 });
+  const a = run(tr, S, { sec: 240, appKmh: 10, beltKmh: 8 });
   ok(a.length === 1, `un solo aviso en el mismo tramo (${a.length})`);
   const after = (a[0]?.at - fresh().t) / 1000;
-  ok(after >= SETTLE_SEC + DRIFT_SEC && after <= SETTLE_SEC + DRIFT_SEC + 8, `sale a los ~40 s del cambio, no antes (${after} s)`);
-  ok(a[0]?.app === 10.9 && a[0]?.watch === 10.3 && a[0]?.text === driftText(10.9, 10.3), `dice las dos cifras (${JSON.stringify(a[0])})`);
-  ok(tr.view(S.t).off === true && tr.view(S.t).dev === -0.6, 'el chip queda marcado como desviado (−0,6)');
-  // Otro tramo, también desviado: vuelve a avisar, pero no antes de 2 min del anterior
-  const b = run(tr, S, { sec: 200, appKmh: 12, beltKmh: 11.2 });
+  ok(after >= SETTLE_SEC + DRIFT_SEC && after <= SETTLE_SEC + DRIFT_SEC + 10, `sale a los ~105 s del cambio, no antes (${after} s)`);
+  ok(a[0]?.app === 10 && a[0]?.watch === 8 && a[0]?.text === driftText(10, 8), `dice las dos cifras (${JSON.stringify(a[0])})`);
+  ok(tr.view(S.t).off === true && tr.view(S.t).dev === -2, 'el chip queda marcado como desviado (−2,0)');
+  // Otro tramo, también muy desviado: vuelve a avisar (han pasado más de 3 min del anterior)
+  const b = run(tr, S, { sec: 200, appKmh: 12, beltKmh: 9.5 });
   ok(b.length === 1 && b[0].app === 12, `tramo nuevo desviado: otro aviso (${b.length})`);
+  // …pero no dos en menos de 3 min, aunque cambie el tramo
+  // …pero no dos en menos de 3 min: la clase baja 3 km/h, la cinta no se toca (el reloj no nota nada a los 80 s)
+  ok(run(tr, S, { sec: 100, appKmh: 9, beltKmh: 9.5 }).length === 0, 'menos de 3 min desde el anterior: no repite');
   // Vuelve a su sitio: el chip deja de estar desviado
   run(tr, S, { sec: 90, appKmh: 10, beltKmh: 10 });
   ok(tr.view(S.t).off === false && tr.view(S.t).kmh === 10, `en su sitio: sin marca (${JSON.stringify(tr.view(S.t))})`);
+
+  // (a) La clase cambia 1,6 km/h y la cinta se queda donde estaba: el desvío (1,6) no llega al margen sostenido (1,9),
+  // pero el reloj no ha notado el cambio → aviso al minuto y poco
+  const tr2 = createSpeedTracker({ factor: 1 });
+  const S2 = fresh();
+  ok(run(tr2, S2, { sec: 180, appKmh: 9 }).length === 0, 'antes del cambio, nada');
+  const t0 = S2.t;
+  const c = run(tr2, S2, { sec: 150, appKmh: 10.6, beltKmh: 9 });
+  const at = (c[0]?.at - t0) / 1000;
+  ok(c.length === 1 && at >= 78 && at <= 95 && c[0].app === 10.6 && c[0].watch === 9, `la clase sube 1,6 y el reloj no lo nota: aviso a los ${at} s (${JSON.stringify(c[0])})`);
+  ok(tr2.view(S2.t).off === true, 'y el chip queda marcado');
+  // Si la cinta sí cambia, nada; y tampoco si el reloj va ese día un 8 % alto todo el rato (se compara consigo mismo)
+  const tr3 = createSpeedTracker({ factor: 1 });
+  const S3 = fresh();
+  run(tr3, S3, { sec: 180, appKmh: 9, bias: 1.08 });
+  ok(run(tr3, S3, { sec: 150, appKmh: 10.6, bias: 1.08 }).length === 0 && run(tr3, S3, { sec: 150, appKmh: 8, bias: 1.08 }).length === 0,
+    'cinta cambiada con el reloj un 8 % alto todo el día: sin avisos');
+  // Con que el reloj note una cuarta parte del cambio ya vale (no distingue pasos pequeños)
+  const tr4 = createSpeedTracker({ factor: 1 });
+  const S4 = fresh();
+  run(tr4, S4, { sec: 180, appKmh: 10 });
+  ok(run(tr4, S4, { sec: 150, appKmh: 7.8, beltKmh: 9.2 }).length === 0, 'la clase baja 2,2 y el reloj nota 0,8: comprobado, sin aviso');
+  // Cambios pequeños de la clase (menos de 1,5) no se vigilan: el reloj no los distingue
+  const tr5 = createSpeedTracker({ factor: 1 });
+  const S5 = fresh();
+  run(tr5, S5, { sec: 180, appKmh: 9.3 });
+  ok(run(tr5, S5, { sec: 200, appKmh: 10, beltKmh: 9.3 }).length === 0, 'la clase sube 0,7 y la cinta no: el reloj no puede saberlo, no avisa');
+
+  // La clase larga del 14 nov, con cifras parecidas: el reloj algo alto a 9,3, algo bajo a 10 (y descolocado un minuto
+  // al tocar los botones), 1 km/h de más al trote tras el bloque rápido sin notar el paso de 7,8 a 7,3 → 0 avisos
+  const tr6 = createSpeedTracker({ cal: { factor: 1.009, n: 1, ratios: [1.028] } });
+  const S6 = fresh();
+  let n = 0;
+  n += run(tr6, S6, { sec: 240, appKmh: 8.3 }).length;
+  n += run(tr6, S6, { sec: 700, appKmh: 9.3, bias: 1.04 }).length;
+  n += run(tr6, S6, { sec: 60, appKmh: 10, beltKmh: 9, bias: 1 }).length;
+  n += run(tr6, S6, { sec: 740, appKmh: 10, bias: 0.96 }).length;
+  n += run(tr6, S6, { sec: 580, appKmh: 7.8, bias: 1.06 }).length;
+  n += run(tr6, S6, { sec: 150, appKmh: 7.3, bias: 1.15 }).length;
+  n += run(tr6, S6, { sec: 90, appKmh: 7.6, bias: 1.13 }).length;
+  n += run(tr6, S6, { sec: 90, appKmh: 7, bias: 0.96 }).length;
+  ok(n === 0, `una clase como la del 14 nov: ningún aviso (${n})`);
 });
 
 section('Sin falsas alarmas', () => {
@@ -99,14 +143,16 @@ section('Sin falsas alarmas', () => {
   // Sin corrección aprendida, el sesgo de serie del reloj (4 %) no dispara nada a 12 km/h…
   const tr3 = createSpeedTracker();
   ok(run(tr3, fresh(), { sec: 300, appKmh: 12, bias: 1.04 }).length === 0, 'sin corrección: el 4 % de serie no avisa');
-  // …pero un cambio de verdad (1,5 km/h) sí
+  // …ni 1,5 km/h de diferencia (sin corrección el margen a 12 son 2,8); 3,5 sí
   const tr4 = createSpeedTracker();
-  ok(run(tr4, fresh(), { sec: 120, appKmh: 12, beltKmh: 10.5, bias: 1.04 }).length === 1, 'sin corrección: 1,5 km/h de diferencia sí avisa');
-  // Con la corrección aprendida (1/1,04), el mismo reloj sesgado queda clavado y 0,6 de desvío se ve
+  ok(run(tr4, fresh(), { sec: 200, appKmh: 12, beltKmh: 10.5, bias: 1.04 }).length === 0, 'sin corrección: 1,5 km/h de diferencia no basta');
+  ok(run(createSpeedTracker(), fresh(), { sec: 200, appKmh: 12, beltKmh: 8.5, bias: 1.04 }).length === 1, 'sin corrección: 3,5 km/h de diferencia sí avisa');
+  // Con la corrección aprendida (1/1,04), el mismo reloj sesgado queda clavado; 0,6 de desvío ya no es noticia
   const tr5 = createSpeedTracker({ factor: 1 / 1.04 });
   const S5 = fresh();
   ok(run(tr5, S5, { sec: 120, appKmh: 12, bias: 1.04 }).length === 0 && tr5.view(S5.t).kmh === 12, 'con corrección: el reloj sesgado marca lo de la clase');
-  ok(run(tr5, S5, { sec: 120, appKmh: 10.9, beltKmh: 10.3, bias: 1.04 }).length === 1, 'con corrección: 0,6 de desvío avisa');
+  ok(run(tr5, S5, { sec: 200, appKmh: 10.9, beltKmh: 10.3, bias: 1.04 }).length === 0, 'con corrección: 0,6 de desvío no avisa (el reloj no afina tanto)');
+  ok(run(tr5, S5, { sec: 200, appKmh: 10.9, beltKmh: 8.6, bias: 1.04 }).length === 1, 'con corrección: 2,3 de desvío sí');
   // En pausa no se cuenta nada y, al reanudar, el asentamiento empieza de cero
   const tr6 = createSpeedTracker({ factor: 1 });
   const S6 = fresh();
@@ -166,11 +212,15 @@ section('Se aprende de todas las clases desde la primera, con peso prudente (13 
   trT.touch();
   run(trT, fresh(), { sec: 660, appKmh: 10, bias: 1.04 });
   ok(near(trT.learned().ratio, 1 / 1.04, 0.004) && trT.summary().touched === true && near(trT.summary().learn.ratio, 1 / 1.04, 0.004), 'con la velocidad tocada: se aprende igual, y queda apuntado en la sesión');
-  // Clase de cambios cada 40 s: solo cuentan los pocos segundos estables de cada tramo, así que pesa poco
+  // Clase de cambios cada 40 s: no llega a asentarse (1 min tras cada cambio) y no enseña nada; cada 2 min, sí, poco
   const trS = createSpeedTracker();
   const SS = fresh();
   for (let i = 0; i < 12; i++) run(trS, SS, { sec: 40, appKmh: i % 2 ? 12 : 9, bias: 1.04 });
-  ok(trS.learned() && trS.learned().sec >= 60 && trS.learned().sec < 150, `cambios cada 40 s: aprende, pero con poco peso (${trS.learned()?.sec} s)`);
+  ok(trS.learned() === null, 'cambios cada 40 s: no hay tramo estable, no se aprende');
+  const trS2 = createSpeedTracker();
+  const SS2 = fresh();
+  for (let i = 0; i < 6; i++) run(trS2, SS2, { sec: 120, appKmh: i % 2 ? 12 : 9, bias: 1.04 });
+  ok(trS2.learned() && trS2.learned().sec > 250 && trS2.learned().sec < 370, `cambios cada 2 min: aprende de la segunda mitad de cada tramo (${trS2.learned()?.sec} s)`);
   const trW = createSpeedTracker();
   run(trW, fresh(), { sec: 900, appKmh: 5, bias: 1.1 });
   ok(trW.classRatio() === null && trW.learned() === null, 'andando (menos de 6 km/h): no se aprende');
@@ -200,7 +250,7 @@ section('Se aprende de todas las clases desde la primera, con peso prudente (13 
   ok(calFactor({ factor: 1.03, n: 2 }) === 1.03, 'una corrección fija (sin historial: pruebas y reloj simulado) se usa tal cual');
   ok(createSpeedTracker({ factor: 3 }).factor() === null && createSpeedTracker({ factor: 0.96 }).calibrated() === true, 'el seguimiento solo acepta correcciones razonables');
   // El margen del aviso depende de cuánta calibración hay detrás
-  ok(tolerance(12, 1) === 0.5 && near(tolerance(12, 0), 0.96) && near(tolerance(12, 0.5), 0.73) && tolerance(5, 0.2) === 0.5, 'margen: 0,5 con toda la confianza; más ancho con poca');
+  ok(near(tolerance(12, 1), 2.16) && near(tolerance(12, 0), 2.808) && near(tolerance(12, 0.5), 2.484) && near(tolerance(5, 1), 1.5), 'margen: más ancho cuanta menos calibración hay detrás');
 });
 
 section('Parado no marca velocidad (12 nov: salió «≈4,2» sin moverse, con la clase a 9,2)', () => {
@@ -363,7 +413,7 @@ section('Corrección por franjas de velocidad (13 nov: −3,6 % de media, pero �
   };
   const tr0 = createSpeedTracker({ cal: { factor: 1.03, n: 2 } });
   const S0 = fresh();
-  ok(klass(tr0, S0) >= 1, 'con una sola corrección para todo: el bloque rápido dispara el aviso');
+  ok(klass(tr0, S0) === 0, 'un reloj 0,9 km/h corto en el bloque rápido ya no dispara el aviso (antes sí)');
   const L = tr0.learned();
   ok(L && Math.abs(L.bands['6'].ratio - 1) < 0.01 && Math.abs(L.bands['8'].ratio - 1.1) < 0.012 && L.bands['8'].sec > 500 && L.ratio > 1.03 && L.ratio < 1.07 && L.sec > 1000,
     `la clase enseña cada franja, con sus segundos (${JSON.stringify(L)})`);
@@ -389,7 +439,7 @@ section('Corrección por franjas de velocidad (13 nov: −3,6 % de media, pero �
   ok(trU.real(SU.t)?.ok === false, 'real() justo tras un cambio de velocidad: ok:false');
   ok(createSpeedTracker().real(1) === null, 'real() sin lecturas: null');
   // …y un cambio de cinta de verdad se sigue viendo
-  ok(run(tr1, S1, { sec: 120, appKmh: 9.3, beltKmh: 8.6, bias: biasOf(8.6) }).length === 1, 'cinta 0,7 por debajo: avisa');
+  ok(run(tr1, S1, { sec: 200, appKmh: 9.3, beltKmh: 7.2, bias: biasOf(7.2) }).length === 1, 'cinta 2,1 por debajo: avisa');
   // Con poco rato en una franja se aprende, pero apenas mueve nada
   const trS = createSpeedTracker();
   const SS = fresh();
@@ -455,7 +505,7 @@ section('Serie de la sesión, cadencia y zancada', () => {
   // Instantánea: al retomar la clase, la serie y las franjas siguen
   const tr2 = createSpeedTracker({ restore: JSON.parse(JSON.stringify(tr.snapshot())) });
   go(tr2, S, { sec: 120, appKmh: 9.6, bias: 0.9, cadence: 170 });
-  ok(tr2.series().length === 72 && tr2.summary().bands['8'].sec > 350 && tr2.summary().cadence === 166, `tras retomar: ${tr2.series().length} puntos`);
+  ok(tr2.series().length === 72 && tr2.summary().bands['8'].sec > 280 && Math.abs(tr2.summary().cadence - 166) <= 1, `tras retomar: ${tr2.series().length} puntos`);
   // Parado: el punto queda sin lectura del reloj (pero con lo que marcaba la clase)
   const tr3 = createSpeedTracker();
   let t = 1e12;
@@ -489,7 +539,7 @@ section('Serie de la sesión, cadencia y zancada', () => {
 });
 
 section('Reloj simulado (?debug=speed)', () => {
-  const sim = createSpeedSim({ offset: -0.6 });
+  const sim = createSpeedSim({ offset: -2.2 });
   const tr = createSpeedTracker({ cal: sim.cal });
   let t = 1_762_927_200_000;
   let appKm = 0;
@@ -505,7 +555,7 @@ section('Reloj simulado (?debug=speed)', () => {
   }
   ok(nSamples >= 38 && nSamples <= 40, `una lectura cada 3 s (${nSamples} en 2 min)`);
   // (el simulado baila ±0,08 y la lectura viaja con un decimal: corregida, eso son hasta ±0,2)
-  ok(alerts === 1 && Math.abs(tr.view(t).kmh - 10.3) <= 0.25, `con la cinta a −0,6: el chip marca ~10,3 y sale el aviso (${tr.view(t).kmh}, ${alerts})`);
+  ok(alerts === 1 && Math.abs(tr.view(t).kmh - 8.7) <= 0.25, `con la cinta a −2,2: el chip marca ~8,7 y sale el aviso (${tr.view(t).kmh}, ${alerts})`);
   // El reloj simulado se queda corto cuanto más rápido (como en la clase real) y trae su corrección por franjas
   ok(sim.cal.bands['6'].factor === 1 && sim.cal.bands['8'].factor > 1.07 && sim.cal.bands['12'].factor > 1.2 && createSpeedSim({ bias: 1.04 }).cal.factor === 0.962,
     `corrección del simulado por franjas (${JSON.stringify(Object.values(sim.cal.bands).map((b) => b.factor))})`);

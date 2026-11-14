@@ -10,7 +10,9 @@
 // 4. Con «Entreno exigente», las series cortas (correr o rápido de 45 s a 3 min): si a esa velocidad ni manteniéndola
 //    llegarías al centro de la zona con tu pulso de hoy, la siguiente serie sube hasta +0,3 (seriesSpeed).
 // 5. La cuenta de tu pulso se lleva con la velocidad a la que corres de verdad cuando el reloj la sabe con garantías
-//    (effectiveSpeed); y si no vas a la velocidad de la clase (≥ 0,5 km/h), el modo pulso no cambia nada: primero la cinta.
+//    (effectiveSpeed); y si no vas a la velocidad de la clase (≥ 1,0 km/h), el modo pulso no cambia nada: primero la cinta.
+// 6. Calentar, vuelta a la calma y caminar no se ajustan por pulso; la vuelta a la calma nunca va más rápida que lo
+//    que vienes corriendo (calmCaps), y el trote nunca baja más de 1,0 (0,6 con exigente) de tu velocidad de trote.
 import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, starterModel, HR_DT } from './hr-dynamics.js';
 
 const WORK = new Set(['jog', 'run', 'fast']);
@@ -125,13 +127,15 @@ export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, highDa
  * Nunca mueve la velocidad al revés de lo que pide el pulso (con poco tramo por delante el despeje podía pedir subir
  * yendo alto) y, con menos de 90 s por delante, no toca nada por unas pocas pulsaciones.
  */
-const REAL_MIN_DEV = 0.3;    // por debajo de esto, el reloj y la clase dicen lo mismo: manda la clase
+// (14 nov 2026: en la primera clase larga el reloj acertó ±0,3 en unas franjas y falló ±1 en otras. Aun con `ok`, que
+//  ya exige un error esperable ≤ 0,35, menos de 0,6 de diferencia es ruido y menos de 1,0 no justifica parar el control.)
+const REAL_MIN_DEV = 0.6;    // por debajo de esto, el reloj y la clase dicen lo mismo: manda la clase
 const REAL_MAX_DEV = 0.15;   // el reloj nunca mueve la cuenta más de un 15 % de la velocidad de la clase
-export const REAL_HOLD_DEV = 0.5; // desde aquí no vas a la velocidad de la clase: el modo pulso no toca nada (te avisa el reloj)
+export const REAL_HOLD_DEV = 1.0; // desde aquí no vas a la velocidad de la clase: el modo pulso no toca nada (te avisa el reloj)
 
 /**
  * La velocidad a la que corres de verdad, para llevar la cuenta de tu pulso: la que estima el reloj si se puede decidir
- * con ella (`real.ok`: calibrada y con la clase asentada, js/training/watch-speed.js) y se aparta de la clase ≥ 0,3;
+ * con ella (`real.ok`: calibrada y con la clase asentada, js/training/watch-speed.js) y se aparta de la clase ≥ 0,6;
  * si no, la de la clase. Así un día con la cinta más lenta de lo que dice la clase no se apunta como «día de pulso
  * bajo» (ni al revés). → { v, real (¿sale del reloj?), dev (v − clase) }
  */
@@ -142,6 +146,40 @@ export function effectiveSpeed(classSpeed, real = null) {
   const dev = r1(kmh - v);
   if (Math.abs(dev) < REAL_MIN_DEV - 1e-9) return { v, real: false, dev: 0 };
   return { v: kmh, real: true, dev };
+}
+
+/** Zonas que el modo pulso no toca: calentar, vuelta a la calma y caminar siguen el plan (solo se les pone tope). */
+export const CALM_ZONES = new Set(['warmup', 'cooldown', 'walk']);
+const JOG_FLOOR = 1.0;        // lo más que el pulso puede dejar el trote por debajo de TU velocidad de trote
+const JOG_FLOOR_PUSHY = 0.6;  // …con «Entreno exigente»
+
+/**
+ * Suelo del trote. Las bajadas por pulso se encadenaban (la clase ya trae el trote final más suave, el tramo
+ * siguiente lo bajaba otra vez y el control en directo otra más): un rodaje de 12 min acabó 1,6 km/h por debajo del
+ * trote del corredor. El tope se mide contra tu velocidad de trote, no contra lo ya rebajado.
+ */
+export function jogFloor(levels, { pushy = false, minSpeed = 1 } = {}) {
+  const j = Number(levels?.jog);
+  return j > 0 ? r1(Math.max(Number(minSpeed) || 1, j - (pushy ? JOG_FLOOR_PUSHY : JOG_FLOOR))) : Number(minSpeed) || 1;
+}
+
+/**
+ * Vuelta a la calma: nunca empieza más rápida que lo que vienes corriendo y va siempre de más a menos. Si el pulso (o
+ * tú) habéis bajado el último tramo por debajo del primer escalón de la vuelta a la calma, la clase no puede «subir»
+ * para enfriar. → [{ index, speed }] con los escalones que hay que rebajar (vacío si ninguno).
+ */
+export function calmCaps(segments, fromIndex, curSpeed) {
+  const out = [];
+  let prev = Number(curSpeed);
+  const list = Array.isArray(segments) ? segments : [];
+  if (!(prev > 0)) return out;
+  for (let i = Math.max(0, Math.floor(fromIndex)); i < list.length && list[i]?.zone === 'cooldown'; i++) {
+    const sp = Number(list[i].speed) || 0;
+    const v = r1(Math.min(sp, prev));
+    if (v < sp - 0.05) out.push({ index: i, speed: v });
+    prev = v;
+  }
+  return out;
 }
 
 const SERIES_MIN_SEC = 45;   // series de 45 s a 3 min: más cortas son arreones (los define la velocidad)

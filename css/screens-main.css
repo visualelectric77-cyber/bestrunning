@@ -2704,3 +2704,9 @@ body.is-pushed .wk-cta { bottom: 0; padding-bottom: calc(var(--safe-b) + 12px); 
 /* Cambio automático del plan (js/training/day-fix.js): misma tarjeta que el semáforo, con «Deshacer» */
 .td-fix__undo { align-self: flex-start; margin-top: 8px; min-height: 36px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--fill-2, rgba(120, 120, 128, 0.24)); color: var(--text); font: inherit; font-size: var(--fs-sub); font-weight: 600; }
 .td-fix__undo:active { opacity: 0.7; }
+/* Bonus de la semana (js/training/bonus.js): cuatro duraciones a elegir en la tarjeta del día de descanso */
+.td-bonus { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: var(--s-4); }
+.td-bonus__b { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; min-height: 64px; border: 0; border-radius: 16px; background: var(--fill); color: var(--text); font: inherit; }
+.td-bonus__b b { font-size: 24px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.td-bonus__b span { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-2); }
+.td-bonus__b:active { background: var(--fill-2); }

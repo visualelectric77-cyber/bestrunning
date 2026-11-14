@@ -113,7 +113,7 @@ export function mount(el, { params = {} } = {}) {
       const st = getState();
       // Perfil con las velocidades con las que se entrenó
       const levels = session.levelsAtStart && typeof session.levelsAtStart === 'object' ? session.levelsAtStart : st.levels;
-      return workoutFromId(session.workoutId, { ...st, levels });
+      return workoutFromId(session.workoutId, { ...st, levels }, { gen: Number(session.gen) || 1 });
     } catch {
       return null;
     }
@@ -495,7 +495,7 @@ export function mount(el, { params = {} } = {}) {
 
   /** Titular de la clase (class-debrief.js) con tu modelo de pulso. */
   function debriefNow(s, st) {
-    const segmentsOf = (h) => workoutFromId(h.workoutId, { ...st, levels: h.levelsAtStart || st.levels })?.segments;
+    const segmentsOf = (h) => workoutFromId(h.workoutId, { ...st, levels: h.levelsAtStart || st.levels }, { gen: Number(h.gen) || 1 })?.segments;
     let model = null;
     try { model = dynModelFrom((st.history || []).filter((h) => h.id !== s.id), segmentsOf, { profile: st.profile }); } catch { model = null; }
     try { return classDebrief(s, { segments: workout?.segments || null, model, profile: st.profile }); } catch { return null; }

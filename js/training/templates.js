@@ -91,6 +91,7 @@ function kit(ctx) {
     L: clamp(Number(ctx.load) || 1, 0.6, 1.4),
     J: lv.jog, R: lv.run, F: lv.fast, S: lv.sprint,
     minutes: ctx.minutes,
+    gen: Number(ctx.gen) || 1,   // versión de la forma de la clase (generator.js GEN): 1 = como siempre
     long: ctx.minutes >= 40,
     hasIncline: !!ctx.hasIncline,
     wu: speedForZone('warmup', lv),
@@ -164,15 +165,22 @@ function warmup(k, { quality = false, short = false } = {}) {
   return segs;
 }
 
-/** Vuelta a la calma bajando de trote a paso de calma: 20′ → 2 min · 30′ → 3 min · 45–60′ → 4–5 min. */
+/**
+ * Vuelta a la calma bajando de trote a paso de calma: 20′ → 2 min · 30′ → 3 min · 45–60′ → 3–4 min (4–5 min en las
+ * clases de la forma 1).
+ */
 function cooldown(k) {
   const a = round1(k.J - 0.5);
   const mid = round1((a + k.cd) / 2);
   const s = (speed, sec, cue = '') => k.seg('cooldown', sec, { speed, cue, block: 'Vuelta a la calma' });
   if (k.minutes <= 22) return [s(a, 60, k.cue('cool')), s(k.cd, 60)];
   if (k.minutes <= 37) return [s(a, 60, k.cue('cool')), s(mid, 60), s(k.cd, 60)];
-  return [s(a, 90, k.cue('cool')), s(mid, 90), s(k.cd, k.rng.pick([60, 120]))];
+  const step = k.gen >= 2 ? 60 : 90;
+  return [s(a, step, k.cue('cool')), s(mid, step), s(k.cd, k.rng.pick([60, 120]))];
 }
+
+/** Lo más que dura el trote de soltura de antes de la vuelta a la calma (forma 2): 1 · 2 · 3 min según la clase. */
+const tailCap = (k) => (k.minutes <= 22 ? 60 : k.minutes <= 37 ? 120 : 180);
 
 /** Reparte `diff` segundos (múltiplo de 5) en pasos de 5 s, usando solo los rellenos que puedan quedarse con ≥ 30 s. */
 function spread(all, diff) {
@@ -201,8 +209,22 @@ function fitMain(k, main, budget, depth = 0) {
   let diff = budget - total(main);
   if (diff > 0) {
     const flex = main.filter((s) => s.flex);
-    if (flex.length) spread(flex, diff);
-    else if (diff >= 30) main.push(k.jog(diff, { label: 'Trote de soltura', cue: k.cue('easy') }));
+    const last = main[main.length - 1];
+    if (k.gen >= 2 && flex.length >= 2 && last && last.flex) {
+      // Forma 2: el tiempo que sobra no se reparte a partes iguales. El trote final (el de antes de la vuelta a la
+      // calma) se queda con su parte hasta un tope y el resto va a los rellenos de antes: se corre más antes del
+      // trabajo y la clase no se pasa un tercio del tiempo «bajando».
+      const even = Math.floor(diff / flex.length / 5) * 5;
+      const tail = Math.min(tailCap(k), even);
+      const give = tail >= 30 ? tail : 0;
+      last.sec += give;
+      if (diff - give > 0) spread(flex.slice(0, -1), diff - give);
+    } else if (flex.length) spread(flex, diff);
+    else if (k.gen >= 2 && diff > tailCap(k) + 60 && main.length) {
+      // sin rellenos en la plantilla: lo que pase del tope va delante del trabajo, no detrás
+      main.unshift(k.jog(diff - tailCap(k), { label: 'Trote de transición', cue: k.cue('easy') }));
+      main.push(k.jog(tailCap(k), { label: 'Trote de soltura', cue: k.cue('easy') }));
+    } else if (diff >= 30) main.push(k.jog(diff, { label: 'Trote de soltura', cue: k.cue('easy') }));
     else (main.slice().reverse().find((s) => !HARD.has(s.zone)) || main[main.length - 1]).sec += diff;
   } else if (diff < 0) {
     let need = -diff;
@@ -1310,6 +1332,131 @@ T({
       out.push(W(k.at(speed, w, { label, block: 'Ritmo de carrera', cue: i === 0 ? k.cue('tempo') : last ? k.cue('last') : k.cue('mind') })));
       if (!last) out.push(k.rec(rest, { cue: i === 0 ? k.cue('recovery') : '' }));
     }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return numberReps(out);
+  }),
+});
+
+/* ───────────── Bonus: entrenos sorpresa para cuando ya has completado la semana (js/training/bonus.js) ─────────────
+   Formatos que el plan nunca pone (`planOnly`): pensados, pero distintos a lo de siempre, con la duración que elijas.
+   No sustituyen a ninguna clase del plan ni adelantan la del día siguiente. */
+const BONUS = { category: 'challenge', planOnly: true, bonus: true, family: 'reto', intensity: 'hard', durations: ALL, focus: 'Bonus sorpresa' };
+
+T({
+  ...BONUS, id: 'bonus-emom', title: 'En punto', subtitle: 'Cada dos minutos, un esfuerzo; lo que sobre, para recuperar', themes: [TH.velocidad, TH.mixto],
+  description: 'Cada dos minutos en punto empieza un esfuerzo rápido; lo que quede hasta el siguiente es tu descanso al trote. Cada bloque alarga el esfuerzo y sube la velocidad, así que el descanso se va encogiendo solo.',
+  coachNotes: ['El reloj manda: cada dos minutos empieza el esfuerzo, estés como estés.', 'En el trote, suelta de verdad: es lo único que vas a recuperar.', 'El último bloque es el que cuenta.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const blocks = B >= 2100 ? 3 : B >= 1080 ? 2 : 1;
+    const gap = 120;
+    const per = clamp(Math.floor((B - 60 - (blocks - 1) * gap) / blocks / 120), 3, 6);
+    const works = blocks === 1 ? [50] : blocks === 2 ? [45, 60] : [40, 50, 60];
+    const out = [k.flex()];
+    for (let b = 0; b < blocks; b++) {
+      const v = Math.min(k.S, round1(k.F + 0.3 * b));
+      for (let m = 0; m < per; m++) {
+        out.push(W(k.at(v, works[b], { label: `${works[b]} segundos`, block: `Bloque ${b + 1}`, cue: m === 0 ? k.cue('fast') : m === per - 1 ? k.cue('last') : '' })));
+        out.push(k.jog(120 - works[b], { off: -0.2, label: 'Hasta el siguiente', block: `Bloque ${b + 1}` }));
+      }
+      if (b < blocks - 1) out.push(k.rec(gap, { cue: k.cue('recovery') }));
+    }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return numberReps(out);
+  }),
+});
+
+T({
+  ...BONUS, id: 'bonus-countdown', title: 'La cuenta atrás', subtitle: 'Bloques cada vez más cortos y más rápidos', themes: [TH.escaleras, TH.ritmo],
+  description: 'Una escalera que solo baja: cada bloque dura un minuto menos que el anterior y va más rápido. Empiezas a ritmo de correr y acabas por encima de tu rápido. Lo que te quitas de tiempo, lo pones en velocidad.',
+  coachNotes: ['El primer bloque es largo: no lo quemes.', 'Cada bloque, un punto más de velocidad.', 'El último minuto es tuyo: todo lo que quede.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const ladder = B >= 1560 ? [6, 5, 4, 3, 2, 1] : B >= 1140 ? [5, 4, 3, 2, 1] : B >= 780 ? [4, 3, 2, 1] : [3, 2, 1];
+    const rest = 60;
+    const lo = k.R;
+    const hi = round1(k.F + 0.3);
+    const out = [k.flex()];
+    const lay = (steps, from, to, block) => steps.forEach((min, i) => {
+      const v = round1(from + ((to - from) * i) / Math.max(1, steps.length - 1));
+      out.push(W(k.at(v, min * 60, { label: `${min} ${min === 1 ? 'minuto' : 'minutos'}`, block, cue: i === 0 ? k.cue('tempo') : i === steps.length - 1 ? k.cue('last') : k.cue('mind') })));
+      if (i < steps.length - 1) out.push(k.rec(rest));
+    });
+    lay(ladder, lo, hi, 'Cuenta atrás');
+    const used = ladder.reduce((a, m) => a + m * 60, 0) + (ladder.length - 1) * rest;
+    if (B - used >= 660) {
+      out.push(k.rec(180, { cue: k.cue('recovery') }));
+      lay([3, 2, 1], k.between(0.6), hi, 'Remate');
+    }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return numberReps(out);
+  }),
+});
+
+T({
+  ...BONUS, id: 'bonus-tenths', title: 'Décima a décima', subtitle: 'Cada minuto, un poco más rápido, hasta pasar de tu ritmo rápido', themes: [TH.ritmo, TH.records],
+  description: 'Sales casi al trote y cada minuto la cinta sube un poco. No hay descansos dentro de la subida: solo un minuto detrás de otro, cada uno algo más rápido, hasta pasar de tu ritmo rápido. En las sesiones largas, se repite desde más arriba.',
+  coachNotes: ['Los primeros minutos parecen fáciles: lo son. Guárdate.', 'No mires cuánto falta: solo el minuto en el que estás.', 'Si llegas arriba con aire, la próxima vez empieza más rápido.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const waves = B >= 2400 ? 2 : 1;
+    const gap = 150;
+    const n = clamp(Math.floor((B - 60 - (waves - 1) * gap) / waves / 60), 6, 18);
+    const top = round1(k.F + 0.2);
+    const out = [k.flex()];
+    for (let w = 0; w < waves; w++) {
+      const from = round1(k.J + 0.2 + 0.6 * w);
+      const hi = round1(top + 0.2 * w);
+      const steps = Array.from({ length: n }, (_, i) => { const v = round1(from + ((hi - from) * i) / (n - 1)); return { v, zone: k.near(v) }; });
+      // como mucho 7 minutos seguidos contados como «rápido» (con niveles muy juntos saldrían más): los de antes, «correr»
+      const quick = steps.filter((x) => HARD.has(x.zone));
+      quick.slice(0, Math.max(0, quick.length - 7)).forEach((x) => { x.zone = 'run'; });
+      steps.forEach((x, i) => {
+        out.push(k.at(x.v, 60, { zone: x.zone, label: `Minuto ${i + 1}`, block: waves > 1 ? `Subida ${w + 1}` : 'Subida', cue: i === 0 ? k.cue('easy') : i === n - 1 ? k.cue('last') : i === Math.floor(n / 2) ? k.cue('tempo') : '' }));
+      });
+      if (w < waves - 1) out.push(k.rec(gap, { cue: k.cue('recovery') }));
+    }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return out;
+  }),
+});
+
+T({
+  ...BONUS, id: 'bonus-906030', title: '90 · 60 · 30', subtitle: 'Suave, alegre y a tope, en bucle', themes: [TH.explosividad, TH.mixto],
+  description: 'Un bucle de tres minutos: noventa segundos suaves, sesenta alegres y treinta a tope. Y otra vez. El cuerpo no llega a acomodarse a ningún ritmo, que es justo la idea.',
+  coachNotes: ['Los noventa suaves son suaves de verdad.', 'Los sesenta, ritmo alegre: todavía no es el sprint.', 'Treinta segundos: sal fuerte desde el primero.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const rounds = B < 780 ? 3 : 4;
+    const gap = 120;
+    const sets = clamp(Math.floor((B - 60 + gap) / (rounds * 180 + gap)), 1, 3);
+    const out = [k.flex()];
+    for (let s = 0; s < sets; s++) {
+      for (let r = 0; r < rounds; r++) {
+        const block = sets > 1 ? `Bucle ${s + 1}` : 'Bucle';
+        out.push(k.jog(90, { label: '90 suave', block, cue: r === 0 ? k.cue('easy') : '' }));
+        out.push(k.at(k.between(0.6), 60, { label: '60 alegre', block, cue: r === 0 ? k.cue('tempo') : '' }));
+        out.push(W(k.sprint(30, { label: '30 a tope', block, cue: r === rounds - 1 ? k.cue('last') : k.cue('sprint') })));
+      }
+      if (s < sets - 1) out.push(k.rec(gap, { cue: k.cue('recovery') }));
+    }
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return numberReps(out);
+  }),
+});
+
+T({
+  ...BONUS, id: 'bonus-broken', title: 'Escalera rota', subtitle: 'Bloques de uno a cuatro minutos, sin orden', themes: [TH.escaleras, TH.fartlek],
+  description: 'Una escalera con los peldaños cambiados de sitio: uno, tres, dos, cuatro… Los bloques cortos van rápidos y los largos a ritmo de tempo, así que nunca sabes del todo qué toca. Un minuto de trote entre bloques.',
+  coachNotes: ['No adivines el siguiente: corre el que tienes.', 'Corto es rápido; largo es ritmo. Cambia el chip en cada uno.', 'El minuto de trote es corto: respira desde el primer segundo.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const order = [...k.rng.pick([[1, 3, 2, 4, 2, 3, 1], [2, 1, 3, 1, 4, 2, 1], [1, 2, 4, 1, 3, 2, 1], [3, 1, 2, 4, 1, 2, 1]])];
+    const rest = 60;
+    const lenOf = (o) => o.reduce((a, m) => a + m * 60, 0) + (o.length - 1) * rest;
+    while (order.length > 3 && lenOf(order) > B - 60) order.pop();
+    if (B - lenOf(order) >= 900) order.push(2, 3, 1);
+    const speedOf = (min) => (min === 1 ? round1(k.F + 0.3) : min === 2 ? k.F : min === 3 ? k.between(0.6) : k.between(0.3));
+    const out = [k.flex()];
+    order.forEach((min, i) => {
+      out.push(W(k.at(speedOf(min), min * 60, { label: `${min} ${min === 1 ? 'minuto' : 'minutos'}`, block: 'Escalera rota', cue: min === 1 ? k.cue('fast') : i === order.length - 1 ? k.cue('last') : k.cue('tempo') })));
+      if (i < order.length - 1) out.push(k.rec(rest));
+    });
     out.push(k.flex({ label: 'Trote de soltura' }));
     return numberReps(out);
   }),

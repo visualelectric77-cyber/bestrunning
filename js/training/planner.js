@@ -228,7 +228,10 @@ function estimate(id, minutes, seed, lf, incline) {
   const k = `${id}|${minutes}|${seed}|${lf}|${incline ? 1 : 0}`;
   let e = EST.get(k);
   if (!e) {
-    const w = buildWorkout(id, { minutes, seed, loadFactor: lf, levels: DEFAULT_LEVELS, hasIncline: incline });
+    // La carga se estima siempre con la forma 1 de las clases: así el plan elige exactamente las mismas clases que
+    // antes de cambiar la forma (generator.js GEN) y a nadie se le baraja la semana a medias. La forma 2 solo mueve
+    // trote de sitio y recorta un minuto de vuelta a la calma: la carga real es prácticamente la misma.
+    const w = buildWorkout(id, { minutes, seed, loadFactor: lf, levels: DEFAULT_LEVELS, hasIncline: incline, gen: 1 });
     e = w ? { load: w.load, easy: EASY_ZONES.reduce((a, z) => a + (w.timeInZone[z] || 0), 0), total: w.totalSec }
       : { load: minutes, easy: minutes * 60, total: minutes * 60 };
     if (EST.size > 30000) EST.clear();

@@ -126,6 +126,15 @@ export function summarizeSegments(segments, weightKg = 78) {
   };
 }
 
+/**
+ * Versión de la forma de las clases. Una clase guardada se reconstruye con la versión con la que se corrió
+ * (session.gen; las de antes no la llevan y son la 1), para que su análisis siga cuadrando con lo que se hizo.
+ *   2 (14 nov 2026): final más corto: el trote de antes de la vuelta a la calma tiene tope y el tiempo sobrante va
+ *     al principio del bloque; la vuelta a la calma de las clases largas pasa de 4–5 a 3–4 min.
+ */
+export const GEN = 2;
+const normGen = (g) => (Number(g) >= 1 ? Math.min(GEN, Math.floor(Number(g))) : GEN);
+
 export function workoutId({ templateId, minutes, seed, loadFactor }) {
   const lf = Math.round((Number(loadFactor) || 1) * 100);
   return `${templateId}~${Math.round(Number(minutes) || 0)}~${normSeed(seed).toString(36)}~${lf}`;
@@ -149,6 +158,7 @@ export function parseWorkoutId(id) {
 /** Construye la clase completa. Devuelve null si la plantilla no existe. */
 export function buildWorkout(templateId, {
   minutes, levels, seed = 1, loadFactor = 1, hasIncline = false, treadmill, weightKg = 78, weekInCycle = 1, cycleIndex = 0,
+  gen = GEN,
 } = {}) {
   const t = getTemplate(templateId);
   if (!t) return null;
@@ -160,7 +170,7 @@ export function buildWorkout(templateId, {
   const isTest = t.category === 'test';
   const ctx = {
     minutes: mins, levels: lv, load, seed: sd, rng: makeRng(hashStr(`${templateId}|${sd}|${mins}`)),
-    hasIncline: !!hasIncline, treadmill: tm, weekInCycle, cycleIndex,
+    hasIncline: !!hasIncline, treadmill: tm, weekInCycle, cycleIndex, gen: normGen(gen),
   };
   let segs = normalizeSegments(t.build(ctx) || [], tm, !!hasIncline);
   if (!segs.length) segs = [{ zone: 'jog', speed: clampSpeed(lv.jog, tm), incline: 0, sec: mins * 60, label: ZONES.jog.name, cue: '' }];
@@ -190,11 +200,12 @@ export function buildWorkout(templateId, {
     isTest,
     seed: sd,
     loadFactor: load,
+    gen: ctx.gen,
     ...(t.event ? { event: t.event } : {}),
   };
 }
 
-export function workoutFromId(id, state) {
+export function workoutFromId(id, state, { gen = GEN } = {}) {
   const p = parseWorkoutId(id);
   // Carrera en la cinta (js/training/race.js): la «semilla» son las décimas de km/h del ritmo de carrera
   if (p && isRaceTemplate(p.templateId)) {
@@ -211,6 +222,7 @@ export function workoutFromId(id, state) {
     hasIncline: !!state?.treadmill?.hasIncline,
     treadmill: state?.treadmill,
     weightKg: Number(state?.profile?.weightKg) || 78,
+    gen,
   });
 }
 

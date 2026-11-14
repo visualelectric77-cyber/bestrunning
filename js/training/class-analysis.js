@@ -54,10 +54,11 @@ const segCache = new Map();
 export function segmentsOfSession(state, s) {
   if (!s?.workoutId) return null;
   const levels = s.levelsAtStart || state?.levels || null;
-  const key = `${s.workoutId}|${levels ? [levels.jog, levels.run, levels.fast, levels.sprint].join() : ''}|${state?.treadmill?.hasIncline ? 1 : 0}`;
+  const gen = Number(s.gen) || 1;   // la forma con la que se corrió (las de antes del 14 nov 2026 no la guardaban)
+  const key = `${s.workoutId}|${levels ? [levels.jog, levels.run, levels.fast, levels.sprint].join() : ''}|${state?.treadmill?.hasIncline ? 1 : 0}|${gen}`;
   if (segCache.has(key)) return segCache.get(key);
   let segs = null;
-  try { segs = workoutFromId(s.workoutId, { ...state, levels })?.segments || null; } catch { segs = null; }
+  try { segs = workoutFromId(s.workoutId, { ...state, levels }, { gen })?.segments || null; } catch { segs = null; }
   if (segCache.size > 400) segCache.clear();
   segCache.set(key, segs);
   return segs;

@@ -143,7 +143,8 @@ function checkWorkout(w, t, minutes, opts, tag) {
   if (!test) {
     const warmSec = w.segments.filter((s) => s.zone === 'warmup').reduce((a, s) => a + s.sec, 0);
     const coolSec = w.segments.filter((s) => s.zone === 'cooldown').reduce((a, s) => a + s.sec, 0);
-    const expCool = minutes <= 22 ? [120] : minutes <= 37 ? [180] : [240, 300];
+    // (forma 2 de las clases, 14 nov 2026: en las largas, 3–4 min; con la forma 1 eran 4–5)
+    const expCool = minutes <= 22 ? [120] : minutes <= 37 ? [180] : [180, 240];
     ok(expCool.includes(coolSec), `${tag}: vuelta a la calma ${coolSec}s`);
     ok(warmSec >= 120 && warmSec <= 240, `${tag}: calentamiento progresivo ${warmSec}s`);
     const main = total - coolSec - warmSec - 60;

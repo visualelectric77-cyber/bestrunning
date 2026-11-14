@@ -6,7 +6,10 @@ braceo, no de la cinta) y **nunca cambia la velocidad de la clase**.
 
 Estado (12 nov 2026): **publicado**. Primero la web 1.30.0 (commit `050be39`) con la build 24 (TestFlight, 22:07) y,
 tras la primera prueba del usuario, la web 1.30.1 con la build 25 (ver «Primera prueba en el iPhone»), con su OK. Probado en simulador y en el navegador; **con el reloj de
-verdad aún no** (lista más abajo). El repo `native/` tiene la build 24 en el commit `360e7fb`, con push hecho.
+verdad aún no** (lista más abajo). El repo `native/` tiene la build 25 en el commit `94580a4`, con push hecho.
+Desde el 13 nov: la corrección por franjas, la serie, la cadencia, la tarjeta del Resumen, el aprendizaje de todas las
+clases y el aviso con voz van en la **web 1.31.0** (commit `e2a523b`, publicada por la sesión principal); no necesitan
+build nueva. Una primera clase real ya está corrida con el reloj (13 nov).
 
 ## Qué hace
 
@@ -84,7 +87,7 @@ Arreglo:
 Demostración: `?debug=speed&cinta=parado` (reloj simulado quieto moviendo la mano: el chip se queda en `≈–`).
 Pruebas: `tools/test-watch-speed.mjs` (73), `logic-check` (216).
 
-## Primera clase real (13 nov) → corrección por franjas, serie, cadencia y tarjeta — hecho en local, sin publicar
+## Primera clase real (13 nov) → corrección por franjas, serie, cadencia y tarjeta — publicado en la web 1.31.0
 
 En la primera clase corrida de verdad (20 min, sin tocar la velocidad) el reloj midió de media algo menos que la clase,
 pero bastante menos en el bloque rápido: el error del reloj no es un factor único, se queda más corto cuanto más
@@ -138,8 +141,35 @@ a leerlos). Sustituye a lo de «2 clases sin tocar la velocidad»:
   `seriesReal(serie, cal)` para la serie ya corregida.
 
 Pendiente de esta parte: con una sola clase real no se puede afirmar la tendencia; se irá viendo en el diagnóstico.
-Cadencia «por tramo de la clase» (no por franja) se puede sacar de la serie, pero aún no se pinta. Cuándo publicar lo
-decide la sesión principal (encargo del usuario del 13 nov).
+Cadencia «por tramo de la clase» (no por franja) se puede sacar de la serie, pero aún no se pinta. Lo publicó la sesión
+principal en la 1.31.0 (13 nov, 21:57), junto con su parte: el control por pulso usa `speedTrack.real()` cuando es
+fiable y la voz del desvío tiene su propio límite en `coach.js`.
+
+## Primera clase larga real (14 nov, 50 min) → el aviso de desvío se rehace — hecho en local, sin publicar
+
+Leída del iPhone por cable. El aviso de desvío saltó 5 veces en 50 minutos y ninguna era un cambio de cinta (el
+usuario oyó «pon la cinta a…» con la cinta ya puesta). Lo que mostró la serie:
+
+- En tramos estables el reloj acierta dentro de ±0,5 km/h entre 8 y 10 km/h (baila un 2 %), pero al trote suave
+  después de un bloque rápido marca entre 0,4 y 1,2 km/h de más (baila un 5 %): con la misma cadencia a 7,8 que a 7,3,
+  no nota ese paso.
+- Al tocar los botones de la cinta para cambiar de velocidad, la lectura se descoloca durante un minuto.
+- De un día a otro también cambia: a la misma velocidad, un día midió de menos y otro de más.
+
+Conclusión: su resolución real es de ±0,5 a ±1 km/h según la velocidad; un umbral de 0,5 km/h era ruido. Cambios:
+
+1. **El aviso solo salta con lo que el reloj distingue.** (a) La clase cambia 1,5 km/h o más y, pasado 1 min, el reloj
+   se ha movido menos de la cuarta parte de ese cambio (comparado consigo mismo: su sesgo del día no cuenta). (b) Un
+   desvío sostenido de 1,5 km/h o del 18 % (un 30 % más sin calibración), 45 s seguidos, pasado 1 min de cualquier
+   cambio. Uno por tramo estable y como poco 3 min entre avisos. Repitiendo la clase real: 0 avisos (antes 5).
+2. **Se aprende cuánto baila el reloj a cada velocidad** (`sds` junto a `ratios` y `secs` en `watchCal`, y `sd` en lo
+   que enseña cada clase). `real()` da `err` (km/h de error esperable) y `ok` exige además `err ≤ 0,35`, mirando lo
+   peor entre la velocidad que cree el reloj y la que marca la clase. Sin dato (lo guardado antes), se supone un 5 %.
+3. Para aprender, el asentamiento pasa de 30 s a 1 min tras cada cambio de velocidad.
+
+Demostración: el aviso ya no sale con `cinta=-0.6`; para verlo, `?debug=speed&cinta=-2.5`.
+Pruebas: `tools/test-watch-speed.mjs` (138). La pantalla Ritmo del reloj sigue coloreando con su margen de 0,5 km/h
+(haría falta build nueva para cambiarlo).
 
 ## Qué falta probar con el reloj de verdad en el gimnasio
 

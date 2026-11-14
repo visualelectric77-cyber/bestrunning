@@ -14,26 +14,53 @@
 //   5. La sesión guarda una serie compacta del reloj (velocidad, cadencia y lo que marcaba la clase, cada 10 s) y la
 //      cadencia y la zancada medias, para comparar tramo a tramo (seriesCompare) y para las clases de técnica.
 // Módulo puro (sin DOM ni almacenamiento): lo usan js/screens/player.js y tools/test-watch-speed.mjs.
-// Las mismas cuentas de tolerancia están en native/BestRunningWatch/Model/PaceMath.swift (pantalla Ritmo del reloj).
+// 14 nov (primera clase larga real, 50 min): el aviso de desvío saltó 5 veces y ninguna era un cambio de cinta. En
+// tramos estables el reloj acertó dentro de ±0,5 km/h entre 8 y 10, pero tras un bloque rápido marcó hasta 1,2 km/h de
+// más al trote suave (misma cadencia a 7,8 que a 7,3: no nota ese paso), y tocar los botones de la cinta le descoloca
+// la lectura durante un minuto. Un umbral de 0,5 km/h era ruido. Ahora el aviso solo salta con lo que el reloj SÍ
+// distingue: un cambio grande de la clase que el reloj no nota, o un desvío grande y sostenido (ver más abajo).
+// La pantalla Ritmo del reloj (native/BestRunningWatch/Model/PaceMath.swift) sigue coloreando con su margen de siempre.
 
 /** Una lectura vale como «en directo» si llegó hace ≤ 15 s. */
 export const SPEED_FRESH_MS = 15000;
-/** Desvío que es noticia (km/h) con tu corrección ya aprendida, y cuánto tiene que durar (s). */
-export const DRIFT_KMH = 0.5;
-export const DRIFT_SEC = 20;
-/** Tras un cambio de velocidad de la clase, la cinta y la estimación del reloj tardan: estos segundos no cuentan. */
-export const SETTLE_SEC = 20;
+/**
+ * Aviso de desvío («¿has cambiado la cinta?»). Dos formas de saltar, las dos con lo que el reloj distingue de verdad:
+ *  (a) La clase cambia de velocidad 1,5 km/h o más y, pasado 1 min, el reloj se ha movido menos de la cuarta parte de
+ *      ese cambio (comparando lo que marcaba él mismo antes y después: su sesgo del día no cuenta) durante 20 s.
+ *  (b) Un desvío sostenido de 1,5 km/h o del 18 % de la velocidad (lo que sea más; un 30 % más ancho sin calibración),
+ *      45 s seguidos y siempre hacia el mismo lado, pasado 1 min de cualquier cambio de velocidad.
+ * Uno por tramo estable y como poco 3 min entre avisos.
+ */
+export const DRIFT_KMH = 1.5;
+export const DRIFT_SHARE = 0.18;
+export const DRIFT_SEC = 45;
+/** Tras un cambio de velocidad de la clase, la cinta, tu mano en los botones y la estimación del reloj tardan: 1 min. */
+export const SETTLE_SEC = 60;
 /** Entre dos avisos, como poco (s). Además, solo uno por tramo estable. */
-export const DRIFT_REPEAT_SEC = 120;
-/** Sin corrección aprendida el reloj puede ir desviado de serie: el margen es 0,5 o este tanto de la velocidad. */
-export const UNCAL_SHARE = 0.08;
+export const DRIFT_REPEAT_SEC = 180;
+/** Sin corrección aprendida, el margen del desvío sostenido es este tanto más ancho. */
+export const UNCAL_EXTRA = 0.3;
+/** (a) Cambio de la clase que el reloj tiene que notar, espera, cuánto tiene que moverse y cuánto dura la comprobación. */
+export const STEP_MIN_KMH = 1.5;
+export const STEP_WAIT_SEC = 60;
+export const STEP_HOLD_SEC = 20;
+export const STEP_MOVED_MIN = 0.25;
+const STEP_WINDOW_SEC = 150;
+/**
+ * Cuánto baila el reloj a cada velocidad (desviación de reloj / clase, en tanto por uno), aprendido con las clases.
+ * Sin dato (lo guardado antes del 14 nov), se supone un 5 %. Para decidir con la velocidad real (real().ok) el error
+ * esperable tiene que ser de 0,35 km/h como mucho.
+ */
+const UNKNOWN_SD = 0.05;
+const FIXED_SD = 0.02;
+export const OK_ERR_KMH = 0.35;
 /** La corrección personal (cinta / reloj) nunca sale de aquí; fuera de esto no es sesgo, es otra cosa. Hasta el 12 nov
  *  era 0,85…1,15; la primera clase real dio ya 1,107 en el bloque rápido, así que se abre a lo mismo que se aprende. */
 export const FACTOR_MIN = 0.8;
 export const FACTOR_MAX = 1.25;
 /**
  * Se aprende de TODAS las clases, desde la primera (13 nov), también de las que llevan cambios de velocidad a mano: la
- * app sabe qué velocidad marca la clase en cada momento, así que lo que cuenta son los tramos estables (pasados 30 s
+ * app sabe qué velocidad marca la clase en cada momento, así que lo que cuenta son los tramos estables (pasado 1 min
  * de cualquier cambio de velocidad, tuyo o de la clase), a partir de 6 km/h y con lecturas que cuadren con la clase.
  * Lo prudente no es esperar, es el PESO: lo que enseña cada clase pesa según sus segundos estables (como mucho 15 min
  * por clase) y la corrección se encoge hacia «sin corregir» mientras haya poco: con W segundos acumulados se aplica
@@ -41,7 +68,7 @@ export const FACTOR_MAX = 1.25;
  * única). Así una primera clase de 20 min ya corrige más de la mitad, y una rara no lo descoloca todo: se guarda la
  * mediana (ponderada) de las 12 últimas.
  */
-const LEARN_SETTLE_SEC = 30;
+const LEARN_SETTLE_SEC = 60;
 const LEARN_MIN_KMH = 6;
 const LEARN_MIN_SEC = 60;
 const LEARN_MIN_KM = 0.1;
@@ -128,12 +155,13 @@ export function cleanSpeed(d) {
 }
 
 /**
- * Margen (km/h) entre lo que marca la clase y lo que calcula el reloj. `calibrated`: true / false, o la confianza en la
- * corrección (0…1): con toda, 0,5; sin ninguna, 0,5 o el 8 % de la velocidad; a medias, entre los dos.
+ * Margen (km/h) del desvío sostenido entre lo que marca la clase y lo que calcula el reloj. `calibrated`: true / false,
+ * o la confianza en la corrección (0…1): con toda, 1,5 km/h o el 18 % de la velocidad (lo que sea más); sin ninguna,
+ * un 30 % más; a medias, entre los dos.
  */
 export function tolerance(classKmh, calibrated) {
   const c = calibrated === true ? 1 : typeof calibrated === 'number' && Number.isFinite(calibrated) ? clamp(calibrated, 0, 1) : 0;
-  return DRIFT_KMH + Math.max(0, UNCAL_SHARE * (Number(classKmh) || 0) - DRIFT_KMH) * (1 - c);
+  return Math.max(DRIFT_KMH, DRIFT_SHARE * (Number(classKmh) || 0)) * (1 + UNCAL_EXTRA * (1 - c));
 }
 
 /** −1 vas por debajo de la clase · 0 coincide · +1 vas por encima. */
@@ -191,9 +219,24 @@ function entriesOf(c, oldSec) {
   c.ratios.forEach((r, i) => {
     if (!okRatio(r)) return;
     const w = num(c.secs?.[i]);
-    out.push({ r, w: Math.min(CLASS_CAP_SEC, w > 0 ? w : oldSec) });
+    const sd = num(c.sds?.[i]);
+    out.push({ r, w: Math.min(CLASS_CAP_SEC, w > 0 ? w : oldSec), sd: sd >= 0 ? sd : null });
   });
   return out;
+}
+
+/**
+ * Cuánto baila el reloj en una corrección (tanto por uno): lo que bailó dentro de cada clase (media de las que lo
+ * traen; si ninguna, un 5 %) más lo que cambia de una clase a otra.
+ */
+function spreadOf(list) {
+  const known = list.filter((e) => e.sd != null);
+  const within = known.length ? Math.sqrt(known.reduce((a, e) => a + e.sd * e.sd * e.w, 0) / known.reduce((a, e) => a + e.w, 0)) : UNKNOWN_SD;
+  if (list.length < 2) return within;
+  const W = list.reduce((a, e) => a + e.w, 0);
+  const mean = list.reduce((a, e) => a + e.r * e.w, 0) / W;
+  const between = Math.sqrt(list.reduce((a, e) => a + (e.r - mean) ** 2 * e.w, 0) / W);
+  return Math.sqrt(within * within + between * between);
 }
 
 /** Mediana ponderada (por segundos) de lo que han enseñado las clases. */
@@ -220,11 +263,11 @@ function estimate(c, w0, base, oldSec) {
   if (list.length) {
     const W = list.reduce((a, e) => a + e.w, 0);
     const conf = W / (W + w0);
-    return { f: clamp(base + (weightedMedian(list) - base) * conf, FACTOR_MIN, FACTOR_MAX), conf };
+    return { f: clamp(base + (weightedMedian(list) - base) * conf, FACTOR_MIN, FACTOR_MAX), conf, sd: spreadOf(list) };
   }
   if (Array.isArray(c.ratios)) return null;
   const f = num(c.factor);
-  return f >= FACTOR_MIN && f <= FACTOR_MAX && (Number(c.n) || 0) >= 1 ? { f, conf: 1 } : null;
+  return f >= FACTOR_MIN && f <= FACTOR_MAX && (Number(c.n) || 0) >= 1 ? { f, conf: 1, sd: FIXED_SD } : null;
 }
 const globalOf = (cal) => estimate(cal, GLOBAL_W0_SEC, 1, OLD_GLOBAL_SEC);
 const usable = (c) => estimate(c, GLOBAL_W0_SEC, 1, OLD_GLOBAL_SEC)?.f ?? null;
@@ -236,8 +279,8 @@ export function calFactor(cal) {
 }
 
 /**
- * Tu corrección a una velocidad dada (km/h de cinta) y cuánta calibración hay detrás → { f, conf (0…1) } o null si aún
- * no hay nada aprendido. La de su franja (encogida hacia la única según sus segundos); entre dos franjas con datos, la
+ * Tu corrección a una velocidad dada (km/h de cinta), cuánta calibración hay detrás y cuánto baila el reloj ahí
+ * → { f, conf (0…1), sd (tanto por uno) } o null si aún no hay nada aprendido. La de su franja (encogida hacia la única según sus segundos); entre dos franjas con datos, la
  * recta que las une (sin saltos en los bordes); más allá de la última franja con datos, vuelve poco a poco (en 2 km/h)
  * a la corrección única; y sin ninguna franja, la única.
  */
@@ -246,13 +289,13 @@ export function calAt(cal, kmh) {
   const pts = [];
   for (const key of BAND_KEYS) {
     const e = estimate(cal?.bands?.[key], BAND_W0_SEC, g ? g.f : 1, OLD_BAND_SEC);
-    if (e) pts.push([bandCenter(key), e.f, e.conf]);
+    if (e) pts.push([bandCenter(key), e.f, e.conf, e.sd]);
   }
-  if (!pts.length || !(kmh > 0)) return g ? { f: r3(g.f), conf: g.conf } : null;
+  if (!pts.length || !(kmh > 0)) return g ? { f: r3(g.f), conf: g.conf, sd: g.sd } : null;
   const mix = (a, b, u) => a + (b - a) * u;
   const out = (edge, d) => {
     const u = g == null || d <= 1 ? 0 : Math.min(1, (d - 1) / 2);
-    return { f: r3(mix(edge[1], g ? g.f : edge[1], u)), conf: mix(edge[2], g ? g.conf : edge[2], u) };
+    return { f: r3(mix(edge[1], g ? g.f : edge[1], u)), conf: mix(edge[2], g ? g.conf : edge[2], u), sd: mix(edge[3], g ? g.sd : edge[3], u) };
   };
   const first = pts[0];
   const last = pts[pts.length - 1];
@@ -261,10 +304,10 @@ export function calAt(cal, kmh) {
   for (let i = 1; i < pts.length; i++) {
     if (kmh <= pts[i][0]) {
       const u = (kmh - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
-      return { f: r3(mix(pts[i - 1][1], pts[i][1], u)), conf: mix(pts[i - 1][2], pts[i][2], u) };
+      return { f: r3(mix(pts[i - 1][1], pts[i][1], u)), conf: mix(pts[i - 1][2], pts[i][2], u), sd: mix(pts[i - 1][3], pts[i][3], u) };
     }
   }
-  return g ? { f: r3(g.f), conf: g.conf } : null;
+  return g ? { f: r3(g.f), conf: g.conf, sd: g.sd } : null;
 }
 
 /** Solo el factor de calAt (o null). */
@@ -276,21 +319,24 @@ export function calFactorAt(cal, kmh) {
  * Lo que calcula el reloj (km/h sin corregir) → velocidad de cinta más probable. La corrección depende de la velocidad
  * de verdad, que es justo lo que se busca: se parte de la corrección única y se afina cuatro veces con la de su franja
  * (cada vuelta deja el error en un tercio: con cuatro queda por debajo de 0,01 km/h).
- * → { kmh, k (factor aplicado), calibrated (hay algo aprendido), conf (0…1: cuánto hay detrás de esa corrección) }
+ * → { kmh, k (factor aplicado), calibrated (hay algo aprendido), conf (0…1: cuánto hay detrás de esa corrección),
+ *     sd (cuánto baila el reloj a esa velocidad, en tanto por uno; sin nada aprendido, un 5 %) }
  */
 export function correctSpeed(cal, raw) {
   const g = globalOf(cal);
   let k = g ? g.f : 1;
   let conf = g ? g.conf : 0;
+  let sd = g ? g.sd : UNKNOWN_SD;
   let calibrated = !!g;
   for (let i = 0; i < 4; i++) {
     const c = calAt(cal, raw * k);
     if (!c) break;
     k = c.f;
     conf = c.conf;
+    sd = c.sd;
     calibrated = true;
   }
-  return { kmh: raw * k, k, calibrated, conf };
+  return { kmh: raw * k, k, calibrated, conf, sd };
 }
 
 /**
@@ -299,11 +345,13 @@ export function correctSpeed(cal, raw) {
  * `base`: hacia dónde se encoge (1 para la única; la única para una franja). → corrección nueva (o la misma si el
  * ratio es un disparate).
  */
-export function learnFactor(cal, ratio, { now = Date.now(), sec = OLD_GLOBAL_SEC, base = 1, w0 = GLOBAL_W0_SEC, oldSec = OLD_GLOBAL_SEC } = {}) {
+export function learnFactor(cal, ratio, { now = Date.now(), sec = OLD_GLOBAL_SEC, sd = null, base = 1, w0 = GLOBAL_W0_SEC, oldSec = OLD_GLOBAL_SEC } = {}) {
   if (!okRatio(ratio)) return cal || null;
   const prev = entriesOf(cal, oldSec);
-  const all = [...prev, { r: r3(ratio), w: Math.max(1, Math.round(Math.min(CLASS_CAP_SEC, num(sec) > 0 ? sec : oldSec))) }].slice(-LEARN_KEEP);
-  const next = { ratios: all.map((e) => e.r), secs: all.map((e) => Math.round(e.w)) };
+  const one = { r: r3(ratio), w: Math.max(1, Math.round(Math.min(CLASS_CAP_SEC, num(sec) > 0 ? sec : oldSec))), sd: num(sd) >= 0 ? r3(sd) : null };
+  const all = [...prev, one].slice(-LEARN_KEEP);
+  // `sds`: cuánto bailó el reloj dentro de cada clase (null en las guardadas antes del 14 nov)
+  const next = { ratios: all.map((e) => e.r), secs: all.map((e) => Math.round(e.w)), sds: all.map((e) => e.sd) };
   const e = estimate(next, w0, base, oldSec);
   return {
     ...(cal?.bands ? { bands: cal.bands } : {}),
@@ -319,7 +367,7 @@ export function learnFactor(cal, ratio, { now = Date.now(), sec = OLD_GLOBAL_SEC
  */
 export function learnCal(cal, learned, { now = Date.now() } = {}) {
   if (!learned) return cal || null;
-  let out = learned.ratio != null ? learnFactor(cal, learned.ratio, { now, sec: learned.sec }) : cal || null;
+  let out = learned.ratio != null ? learnFactor(cal, learned.ratio, { now, sec: learned.sec, sd: learned.sd }) : cal || null;
   const base = globalOf(out)?.f ?? 1;
   const bands = { ...(out?.bands || {}) };
   let any = false;
@@ -328,9 +376,10 @@ export function learnCal(cal, learned, { now = Date.now() } = {}) {
     const r = raw && typeof raw === 'object' ? raw.ratio : raw;
     if (r == null) continue;
     const sec = raw && typeof raw === 'object' ? raw.sec : OLD_BAND_SEC;
-    const b = learnFactor(bands[key] || null, r, { now, sec, base, w0: BAND_W0_SEC, oldSec: OLD_BAND_SEC });
+    const sd = raw && typeof raw === 'object' ? raw.sd : null;
+    const b = learnFactor(bands[key] || null, r, { now, sec, sd, base, w0: BAND_W0_SEC, oldSec: OLD_BAND_SEC });
     if (!b || b === bands[key]) continue;
-    bands[key] = { factor: b.factor, n: b.n, ratios: b.ratios, secs: b.secs };
+    bands[key] = { factor: b.factor, n: b.n, ratios: b.ratios, secs: b.secs, sds: b.sds };
     any = true;
   }
   if (any) out = { ...(out || {}), bands, updatedAt: new Date(now).toISOString() };
@@ -379,6 +428,15 @@ export function createSpeedTracker(opts = {}) {
   const fix = (raw) => correctSpeed(cal, raw);         // lectura del reloj → km/h de cinta, con la de su franja
   const anyCal = factor != null || BAND_KEYS.some((key) => usable(cal?.bands?.[key]) != null);
   let stableOff = false;      // (para real()) la última lectura fiable llegó con la clase ya asentada
+  // cuánto baila reloj / clase en los tramos estables de esta clase (todas las franjas): Σ r·dt, Σ r²·dt, Σ dt
+  let q1 = 0;
+  let q2 = 0;
+  let qw = 0;
+  // aviso (a): un cambio grande de la clase que el reloj no nota
+  let hist = [];              // últimas lecturas fiables, ya corregidas: { t, w }
+  let jump = null;            // { t, from, to, base (lo que marcaba el reloj antes del cambio) }
+  let jumpSince = null;
+  let jumpOff = -1;           // tramo estable en el que saltó (el chip sigue marcado)
 
   let last = null;            // última lectura: { kmh, km, cadence, at, source, rx }
   let prev = null;            // para emparejar: { km, appKm, t, steady }
@@ -432,13 +490,17 @@ export function createSpeedTracker(opts = {}) {
         const b = s0.bands[key];
         if (!b || typeof b !== 'object') continue;
         bands[key] = { w: Math.max(0, num(b.w) || 0), a: Math.max(0, num(b.a) || 0), ms: Math.max(0, num(b.ms) || 0),
-          cad: Math.max(0, num(b.cad) || 0), cms: Math.max(0, num(b.cms) || 0) };
+          cad: Math.max(0, num(b.cad) || 0), cms: Math.max(0, num(b.cms) || 0),
+          q1: Math.max(0, num(b.q1) || 0), q2: Math.max(0, num(b.q2) || 0), qw: Math.max(0, num(b.qw) || 0) };
       }
     }
     cadSum = Math.max(0, num(s0.cadSum) || 0);
     cadMs = Math.max(0, num(s0.cadMs) || 0);
     strSum = Math.max(0, num(s0.strSum) || 0);
     strMs = Math.max(0, num(s0.strMs) || 0);
+    q1 = Math.max(0, num(s0.q1) || 0);
+    q2 = Math.max(0, num(s0.q2) || 0);
+    qw = Math.max(0, num(s0.qw) || 0);
     if (Array.isArray(s0.series)) series = s0.series.filter((x) => Array.isArray(x) && x.length >= 4).map((x) => x.slice(0, 4));
     if (num(s0.step) >= SERIES_STEP) step = s0.step;
   }
@@ -488,6 +550,14 @@ export function createSpeedTracker(opts = {}) {
     const v = num(ctx.appKmh);
     const run = !!ctx.running;
     if (changeAt == null || run !== running || (Number.isFinite(v) && (appKmh == null || Math.abs(v - appKmh) >= 0.05))) {
+      // ¿Un cambio grande de la clase, corriendo antes y después? Se apunta lo que marcaba el reloj justo antes
+      // (30 s, al menos 3 lecturas) para ver, pasado 1 min, si lo ha notado. Cualquier otro cambio lo anula.
+      jump = null;
+      jumpSince = null;
+      if (run && running && appKmh != null && Number.isFinite(v) && Math.abs(v - appKmh) >= STEP_MIN_KMH - 1e-9) {
+        const before = hist.filter((h) => h.t >= t - 30000);
+        if (before.length >= 3) jump = { t, from: appKmh, to: v, base: before.reduce((a, h) => a + h.w, 0) / before.length };
+      }
       changeAt = t;
       stretch++;
       offSince = null;
@@ -496,6 +566,15 @@ export function createSpeedTracker(opts = {}) {
     if (Number.isFinite(v)) appKmh = v;
   }
   const settledFor = (t, sec) => running && changeAt != null && t - changeAt >= sec * 1000;
+  const sdOf = (a, b, w) => (w > 0 ? Math.sqrt(Math.max(0, b / w - (a / w) ** 2)) : null);
+  /** Un aviso, si toca: uno por tramo estable y como poco 3 min entre dos. */
+  function alert(t, w) {
+    if (alertStretch === stretch || (alertAt != null && t - alertAt < DRIFT_REPEAT_SEC * 1000)) return false;
+    alertAt = t;
+    alertStretch = stretch;
+    pending = { app: r1(appKmh), watch: r1(w), text: driftText(appKmh, w) };
+    return true;
+  }
 
   return {
     /** La corrección única ya aprendida (o null). */
@@ -557,9 +636,13 @@ export function createSpeedTracker(opts = {}) {
           if (steady && prev.steady && dT <= MAX_PAIR_GAP_MS) {
             sW += dW; sA += dA; sMs += dT;
             // lo mismo, en la franja de lo que marca la clase
-            const b = (bands[bandKey(appKmh)] ||= { w: 0, a: 0, ms: 0, cad: 0, cms: 0 });
+            const b = (bands[bandKey(appKmh)] ||= { w: 0, a: 0, ms: 0, cad: 0, cms: 0, q1: 0, q2: 0, qw: 0 });
             b.w += dW; b.a += dA; b.ms += dT;
             if (sample.cadence != null) { b.cad += sample.cadence * dT; b.cms += dT; }
+            // cuánto baila el reloj frente a la clase (lectura a lectura), en la franja y en toda la clase
+            const q = sample.kmh / appKmh;
+            b.q1 = (b.q1 || 0) + q * dT; b.q2 = (b.q2 || 0) + q * q * dT; b.qw = (b.qw || 0) + dT;
+            q1 += q * dT; q2 += q * q * dT; qw += dT;
           }
         }
         // Cadencia y zancada (velocidad de la clase ÷ cadencia), solo moviéndote de verdad y sin huecos
@@ -573,23 +656,47 @@ export function createSpeedTracker(opts = {}) {
       last = { ...sample, rx: t };
       if (running) toSeries(num(ctx.elapsed), trust ? sample.kmh : null, trust ? sample.cadence : null);
 
+      const c = trust ? fix(sample.kmh) : null;
+      if (c) {
+        hist.push({ t, w: c.kmh });
+        while (hist.length && hist[0].t < t - 100000) hist.shift();
+      }
       stableOff = trust && appKmh != null && settledFor(t, SETTLE_SEC);
-      // Desvío: solo con velocidad estable, moviéndote de verdad y siempre hacia el mismo lado
+
+      // Aviso (a): la clase cambió 1,5 km/h o más hace 1 min y el reloj no lo ha notado (frente a sí mismo)
+      if (jump) {
+        const dt = t - jump.t;
+        if (!running || dt > STEP_WINDOW_SEC * 1000) {
+          jump = null;
+          jumpSince = null;
+        } else if (c && dt >= STEP_WAIT_SEC * 1000) {
+          const recent = hist.filter((h) => h.t >= t - 20000 && h.t >= jump.t + 40000);
+          if (recent.length >= 3) {
+            const cur = recent.reduce((a, h) => a + h.w, 0) / recent.length;
+            if ((cur - jump.base) / (jump.to - jump.from) < STEP_MOVED_MIN) {
+              if (jumpSince == null) jumpSince = t;
+              if (t - jumpSince >= STEP_HOLD_SEC * 1000) {
+                if (alert(t, cur)) jumpOff = stretch;
+                jump = null;
+                jumpSince = null;
+              }
+            } else {
+              jump = null;      // lo ha notado: comprobado
+              jumpSince = null;
+            }
+          }
+        }
+      }
+
+      // Aviso (b): desvío grande y sostenido, con velocidad estable, moviéndote de verdad y siempre hacia el mismo lado
       if (!stableOff) { offSince = null; return true; }
-      const c = fix(sample.kmh);
       const w = c.kmh;
       // el margen depende de cuánta calibración hay detrás: con poca, más ancho (el reloj aún puede ir desviado)
-      const st = speedStatus(appKmh, w, c.conf);
-      // «0,5 o más»: el borde también cuenta
-      const far = st !== 0 || Math.abs(w - appKmh) >= tolerance(appKmh, c.conf) - 1e-9;
+      const far = Math.abs(w - appKmh) >= tolerance(appKmh, c.conf) - 1e-9;
       const sign = w >= appKmh ? 1 : -1;
       if (!far) { offSince = null; return true; }
       if (offSince == null || sign !== offSign) { offSince = t; offSign = sign; }
-      if (t - offSince >= DRIFT_SEC * 1000 && alertStretch !== stretch && (alertAt == null || t - alertAt >= DRIFT_REPEAT_SEC * 1000)) {
-        alertAt = t;
-        alertStretch = stretch;
-        pending = { app: r1(appKmh), watch: r1(w), text: driftText(appKmh, w) };
-      }
+      if (t - offSince >= DRIFT_SEC * 1000) alert(t, w);
       return true;
     },
     /** Aviso pendiente (una vez): { app, watch, text } o null. */
@@ -601,14 +708,15 @@ export function createSpeedTracker(opts = {}) {
     /**
      * Lo que se enseña ahora: null si el reloj no ha mandado nada en esta clase.
      * { kmh (ya corregida; null si no hay lectura fresca, estás parado o no cuadra con la clase), raw, km, cadence,
-     *   calibrated, off (lleva ≥ 20 s desviado), dev (km/h frente a la clase), fresh }
+     *   calibrated, off (hay desvío de aviso: sostenido 45 s, o un cambio de la clase que el reloj no ha notado),
+     *   dev (km/h frente a la clase), fresh }
      */
     view(t) {
       if (!last) return null;
       const fresh = t - last.rx <= SPEED_FRESH_MS;
       const c = trust && last.kmh != null && t - last.rx <= SHOW_FRESH_MS ? fix(last.kmh) : null;
       const kmh = c ? r1(c.kmh) : null;
-      const off = kmh != null && offSince != null && t - offSince >= DRIFT_SEC * 1000;
+      const off = kmh != null && ((offSince != null && t - offSince >= DRIFT_SEC * 1000) || jumpOff === stretch);
       return {
         kmh, raw: fresh ? last.kmh : null, km: r3((firstKm + wKm) * k), cadence: fresh ? last.cadence : null,
         calibrated: c ? c.calibrated : anyCal, off, dev: kmh != null && appKmh != null ? r1(kmh - appKmh) : null, fresh, source: last.source,
@@ -618,16 +726,23 @@ export function createSpeedTracker(opts = {}) {
      * La velocidad REAL más probable ahora mismo (para quien quiera usarla: control por pulso, análisis). null si no hay
      * lectura fresca y fiable (parado, braceo, sin reloj, lectura de hace más de 9 s o que no cuadra con la clase).
      * → { kmh (de cinta, ya corregidos), raw (lo que marca el reloj), cadence | null, conf (0…1: cuánta calibración
-     *     hay detrás de esa corrección), ok (conf ≥ 0,5 y la clase lleva ≥ 20 s a la misma velocidad: se puede decidir
-     *     con ella; si no, solo orienta), dev (kmh − lo que marca la clase) }
+     *     hay detrás de esa corrección), err (km/h de error esperable a esa velocidad: lo que el reloj ha bailado ahí
+     *     en tus clases; sin dato, un 5 %), ok (se puede decidir con ella: conf ≥ 0,5, err ≤ 0,35 km/h y la clase lleva
+     *     ≥ 1 min a la misma velocidad; si no, solo orienta), dev (kmh − lo que marca la clase) }
+     * El reloj acierta mejor a unas velocidades que a otras (14 nov: ±0,25 km/h entre 8 y 10, pero hasta 1,2 de más al
+     * trote suave tras un bloque rápido): `ok` solo sale donde ha demostrado acertar.
      */
     real(t) {
       if (!last || !trust || last.kmh == null || !(t - last.rx <= SHOW_FRESH_MS)) return null;
       const c = fix(last.kmh);
       const kmh = r1(c.kmh);
+      // Lo que baila el reloj: lo peor entre la velocidad que él cree que llevas y la que marca la clase. Si discrepan,
+      // no se sabe quién acierta, y hay velocidades (el trote suave) en las que el reloj se equivoca más.
+      const atClass = appKmh > 0 ? calAt(cal, appKmh) : null;
+      const err = r2(Math.max(c.sd, atClass ? atClass.sd : UNKNOWN_SD) * c.kmh);
       return {
-        kmh, raw: last.kmh, cadence: last.cadence, conf: r2(c.conf),
-        ok: c.conf >= 0.5 && stableOff && settledFor(t, SETTLE_SEC),
+        kmh, raw: last.kmh, cadence: last.cadence, conf: r2(c.conf), err,
+        ok: c.conf >= 0.5 && err <= OK_ERR_KMH && stableOff && settledFor(t, SETTLE_SEC),
         dev: appKmh != null ? r1(kmh - appKmh) : null,
       };
     },
@@ -681,11 +796,17 @@ export function createSpeedTracker(opts = {}) {
      */
     learned() {
       const out = { ratio: this.classRatio(), sec: Math.round(sMs / 1000), bands: {} };
+      // `sd`: cuánto ha bailado reloj / clase (tanto por uno) en esos tramos, en toda la clase y en cada franja
+      const sdAll = sdOf(q1, q2, qw);
+      if (out.ratio != null && sdAll != null) out.sd = r3(sdAll);
       for (const key of BAND_KEYS) {
         const b = bands[key];
         if (!b || b.ms < BAND_MIN_SEC * 1000 || b.w < BAND_MIN_KM) continue;
         const r = b.a / b.w;
-        if (r >= LEARN_RATIO_MIN && r <= LEARN_RATIO_MAX) out.bands[key] = { ratio: r3(r), sec: Math.round(b.ms / 1000) };
+        if (!(r >= LEARN_RATIO_MIN && r <= LEARN_RATIO_MAX)) continue;
+        out.bands[key] = { ratio: r3(r), sec: Math.round(b.ms / 1000) };
+        const sd = sdOf(b.q1 || 0, b.q2 || 0, b.qw || 0);
+        if (sd != null) out.bands[key].sd = r3(sd);
       }
       return out.ratio == null && !Object.keys(out.bands).length ? null : out;
     },
@@ -704,11 +825,12 @@ export function createSpeedTracker(opts = {}) {
       const bb = {};
       for (const key of BAND_KEYS) {
         const b = bands[key];
-        if (b) bb[key] = { w: r3(b.w), a: r3(b.a), ms: Math.round(b.ms), cad: Math.round(b.cad), cms: Math.round(b.cms) };
+        if (b) bb[key] = { w: r3(b.w), a: r3(b.a), ms: Math.round(b.ms), cad: Math.round(b.cad), cms: Math.round(b.cms), q1: r2(b.q1 || 0), q2: r2(b.q2 || 0), qw: Math.round(b.qw || 0) };
       }
       return {
         n, firstKm, wKm: r3(wKm), aKm: r3(aKm), pairMs: Math.round(pairMs), sW: r3(sW), sA: r3(sA), sMs: Math.round(sMs), touched,
         bands: bb, cadSum: Math.round(cadSum), cadMs: Math.round(cadMs), strSum: r2(strSum), strMs: Math.round(strMs),
+        q1: r2(q1), q2: r2(q2), qw: Math.round(qw),
         series: this.series(), step,
       };
     },

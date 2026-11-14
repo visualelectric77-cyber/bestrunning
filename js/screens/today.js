@@ -24,6 +24,7 @@ import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
 import { raceSpeedFor, raceWorkoutId } from '../training/race.js';
 import { readiness } from '../training/readiness.js';
 import { dayState, planFix, applyFix, undoFix, fixOn } from '../training/day-fix.js';
+import { BONUS_MINUTES, bonusOffer, bonusPick } from '../training/bonus.js';
 import { diagMark } from '../core/diag.js';
 import { syncFocus } from '../training/focus-sync.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
@@ -228,6 +229,20 @@ function restHero(day, state, today, animate) {
     <div class="td-hero__top"><span class="eyebrow">${esc(rel)} · Descanso</span></div>
     <h2 class="td-hero__title">Mañana, tu ${esc(eve.race.label)}</h2>
     <p class="td-hero__sub">Piernas en alto, mucha agua y cena de siempre. Deja preparados la ropa y el dorsal, y a dormir pronto.</p>
+  </article>`;
+  }
+  // Semana completa y hoy descansas: en vez de adelantar la clase de mañana, un entreno sorpresa del tiempo que elijas
+  if (day.date === today && safe(() => bonusOffer(state, day.date), false)) {
+    return `<article class="card td-hero td-hero--rest td-hero--bonus${animate ? ' td-hero--in' : ''}">
+    <div class="td-hero__top"><span class="eyebrow">${esc(rel)} · Bonus</span></div>
+    <h2 class="td-hero__title">Semana completa. ¿Un extra?</h2>
+    <p class="td-hero__sub">Elige cuánto tiempo tienes y te preparo algo distinto a lo de siempre. Es un extra: tu plan de la semana que viene no cambia.</p>
+    <div class="td-bonus" role="group" aria-label="Duración del bonus">
+      ${BONUS_MINUTES.map((m) => `<button type="button" class="td-bonus__b" data-bonus="${m}" aria-label="Bonus de ${m} minutos"><b class="num">${m}</b><span>min</span></button>`).join('')}
+    </div>
+    <div class="td-hero__actions">
+      <button type="button" class="btn btn--secondary btn--lg btn--block" data-train-anyway="${day.date}">Prefiero algo suave</button>
+    </div>
   </article>`;
   }
   const next = nextTraining(state, day.date);
@@ -679,6 +694,15 @@ export function mount(el) {
     if (swap) {
       haptic('light');
       openSwapSheet(swap.dataset.swap);
+      return;
+    }
+    const bonus = e.target.closest('[data-bonus]');
+    if (bonus) {
+      const w = safe(() => bonusPick(getState(), today, Number(bonus.dataset.bonus)), null);
+      if (!w) return;
+      haptic('light');
+      diagMark('bonus.elegido', { min: Number(bonus.dataset.bonus), clase: w.templateId });
+      navigate(`#/workout/${enc(w.id)}?from=today`);
       return;
     }
     const easy = e.target.closest('[data-train-anyway]');

@@ -613,6 +613,7 @@ export function buildSession(workout, engineState, { levels = null, planDate = n
   return {
     id: uid('ses'),
     workoutId: workout?.id ?? null,
+    gen: Number(workout?.gen) || null,                    // versión de la forma de la clase (generator.js GEN)
     templateId: workout?.templateId ?? null,
     title: workout?.title || 'Entrenamiento',
     category: workout?.category ?? null,

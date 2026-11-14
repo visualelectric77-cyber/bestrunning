@@ -22,7 +22,10 @@ import { attachPlayer, isNative, post as nativePost, nativeStatus } from '../int
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
-import { calibrateClass, nextSpeed, seriesSpeed, liveSpeed, pulseTrend, dynModelFrom, effectiveSpeed, REAL_HOLD_DEV } from '../training/hr-control.js';
+import {
+  calibrateClass, nextSpeed, seriesSpeed, liveSpeed, pulseTrend, dynModelFrom, effectiveSpeed, REAL_HOLD_DEV,
+  CALM_ZONES, jogFloor, calmCaps,
+} from '../training/hr-control.js';
 import { createVamAssist, vamPreCheck, VAM_TEXT } from '../training/vam-assist.js';
 import { createTracker, hrAfter } from '../training/hr-dynamics.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
@@ -478,14 +481,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let dynChanges = [];
   if (!workout.isTest) {
     try {
-      dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments, { profile: state.profile });
+      dynModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels }, { gen: Number(h.gen) || 1 })?.segments, { profile: state.profile });
     } catch { dynModel = null; }
   }
   // Test VAM: el modelo solo sirve para detectar en el calentamiento si hoy tu pulso va alto; nunca toca una velocidad
   let vamModel = null;
   if (workout.isTest) {
     try {
-      vamModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels })?.segments);
+      vamModel = dynModelFrom(state.history, (h) => workoutFromId(h.workoutId, { ...state, levels: h.levelsAtStart || state.levels }, { gen: Number(h.gen) || 1 })?.segments);
     } catch { vamModel = null; }
   }
   if (dynModel && !dynModel.starter && !snap && !workout.race) {
@@ -2671,6 +2674,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { update(s); } catch (err) { reportOnce(err); }
     if (s.status === 'running' && !suppressCoach) {
       try { coachTick(s); } catch (err) { reportOnce(err); }
+      try { calmCap(s); } catch (err) { reportOnce(err); }
       try { hrCoachTick(s); } catch (err) { reportOnce(err); }
       // Durante un salto (skip / «No puedo más») la música se reubica después con musicSeek
       try { musicTick(s); } catch (err) { reportOnce(err); }
@@ -3427,6 +3431,38 @@ export function mount(el, { params = {}, query = {} } = {}) {
   }
 
   /**
+   * Vuelta a la calma a tu velocidad de verdad: unos segundos antes de entrar (y entre sus escalones), si lo que
+   * vienes corriendo va ya por debajo de lo que marca la vuelta a la calma (porque el pulso o tú habéis bajado el
+   * tramo), sus escalones se rebajan para que la clase nunca «suba» para enfriar. Vale con pulso y sin él. La voz y
+   * «Siguiente» se rehacen con la velocidad buena.
+   */
+  function calmCap(s) {
+    if (!engine || countingDown || workout?.isTest || s.status !== 'running') return;
+    const seg = s.segment;
+    const nx = s.nextSegment;
+    if (!seg || !nx || nx.zone !== 'cooldown' || seg.zone === 'walk' || seg.zone === 'warmup') return;
+    if (calmCap.seg === s.segIndex) return;
+    const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
+    if (s.segRemaining > lead + 8 || s.segRemaining < 1.5) return;
+    calmCap.seg = s.segIndex;
+    const cur = Number(s.currentSpeed) || Number(seg.speed) || 0;
+    const caps = calmCaps(engine.getSegments?.() || [], s.segIndex + 1, cur);
+    let changed = 0;
+    for (const c of caps) if (engine.setSegmentSpeed?.(c.index, c.speed)) changed++;
+    if (!changed) return;
+    diagMark('calma.tope', { vas: cur, era: nx.speed, queda: caps[0].speed });
+    renderNext(engine.getState());
+    renderProfile();
+    if (coach) {
+      const s2 = engine.getState();
+      coachCall('destroy');
+      coach = makeCoach();
+      coachCall('seek', s2.totalElapsed);
+      lastCoachPos = s2.totalElapsed;
+    }
+  }
+
+  /**
    * Pulso perdido: llegaba del reloj y lleva 90 s sin llegar con la clase en marcha. Sin pulso, ni el modo pulso ni la
    * guía de carrera pueden corregir nada, así que se dice (voz y rótulo), como mucho dos veces por clase.
    */
@@ -3463,6 +3499,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const seg = s.segment;
     const nx = s.nextSegment;
     if (!seg || !nx || s.status !== 'running' || st.recSeg === s.segIndex) return;
+    // calentar, vuelta a la calma y caminar siguen el plan: el pulso no las baja (la vuelta a la calma ya lleva su tope)
+    if (CALM_ZONES.has(nx.zone)) return;
     const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
     if (s.segRemaining > lead + 5 || s.segRemaining < 1.5) return;
     if (st.rbuf.length < 3) return;
@@ -3470,9 +3508,15 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const hr = st.rbuf.reduce((a, p) => a + p[1], 0) / st.rbuf.length;
     let nextTarget = null;
     try { nextTarget = segHrTarget(nx); } catch { nextTarget = null; }
-    const v = recoverySpeed({
+    let v = recoverySpeed({
       cur: seg, next: nx, hr, nextTarget, curSpeed: s.currentSpeed, coachLowered: (hrCoachAdj[seg.zone] || 0) < 0,
     });
+    // el trote nunca baja de tu suelo (medido contra tu velocidad de trote, no contra lo ya rebajado)
+    if (v != null && nx.zone === 'jog') {
+      const st0 = getState();
+      v = Math.max(v, jogFloor(st0.levels, { pushy: isHardEffort(st0.profile), minSpeed: st0.treadmill?.minSpeed ?? 1 }));
+      if (v > nx.speed - 0.2 + 1e-9) v = null;
+    }
     if (v == null || !engine.setSegmentSpeed?.(s.segIndex + 1, v)) return;
     diagMark('pulso.recupera', { ppm: Math.round(hr), kmh: v, era: nx.speed });
     renderNext(engine.getState());
@@ -3636,16 +3680,21 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const incl = Number(seg.incline) || 0;
     const tm = getState().treadmill || {};
     const lims = { minSpeed: tm.minSpeed ?? 1, maxSpeed: tm.maxSpeed ?? 20 };
+    // El trote tiene suelo: nunca más de 1,0 km/h (0,6 con exigente) por debajo de TU velocidad de trote, sumando
+    // todas las bajadas. Nunca sirve para subir un trote que la clase ya traía más lento.
+    const floorJog = jogFloor(getState().levels, { pushy, minSpeed: lims.minSpeed });
+    const limsFor = (zone, speed) => (zone === 'jog' ? { ...lims, minSpeed: Math.min(floorJog, Number(speed) || floorJog) } : lims);
     const lead = clamp(Number(tm.announceLead) || 10, 3, 30);
     // 1 · el tramo que viene
     const nx = s.nextSegment;
     // (el tramo de carrera sale a tu ritmo objetivo: no se ajusta a una zona de pulso)
-    if (nx && !nx.race && !hands && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
+    // (ni calentar, vuelta a la calma o caminar: siguen el plan; la vuelta a la calma lleva su propio tope, calmCap)
+    if (nx && !nx.race && !CALM_ZONES.has(nx.zone) && !hands && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
       st.recSeg = s.segIndex;
       let target = null;
       try { target = segHrTarget(nx); } catch { target = null; }
       const hrEnd = hrAfter(dynModel, tr.a, tr.hr, s.segRemaining, (s.currentSpeed || seg.speed) + (st.dev || 0), incl, st.load);
-      let v = nextSpeed(dynModel, aDay, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay, ...lims });
+      let v = nextSpeed(dynModel, aDay, { cur: seg, next: nx, hrEnd, load: st.load, target, highDay, ...limsFor(nx.zone, nx.speed) });
       // Entreno exigente, series cortas: si esa serie se te queda corta para tu pulso de hoy, sube (hr-control.js
       // seriesSpeed). Hace falta llevar ya unos minutos de pulso creíble hoy; como mucho 8 veces por clase.
       let series = false;
@@ -3695,7 +3744,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let target = null;
     try { target = segHrTarget(seg); } catch { target = null; }
     const r = liveSpeed(dynModel, aDay, {
-      seg, hrNow: tr.hr, remaining: s.segRemaining, speed: s.currentSpeed || seg.speed, load: st.load, target, ...lims,
+      seg, hrNow: tr.hr, remaining: s.segRemaining, speed: s.currentSpeed || seg.speed, load: st.load, target,
+      ...limsFor(seg.zone, s.currentSpeed || seg.speed),
       base: hands ? null : st.baseSpeed,
     });
     if (!r || (dynModel.starter && r.speed > (s.currentSpeed || seg.speed))) return;

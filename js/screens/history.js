@@ -95,7 +95,7 @@ async function loadSegments(ses) {
   try {
     const gen = await import('../training/generator.js');
     const st = getState();
-    const w = gen.workoutFromId(ses.workoutId, { ...st, levels: ses.levelsAtStart || st.levels });
+    const w = gen.workoutFromId(ses.workoutId, { ...st, levels: ses.levelsAtStart || st.levels }, { gen: Number(ses.gen) || 1 });
     if (w && Array.isArray(w.segments) && w.segments.length) segs = w.segments;
   } catch {
     segs = null;
