@@ -170,16 +170,17 @@ export function envFrom(ctx, tex) {
 
 /* ─────────────────────────────── luces del color del tramo ─────────────────────────────── */
 
-const GLOW_VERT = /* glsl */ `
+// bend (opcional, kit/bend.js): el camino serpentea; vW se queda en el espacio del camino (sin curvar)
+const glowVert = (bend) => /* glsl */ `
 varying vec3 vW;
-#include <fog_pars_vertex>
+#include <fog_pars_vertex>${bend ? bend.glsl : ''}
 void main() {
   vec4 p = vec4(position, 1.0);
   #ifdef USE_INSTANCING
   p = instanceMatrix * p;
   #endif
   vec4 w = modelMatrix * p;
-  vW = w.xyz;
+  vW = w.xyz;${bend ? '\n  w.x += bendX(w.z);' : ''}
   vec4 mvPosition = viewMatrix * w;
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -203,11 +204,11 @@ void main() {
 }`;
 
 /** Material emisivo (bombillas, captafaros, tiras LED, anillos): color del tramo con la cadena. */
-export function glowMaterial(ctx, runner, { tint = '#ffffff', mix = 1, power = 4, fogK = 0.35 } = {}) {
+export function glowMaterial(ctx, runner, { tint = '#ffffff', mix = 1, power = 4, fogK = 0.35, bend = null } = {}) {
   const { THREE } = ctx;
   return withWave(new THREE.ShaderMaterial({
-    uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTint: { value: new THREE.Color(tint) }, uMix: { value: mix }, uPower: { value: power }, uFogK: { value: fogK } },
-    vertexShader: GLOW_VERT, fragmentShader: GLOW_FRAG, fog: true,
+    uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uTint: { value: new THREE.Color(tint) }, uMix: { value: mix }, uPower: { value: power }, uFogK: { value: fogK }, ...(bend ? bend.u : null) },
+    vertexShader: glowVert(bend), fragmentShader: GLOW_FRAG, fog: true,
   }), runner);
 }
 
@@ -216,7 +217,7 @@ function withWave(mat, runner) {
   return mat;
 }
 
-const HALO_VERT = /* glsl */ `
+const haloVert = (bend) => /* glsl */ `
 attribute vec2 aCorner;
 uniform float uSize, uGrow;
 varying vec2 vUv;
@@ -224,14 +225,14 @@ varying vec3 vCol;
 varying float vK;
 uniform vec3 uTint;
 uniform float uMix, uFogD;
-${WAVE_GLSL}
+${WAVE_GLSL}${bend ? bend.glsl : ''}
 void main() {
   vec4 c = vec4(0.0, 0.0, 0.0, 1.0);
   #ifdef USE_INSTANCING
   c = instanceMatrix * c;
   #endif
   vec3 wc = (modelMatrix * c).xyz;
-  float br; vec3 zc = waveColor(-wc.z, br);
+  float br; vec3 zc = waveColor(-wc.z, br);${bend ? '\n  wc.x += bendX(wc.z);' : ''}
   vCol = mix(uTint, zc, uMix) * br;
   float dist = length(wc - cameraPosition);
   float rad = uSize * (1.0 + dist * uGrow);
@@ -259,7 +260,7 @@ void main() {
  * Halos aditivos (la luz en el aire húmedo) para n puntos: InstancedMesh cuyas matrices dan el centro de cada luz.
  * size (m de radio cerca), grow (crecimiento con la distancia: la hilera se sigue leyendo a lo lejos).
  */
-export function halos(ctx, runner, n, { tint = '#ffffff', mix = 1, size = 0.5, grow = 0.01, power = 1, fogD = 0.004 } = {}) {
+export function halos(ctx, runner, n, { tint = '#ffffff', mix = 1, size = 0.5, grow = 0.01, power = 1, fogD = 0.004, bend = null } = {}) {
   const { THREE } = ctx;
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
@@ -268,9 +269,9 @@ export function halos(ctx, runner, n, { tint = '#ffffff', mix = 1, size = 0.5, g
   const mat = withWave(new THREE.ShaderMaterial({
     uniforms: {
       uTint: { value: new THREE.Color(tint) }, uMix: { value: mix }, uSize: { value: size }, uGrow: { value: grow },
-      uPower: { value: power }, uFogD: { value: fogD },
+      uPower: { value: power }, uFogD: { value: fogD }, ...(bend ? bend.u : null),
     },
-    vertexShader: HALO_VERT, fragmentShader: HALO_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    vertexShader: haloVert(bend), fragmentShader: HALO_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
   }), runner);
   const mesh = new THREE.InstancedMesh(g, mat, n);
   mesh.frustumCulled = false;
@@ -286,9 +287,11 @@ export function halos(ctx, runner, n, { tint = '#ffffff', mix = 1, size = 0.5, g
  * física de three.js (difusa + especular: lo mojado brilla de verdad). Color = mezcla de tint y del color del tramo
  * con la cadena. rows: THREE.Vector4[] (el escenario actualiza zOff cada fotograma).
  */
-export function addLamps(mat, ctx, runner, rows, { tint = '#ffd9a8', mix = 0.6, power = 6, range = 14 } = {}) {
+export function addLamps(mat, ctx, runner, rows, { tint = '#ffd9a8', mix = 0.6, power = 6, range = 14, bend = null } = {}) {
   const { THREE } = ctx;
   const n = rows.length;
+  // bend (kit/bend.js): la hilera sigue el camino curvado. El material debe pasar después por bend.apply(mat)
+  const bx = bend ? ' + bendX(zk)' : '';
   const uni = {
     uLampRows: { value: rows },
     uLampTint: { value: new THREE.Color(tint) },
@@ -324,7 +327,7 @@ ${WAVE_GLSL}`)
     float kf = floor((R.w - vLampW.z) / R.z);
     for (int j = 0; j < 2; j++) {
       float zk = R.w - (kf + float(j)) * R.z;
-      vec3 lp = (viewMatrix * vec4(R.x, R.y, zk, 1.0)).xyz;
+      vec3 lp = (viewMatrix * vec4(R.x${bx}, R.y, zk, 1.0)).xyz;
       vec3 lv = lp - geometryPosition;
       float ld = length(lv);
       float lbr; vec3 lzc = waveColor(-zk, lbr);
@@ -358,9 +361,16 @@ ${WAVE_GLSL}`)
  *   reach: distancia (m) a la que el reflejo de una luz ya se ha perdido en el aire (las lejanas no se suman en blanco)
  *   Brillo por hilera: uStreakRowK.value[i] (1 por defecto), p. ej. para apagar las farolas y dejar las balizas.
  */
-export function addStreaks(mat, ctx, runner, rows, { tint = '#ffd9a8', mix = 0.6, power = 1, width = 0.4, blur = 0.004, near = 1.4, far = 0.4, jitter = 0, dry = 0.3, groundY = 0, reach = 200 } = {}) {
+export function addStreaks(mat, ctx, runner, rows, { tint = '#ffd9a8', mix = 0.6, power = 1, width = 0.4, blur = 0.004, near = 1.4, far = 0.4, jitter = 0, dry = 0.3, groundY = 0, reach = 200, bend = null } = {}) {
   const { THREE } = ctx;
   const n = rows.length;
+  // bend (kit/bend.js): píxel y luces en su sitio curvado. El material debe pasar después por bend.apply(mat)
+  const bP = bend ? ' + vec3(bendX(vStreakW.z), 0.0, 0.0)' : '';
+  const bZs = bend ? `
+      lx = R.x + bendX(zs) - cameraPosition.x;
+      zs = cameraPosition.z + lx * sDir.y / (abs(sDir.x) > 1e-4 ? sDir.x : 1e-4);` : '';
+  const bLk = bend ? `
+        lx = R.x + bendX(zk) - cameraPosition.x;` : '';
   const uni = {
     uStreakRows: { value: rows },
     uStreakTint: { value: new THREE.Color(tint) },
@@ -399,7 +409,7 @@ uniform float uStreakRowK[${n}];
 ${wave}`)
       .replace('#include <lights_fragment_end>', `
   {
-    vec3 sP = vStreakW - cameraPosition;
+    vec3 sP = vStreakW${bP} - cameraPosition;
     float sH = max(length(sP.xz), 1e-3);
     vec2 sDir = sP.xz / sH;
     vec3 sN = inverseTransformDirection(normal, viewMatrix);
@@ -412,11 +422,11 @@ ${wave}`)
     for (int r = 0; r < ${n}; r++) {
       vec4 R = uStreakRows[r];
       float lx = R.x - cameraPosition.x;
-      float zs = cameraPosition.z + lx * sDir.y / (abs(sDir.x) > 1e-4 ? sDir.x : 1e-4);
+      float zs = cameraPosition.z + lx * sDir.y / (abs(sDir.x) > 1e-4 ? sDir.x : 1e-4);${bZs}
       float kf = floor((R.w - zs) / R.z);
       float lyy = R.y + cameraPosition.y - 2.0 * uStreakK.z;
       for (int j = 0; j < 2; j++) {
-        float zk = R.w - (kf + float(j)) * R.z;
+        float zk = R.w - (kf + float(j)) * R.z;${bLk}
         vec2 dl = vec2(lx, zk - cameraPosition.z);
         float lh = max(length(dl), 1e-3);
         vec2 lDir = dl / lh;
