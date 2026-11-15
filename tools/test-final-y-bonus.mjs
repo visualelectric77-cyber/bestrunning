@@ -25,14 +25,24 @@ section('Vuelta a la calma: nunca más rápida que lo que vienes corriendo');
     { zone: 'run', speed: 10, sec: 600 }, { zone: 'jog', speed: 7.8, sec: 600 },
     { zone: 'cooldown', speed: 8.0, sec: 60 }, { zone: 'cooldown', speed: 7.4, sec: 60 }, { zone: 'cooldown', speed: 6.8, sec: 60 },
   ];
-  // vienes a 7,3 (el pulso o tú habéis bajado el trote): el primer escalón no puede subir a 8,0
+  // vienes a 7,3 (el pulso o tú habéis bajado el trote): el primer escalón no puede subir a 8,0 ni quedarse igual
   const c = calmCaps(segs, 2, 7.3);
-  eq(JSON.stringify(c), JSON.stringify([{ index: 2, speed: 7.3 }, { index: 3, speed: 7.3 }]), 'escalones rebajados a lo que vienes corriendo');
-  ok(c.every((x, i, a) => !i || x.speed <= a[i - 1].speed), 'siempre de más a menos');
+  eq(JSON.stringify(c), JSON.stringify([{ index: 2, speed: 7 }, { index: 3, speed: 6.8 }]), 'cada escalón baja respecto a lo anterior, hasta el paso de calma del plan');
+  ok(c[0].speed < 7.3 && c.every((x, i, a) => !i || x.speed <= a[i - 1].speed), 'siempre hacia abajo, empezando por debajo de lo que vienes corriendo');
   eq(calmCaps(segs, 2, 8.5).length, 0, 'si vienes más rápido que la vuelta a la calma, no se toca');
-  eq(calmCaps(segs, 2, 8.0).length, 0, 'a la misma velocidad, tampoco');
-  eq(JSON.stringify(calmCaps(segs, 2, 6.5)), JSON.stringify([{ index: 2, speed: 6.5 }, { index: 3, speed: 6.5 }, { index: 4, speed: 6.5 }]), 'vienes muy lento: toda la vuelta a la calma a esa velocidad');
+  // a la misma velocidad que el primer escalón: antes se quedaba igual; ahora baja un escalón
+  eq(JSON.stringify(calmCaps(segs, 2, 8.0)), JSON.stringify([{ index: 2, speed: 7.7 }]), 'vienes a la velocidad del primer escalón: baja 0,3 (los demás ya bajaban)');
+  eq(JSON.stringify(calmCaps(segs, 2, 8.2)), JSON.stringify([{ index: 2, speed: 7.9 }]), 'vienes solo un poco más rápido: el escalón queda 0,3 por debajo');
+  eq(calmCaps(segs, 2, 8.3).length, 0, 'ya hay 0,3 de bajada: no se toca');
+  eq(JSON.stringify(calmCaps(segs, 2, 6.5)), JSON.stringify([{ index: 2, speed: 6.5 }, { index: 3, speed: 6.5 }, { index: 4, speed: 6.5 }]), 'vienes por debajo del paso de calma: toda la vuelta a la calma a tu velocidad, sin subir');
+  eq(JSON.stringify(calmCaps(segs, 2, 7.0)), JSON.stringify([{ index: 2, speed: 6.8 }, { index: 3, speed: 6.8 }]), 'vienes casi al paso de calma: directo a él, no más abajo');
   eq(calmCaps(segs, 3, 7.3)[0]?.index, 3, 'también entre escalones');
+  {
+    // el caso real: trote de soltura a 8,3 y vuelta a la calma 8,4 → 7,1; antes quedaba 8,3 → 7,1 (igual que el trote)
+    const two = [{ zone: 'jog', speed: 8.3, sec: 60 }, { zone: 'cooldown', speed: 8.4, sec: 60 }, { zone: 'cooldown', speed: 7.1, sec: 60 }];
+    eq(JSON.stringify(calmCaps(two, 1, 8.3)), JSON.stringify([{ index: 1, speed: 8 }]), 'trote a 8,3: la vuelta a la calma empieza a 8,0, no a 8,3');
+    eq(JSON.stringify(calmCaps(two, 1, 7.7)), JSON.stringify([{ index: 1, speed: 7.4 }]), 'trote a 7,7: 7,4 y luego 7,1');
+  }
   eq(calmCaps(segs, 1, 7.3).length, 0, 'lo que no es vuelta a la calma no se toca');
   eq(calmCaps(segs, 2, 0).length, 0, 'sin velocidad: nada');
   eq(calmCaps(null, 0, 8).length, 0, 'sin tramos: nada');

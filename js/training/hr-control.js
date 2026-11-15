@@ -180,21 +180,31 @@ export function jogFloor(levels, { pushy = false, minSpeed = 1, recovery = false
   return j > 0 ? r1(Math.max(Number(minSpeed) || 1, j - drop)) : Number(minSpeed) || 1;
 }
 
+const CALM_STEP = 0.3;        // cada escalón de la vuelta a la calma, al menos esto por debajo de lo anterior
+
 /**
- * Vuelta a la calma: nunca empieza más rápida que lo que vienes corriendo y va siempre de más a menos. Si el pulso (o
- * tú) habéis bajado el último tramo por debajo del primer escalón de la vuelta a la calma, la clase no puede «subir»
- * para enfriar. → [{ index, speed }] con los escalones que hay que rebajar (vacío si ninguno).
+ * Vuelta a la calma: nunca empieza más rápida que lo que vienes corriendo y cada escalón BAJA respecto al anterior
+ * (al menos 0,3 km/h): enfriar a la misma velocidad que el trote de antes no se nota como enfriar. Si el pulso (o tú)
+ * habéis bajado el último tramo por debajo del primer escalón, la clase no puede «subir» ni quedarse igual. El suelo
+ * es la velocidad del último escalón del plan (el paso de calma), salvo que ya vengas por debajo de ella.
+ * → [{ index, speed }] con los escalones que hay que rebajar (vacío si ninguno).
  */
 export function calmCaps(segments, fromIndex, curSpeed) {
   const out = [];
   let prev = Number(curSpeed);
   const list = Array.isArray(segments) ? segments : [];
   if (!(prev > 0)) return out;
-  for (let i = Math.max(0, Math.floor(fromIndex)); i < list.length && list[i]?.zone === 'cooldown'; i++) {
+  const from = Math.max(0, Math.floor(fromIndex));
+  let end = from;
+  while (end < list.length && list[end]?.zone === 'cooldown') end++;
+  if (end === from) return out;
+  const lowest = Math.min(...list.slice(from, end).map((g) => Number(g.speed) || Infinity));
+  for (let i = from; i < end; i++) {
     const sp = Number(list[i].speed) || 0;
-    const v = r1(Math.min(sp, prev));
+    // un escalón por debajo de lo anterior, sin pasar del paso de calma del plan (ni de lo que ya vienes corriendo)
+    const v = r1(Math.max(Math.min(sp, prev - CALM_STEP), Math.min(lowest, prev)));
     if (v < sp - 0.05) out.push({ index: i, speed: v });
-    prev = v;
+    prev = Math.min(v, sp);
   }
   return out;
 }
