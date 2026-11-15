@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createCoach } from '../js/audio/coach.js';
 import { PACK_SCRIPT, clipsText } from '../js/audio/voice-pack.js';
-import { seriesSpeed, nextSpeed, effectiveSpeed, REAL_HOLD_DEV } from '../js/training/hr-control.js';
+import { seriesSpeed, nextSpeed, effectiveSpeed, REAL_HOLD_DEV, WATCH_SPEED_TRUSTED } from '../js/training/hr-control.js';
 import { createSpeedTracker } from '../js/training/watch-speed.js';
 import { equilibrium, hrAfter } from '../js/training/hr-dynamics.js';
 
@@ -189,7 +189,11 @@ section('Series cortas: suben si se te quedan cortas para tu pulso de hoy');
 /* ───────────── 4 · Velocidad real del reloj en la cuenta del pulso ───────────── */
 section('Velocidad real: se usa solo si el reloj la sabe con garantías');
 {
-  const e = (cls, real) => effectiveSpeed(cls, real);
+  // La estimación del reloj NO se usa para el pulso (15 nov 2026: no distingue velocidades en quien no cambia de cadencia)
+  eq(WATCH_SPEED_TRUSTED, false, 'la velocidad del reloj no se da por buena');
+  eq(JSON.stringify(effectiveSpeed(10, { kmh: 8.5, ok: true })), JSON.stringify({ v: 10, real: false, dev: 0 }), 'por defecto manda siempre la velocidad de la clase, diga lo que diga el reloj');
+  // la lógica sigue probada para cuando haya una velocidad real de verdad (p. ej. leída de la cinta)
+  const e = (cls, real) => effectiveSpeed(cls, real, { trusted: true });
   eq(JSON.stringify(e(10, null)), JSON.stringify({ v: 10, real: false, dev: 0 }), 'sin reloj: la de la clase');
   eq(e(10, { kmh: 9.2, ok: false }).v, 10, 'lectura que solo orienta (ok=false): la de la clase');
   eq(e(10, { kmh: 9.8, ok: true }).real, false, 'a 0,2 de la clase: dicen lo mismo, manda la clase');

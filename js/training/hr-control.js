@@ -9,10 +9,12 @@
 // se definen por velocidad y nunca se suben por pulso.
 // 4. Con «Entreno exigente», las series cortas (correr o rápido de 45 s a 3 min): si a esa velocidad ni manteniéndola
 //    llegarías al centro de la zona con tu pulso de hoy, la siguiente serie sube hasta +0,3 (seriesSpeed).
-// 5. La cuenta de tu pulso se lleva con la velocidad a la que corres de verdad cuando el reloj la sabe con garantías
-//    (effectiveSpeed); y si no vas a la velocidad de la clase (≥ 1,0 km/h), el modo pulso no cambia nada: primero la cinta.
+// 5. La cuenta de tu pulso se lleva con la velocidad de la clase. La estimación del reloj NO se usa (WATCH_SPEED_TRUSTED:
+//    medida contra la cinta, no distingue 8 de 13 km/h en quien no cambia de cadencia); effectiveSpeed queda preparada
+//    para una velocidad real de verdad.
 // 6. Calentar, vuelta a la calma y caminar no se ajustan por pulso; la vuelta a la calma nunca va más rápida que lo
-//    que vienes corriendo (calmCaps), y el trote nunca baja más de 1,0 (0,6 con exigente) de tu velocidad de trote.
+//    que vienes corriendo (calmCaps), y el trote nunca baja más de 1,0 (0,6 con exigente) de tu velocidad de trote
+//    (1,2 si es una recuperación corta entre esfuerzos).
 import { equilibrium, simulate, hrAfter, speedForHr, classInputs, fitHrDynamics, starterModel, HR_DT } from './hr-dynamics.js';
 
 const WORK = new Set(['jog', 'run', 'fast']);
@@ -129,6 +131,15 @@ export function nextSpeed(model, a, { cur, next, hrEnd, load = 0, target, highDa
  */
 // (14 nov 2026: en la primera clase larga el reloj acertó ±0,3 en unas franjas y falló ±1 en otras. Aun con `ok`, que
 //  ya exige un error esperable ≤ 0,35, menos de 0,6 de diferencia es ruido y menos de 1,0 no justifica parar el control.)
+/**
+ * ¿Se usa la velocidad que estima el reloj para llevar la cuenta del pulso? NO. Medido el 15 nov 2026 en una clase de
+ * cambios (trote, rápido y sprint, sin tocar la cinta): el reloj marcó casi lo mismo a todas las velocidades (≈ 10
+ * km/h de 8 a 13) porque sale de la cadencia, y hay corredores que cambian de velocidad alargando la zancada sin
+ * cambiar de cadencia. Solo el 10 % de las lecturas quedó a ±0,5 km/h de la cinta y el 62 % a más de 1. Ninguna
+ * corrección por factores lo arregla (el error no es proporcional), así que el control por pulso usa SIEMPRE la
+ * velocidad de la clase. El código queda por si llega una velocidad real de verdad (p. ej. leída de la cinta).
+ */
+export const WATCH_SPEED_TRUSTED = false;
 const REAL_MIN_DEV = 0.6;    // por debajo de esto, el reloj y la clase dicen lo mismo: manda la clase
 const REAL_MAX_DEV = 0.15;   // el reloj nunca mueve la cuenta más de un 15 % de la velocidad de la clase
 export const REAL_HOLD_DEV = 1.0; // desde aquí no vas a la velocidad de la clase: el modo pulso no toca nada (te avisa el reloj)
@@ -139,9 +150,9 @@ export const REAL_HOLD_DEV = 1.0; // desde aquí no vas a la velocidad de la cla
  * si no, la de la clase. Así un día con la cinta más lenta de lo que dice la clase no se apunta como «día de pulso
  * bajo» (ni al revés). → { v, real (¿sale del reloj?), dev (v − clase) }
  */
-export function effectiveSpeed(classSpeed, real = null) {
+export function effectiveSpeed(classSpeed, real = null, { trusted = WATCH_SPEED_TRUSTED } = {}) {
   const v = Number(classSpeed) || 0;
-  if (!(v > 0) || !real || real.ok !== true || !(Number(real.kmh) > 0)) return { v, real: false, dev: 0 };
+  if (!trusted || !(v > 0) || !real || real.ok !== true || !(Number(real.kmh) > 0)) return { v, real: false, dev: 0 };
   const kmh = r1(clamp(Number(real.kmh), v * (1 - REAL_MAX_DEV), v * (1 + REAL_MAX_DEV)));
   const dev = r1(kmh - v);
   if (Math.abs(dev) < REAL_MIN_DEV - 1e-9) return { v, real: false, dev: 0 };
@@ -152,15 +163,21 @@ export function effectiveSpeed(classSpeed, real = null) {
 export const CALM_ZONES = new Set(['warmup', 'cooldown', 'walk']);
 const JOG_FLOOR = 1.0;        // lo más que el pulso puede dejar el trote por debajo de TU velocidad de trote
 const JOG_FLOOR_PUSHY = 0.6;  // …con «Entreno exigente»
+const REC_FLOOR = 1.2;        // …y una recuperación corta entre esfuerzos (ahí sí interesa bajar de verdad)
+export const REC_MAX_SEC = 180; // hasta 3 min es una recuperación; más largo es un rodaje
 
 /**
  * Suelo del trote. Las bajadas por pulso se encadenaban (la clase ya trae el trote final más suave, el tramo
  * siguiente lo bajaba otra vez y el control en directo otra más): un rodaje de 12 min acabó 1,6 km/h por debajo del
  * trote del corredor. El tope se mide contra tu velocidad de trote, no contra lo ya rebajado.
+ * Las recuperaciones cortas entre esfuerzos (`recovery`: trote de hasta 3 min) tienen un suelo más bajo, 1,2 km/h bajo
+ * tu trote, con o sin exigente: con el mismo suelo que un rodaje quedaban igual de rápidas que el trote final y que
+ * el primer escalón de la vuelta a la calma, y entre sprints no se recuperaba nada.
  */
-export function jogFloor(levels, { pushy = false, minSpeed = 1 } = {}) {
+export function jogFloor(levels, { pushy = false, minSpeed = 1, recovery = false } = {}) {
   const j = Number(levels?.jog);
-  return j > 0 ? r1(Math.max(Number(minSpeed) || 1, j - (pushy ? JOG_FLOOR_PUSHY : JOG_FLOOR))) : Number(minSpeed) || 1;
+  const drop = recovery ? REC_FLOOR : pushy ? JOG_FLOOR_PUSHY : JOG_FLOOR;
+  return j > 0 ? r1(Math.max(Number(minSpeed) || 1, j - drop)) : Number(minSpeed) || 1;
 }
 
 /**

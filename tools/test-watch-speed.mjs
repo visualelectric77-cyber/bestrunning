@@ -3,7 +3,7 @@
 // Uso: node tools/test-watch-speed.mjs   (sale con código ≠ 0 si algo falla)
 import {
   cleanSpeed, tolerance, speedStatus, calFactor, learnFactor, driftText, createSpeedTracker, createSpeedSim,
-  isMoving, plausibleSpeed, bandKey, bandRange, bandLabel, calFactorAt, calAt, correctSpeed, learnCal, calReport, seriesCompare,
+  cadenceBands, cadenceSummary, isMoving, plausibleSpeed, bandKey, bandRange, bandLabel, calFactorAt, calAt, correctSpeed, learnCal, calReport, seriesCompare,
   seriesReal, watchCompare,
   DRIFT_KMH, DRIFT_SEC, SETTLE_SEC, FACTOR_MIN, FACTOR_MAX, SERIES_MAX, BAND_KEYS,
 } from '../js/training/watch-speed.js';
@@ -178,7 +178,8 @@ section('Lo que se guarda en la sesión', () => {
   const sum = tr.summary();
   ok(sum && sum.source === 'watch' && near(sum.appKm, 1.667, 0.01) && near(sum.km, 1.667 * 1.04, 0.02), `distancias de la clase y del reloj (${JSON.stringify(sum)})`);
   ok(near(sum.avgKmh, 10.4, 0.1) && near(sum.sec, 597, 3) && sum.samples === 200, 'ritmo medio del reloj, segundos y lecturas');
-  ok(near(sum.ratio, 1 / 1.04, 0.004) && sum.factor === undefined && sum.touched === undefined, `clase/reloj de la clase (${sum.ratio})`);
+  ok(sum.ratio === undefined && sum.factor === undefined && sum.learn === undefined && sum.touched === undefined && sum.cadence === 165,
+    `desde el 15 nov la sesión no guarda corrección ni aprendizaje de velocidad, sí la cadencia (${JSON.stringify(sum)})`);
   ok(createSpeedTracker().summary() === null, 'sin lecturas: nada que guardar');
   // Instantánea: al retomar la clase, las cuentas siguen
   const snap = tr.snapshot();
@@ -211,7 +212,7 @@ section('Se aprende de todas las clases desde la primera, con peso prudente (13 
   const trT = createSpeedTracker();
   trT.touch();
   run(trT, fresh(), { sec: 660, appKmh: 10, bias: 1.04 });
-  ok(near(trT.learned().ratio, 1 / 1.04, 0.004) && trT.summary().touched === true && near(trT.summary().learn.ratio, 1 / 1.04, 0.004), 'con la velocidad tocada: se aprende igual, y queda apuntado en la sesión');
+  ok(near(trT.learned().ratio, 1 / 1.04, 0.004) && trT.summary().touched === true, 'con la velocidad tocada: learned() da lo mismo (ya nadie lo usa) y la sesión lo apunta');
   // Clase de cambios cada 40 s: no llega a asentarse (1 min tras cada cambio) y no enseña nada; cada 2 min, sí, poco
   const trS = createSpeedTracker();
   const SS = fresh();
@@ -302,7 +303,7 @@ section('Parado no marca velocidad (12 nov: salió «≈4,2» sin moverse, con l
   const S3 = fresh();
   const a3 = feed(tr3, S3, { n: 60, kmh: 4.2, cadence: null });
   ok(tr3.view(S3.t).kmh === null && a3 === 0, `4,2 sostenido con la clase a 9,2: no se enseña ni avisa (${a3})`);
-  ok(tr3.classRatio() === null && tr3.summary().ratio === undefined, 'y de eso no se aprende nada');
+  ok(tr3.classRatio() === null && tr3.summary().ratio === undefined && tr3.view(S3.t).cadence === null, 'y de eso no se aprende nada (sin cadencia en la lectura, tampoco hay cadencia que enseñar)');
   // 4) Andando de verdad en un tramo de andar (clase a 5): sí se enseña, a partir de la tercera lectura
   const tr4 = createSpeedTracker({ factor: 1 });
   const S4 = fresh();
@@ -418,7 +419,8 @@ section('Corrección por franjas de velocidad (13 nov: −3,6 % de media, pero �
   ok(L && Math.abs(L.bands['6'].ratio - 1) < 0.01 && Math.abs(L.bands['8'].ratio - 1.1) < 0.012 && L.bands['8'].sec > 500 && L.ratio > 1.03 && L.ratio < 1.07 && L.sec > 1000,
     `la clase enseña cada franja, con sus segundos (${JSON.stringify(L)})`);
   const sum0 = tr0.summary();
-  ok(sum0.bands['6'].sec > 500 && Math.abs(sum0.bands['8'].ratio - 1.1) < 0.012 && !sum0.bands['10'] && sum0.learn.bands['8'].sec === L.bands['8'].sec, `y lo deja en la sesión (${JSON.stringify(sum0.bands)})`);
+  ok(sum0.bands['6'].sec > 500 && sum0.bands['8'].kmh === 9.3 && sum0.bands['8'].cadence === 165 && sum0.bands['8'].stride === 0.94 && !sum0.bands['10'] && sum0.bands['8'].ratio === undefined,
+    `en la sesión quedan las franjas con cadencia y zancada, no con velocidades del reloj (${JSON.stringify(sum0.bands)})`);
   // Con esa ÚNICA clase aprendida, la misma clase ya no avisa: se aplica desde la primera
   const cal1 = learnCal(null, L);
   const tr1 = createSpeedTracker({ cal: cal1 });
@@ -488,8 +490,10 @@ section('Serie de la sesión, cadencia y zancada', () => {
   ok(full && full.bands.length === 2 && full.bands[1].appKmh === 9.6 && full.cadence === 165 && full.sim === false && full.diffPct < -3,
     `sesión con serie: ${JSON.stringify(full && { d: full.diffPct, n: full.bands.length })}`);
   const noSeries = watchCompare({ watchSpeed: sum });
-  ok(noSeries.bands.length === 2 && Math.abs(noSeries.bands[1].diffPct + 10) <= 1 && noSeries.bands[1].cadence === 170 && noSeries.bands[1].appKmh === 9.6,
-    `sin serie: las franjas guardadas (${JSON.stringify(noSeries.bands.map((b) => b.diffPct))})`);
+  ok(noSeries.bands.length === 0 && noSeries.diffPct < -3, 'sin serie: la sesión ya no guarda franjas de velocidad del reloj (solo queda el total)');
+  // Las sesiones del 14 nov sí las guardaban: watchCompare las sigue leyendo
+  const nov14 = watchCompare({ watchSpeed: { km: 7.3, pairKm: 7.3, appKm: 7.3, bands: { 8: { sec: 900, appKm: 2.4, km: 2.45, ratio: 0.98, cadence: 168, stride: 0.91 } } } });
+  ok(nov14.bands.length === 1 && nov14.bands[0].cadence === 168 && nov14.bands[0].diffPct === 2, `sesión con el formato del 14 nov (${JSON.stringify(nov14.bands)})`);
   // Una sesión de antes de las franjas (solo el total), con cifras de ejemplo
   const old = watchCompare({ watchSpeed: { source: 'watch', km: 2.4, avgKmh: 8.2, appKm: 2.5, sec: 1100, samples: 400, ratio: 1.04 } });
   ok(old && old.diffPct === -4 && old.bands.length === 0 && old.appKm === 2.5 && old.watchKm === 2.4 && old.cadence === undefined, `sesión antigua: solo el total (${JSON.stringify(old)})`);
@@ -536,6 +540,68 @@ section('Serie de la sesión, cadencia y zancada', () => {
   for (let el = 33; el <= 60; el += 3) feed(el);
   const back = tr6.series();
   ok(back.every((p, i) => i === 0 || p[0] > back[i - 1][0]) && back[back.length - 1][0] === 60, `tras volver atrás: en orden hasta el 60 (${back.map((p) => p[0]).join()})`);
+});
+
+section('Cadencia y zancada: lo que el reloj sí mide (15 nov: «cambiarla por cadencia»)', () => {
+  // Quien cambia de velocidad con la zancada: la cadencia casi no se mueve y el reloj dice ~10 km/h a todo
+  const tr = createSpeedTracker();
+  let t = 1_762_927_200_000; let el = 0; let appKm = 0; let wkm = 0;
+  const feed = (sec, appKmh, cadence, watchKmh) => {
+    for (let i = 0; i < sec; i++) {
+      t += 1000; el += 1; appKm += appKmh / 3600; wkm += watchKmh / 3600;
+      const ctx = { t, appKmh, appKm, running: true, elapsed: el };
+      tr.tick(ctx);
+      if (i % 3 === 2) tr.add(cleanSpeed({ kmh: watchKmh, km: wkm, cadence, at: t, moving: true }), ctx);
+    }
+  };
+  feed(180, 8.3, 167, 9.8);
+  let v = tr.view(t);
+  ok(v.cadence === 167 && v.stride === 0.83, `en directo: cadencia y zancada con la velocidad de la clase (${v.cadence}, ${v.stride} m)`);
+  feed(180, 11.1, 170, 10);
+  feed(180, 13, 173, 10.9);
+  v = tr.view(t);
+  ok(v.cadence === 173 && v.stride === 1.25, `a 13 km/h: misma cadencia, zancada más larga (${v.cadence}, ${v.stride} m)`);
+  ok(tr.drift() === null || true, 'el aviso de desvío ya no lo consulta nadie');
+  // La cadencia no depende de que la velocidad del reloj cuadre con la clase: 5,0 del reloj con la clase a 13
+  tr.add(cleanSpeed({ kmh: 5, km: wkm, cadence: 172, at: t + 3000, moving: true }), { t: t + 3000, appKmh: 13, appKm, running: true, elapsed: el + 3 });
+  ok(tr.view(t + 3000).kmh === null && tr.view(t + 3000).cadence === 172, 'velocidad del reloj disparatada: sin km/h, pero la cadencia sigue');
+  ok(tr.view(t + 13000).cadence === null && tr.view(t + 13000).stride === null, 'sin lecturas en 9 s: la cadencia se va');
+  // Parado o braceo: sin cadencia que enseñar
+  const st = createSpeedTracker();
+  let u = 1e12;
+  for (let i = 1; i <= 6; i++) { u += 3000; st.add(cleanSpeed({ kmh: 4.2, km: 0.01 * i, cadence: 38, at: u }), { t: u, appKmh: 9, appKm: 0.02 * i, running: true, elapsed: i * 3 }); }
+  ok(st.view(u).cadence === null, 'braceo de estar quieto (38 por minuto): no es cadencia');
+  for (let i = 1; i <= 6; i++) { u += 3000; st.add(cleanSpeed({ km: 0.07, at: u, moving: false }), { t: u, appKmh: 9, appKm: 0.2, running: true, elapsed: 20 + i * 3 }); }
+  ok(st.view(u).cadence === null && st.series().every((p) => p[2] === null), 'parado: ni cadencia en directo ni en la serie');
+
+  // Lo que se guarda y lo que pinta la tarjeta del Resumen
+  const sum = tr.summary();
+  ok(sum.cadence === 170 && sum.bands['8'].cadence === 167 && sum.bands['8'].kmh === 8.3 && sum.bands['8'].stride === 0.83
+    && sum.bands['10'].stride === 1.09 && sum.bands['12'].stride === 1.25 && sum.bands['12'].sec > 140, `resumen por franjas (${JSON.stringify(sum.bands)})`);
+  const ser = tr.series();
+  const cbands = cadenceBands(ser);
+  ok(cbands.cadence === 170 && cbands.bands.length === 3 && cbands.bands[2].appKmh === 13 && cbands.bands[2].cadence === 173 && cbands.bands[2].stride === 1.25,
+    `de la serie: ${JSON.stringify(cbands.bands.map((b) => [b.appKmh, b.cadence, b.stride]))}`);
+  const card = cadenceSummary({ watchSpeed: sum, watchSeries: ser });
+  ok(card.cadence === 170 && card.stride > 1 && card.bands.length === 3 && card.flat === true && card.sim === false,
+    `tarjeta: cadencia casi plana de 8,3 a 13 km/h → se dice (${JSON.stringify({ c: card.cadence, s: card.stride, flat: card.flat })})`);
+  const noSer = cadenceSummary({ watchSpeed: sum });
+  ok(noSer.bands.length === 3 && noSer.bands[0].appKmh === 8.3 && noSer.bands[0].stride === 0.83, 'sin serie: las franjas guardadas en la sesión');
+  // Sesiones de antes (formato del 14 nov, con appKm en vez de kmh) y sesiones sin franjas
+  const old = cadenceSummary({ watchSpeed: { cadence: 164, stride: 0.89, bands: { 6: { sec: 954, appKm: 1.996, km: 2.1, ratio: 0.95, cadence: 157, stride: 0.8 }, 10: { sec: 783, appKm: 2.175, km: 2.088, ratio: 1.042, cadence: 169, stride: 0.99 } } } });
+  ok(old.cadence === 164 && old.bands.length === 2 && old.bands[0].appKmh === 7.5 && old.bands[1].cadence === 169 && old.flat === false, `sesión con el formato anterior (${JSON.stringify(old.bands.map((b) => [b.appKmh, b.cadence]))})`);
+  ok(cadenceSummary({ watchSpeed: { cadence: 160 } }).bands.length === 0 && cadenceSummary({ watchSpeed: { km: 2, appKm: 2 } }) === null && cadenceSummary({}) === null && cadenceSummary(null) === null
+    && cadenceBands(null) === null && cadenceSummary({ watchSpeed: { ...sum, sim: true } }).sim === true, 'solo la media, sin cadencia o sin nada del reloj');
+  // Alguien que sí cambia la cadencia con la velocidad: no se dice que sea plana
+  const cs = cadenceSummary({ watchSpeed: { cadence: 165, bands: { 8: { sec: 300, kmh: 9, cadence: 160, stride: 0.94 }, 12: { sec: 300, kmh: 12, cadence: 176, stride: 1.14 } } } });
+  ok(cs.flat === false, 'cadencia que sube con la velocidad: no es plana');
+  // Andando o trotando suave la cadencia sí baja: eso no quita que corriendo sea plana (solo cuenta de 8 km/h arriba)
+  const mix = cadenceSummary({ watchSpeed: { cadence: 160, bands: { 6: { sec: 300, kmh: 7.1, cadence: 130, stride: 0.91 }, 8: { sec: 300, kmh: 8.6, cadence: 168, stride: 0.85 },
+    10: { sec: 300, kmh: 11.1, cadence: 170, stride: 1.09 }, 12: { sec: 300, kmh: 13, cadence: 173, stride: 1.25 } } } });
+  ok(mix.flat === true && mix.bands.length === 4, 'cadencia baja andando y plana corriendo: se dice que corriendo es plana');
+  // Instantánea: al retomar, las franjas de cadencia siguen
+  const tr2 = createSpeedTracker({ restore: JSON.parse(JSON.stringify(tr.snapshot())) });
+  ok(tr2.summary().bands['12'].cadence === 173 && tr2.summary().cadence === 170, 'tras retomar la clase: cadencia y franjas siguen');
 });
 
 section('Reloj simulado (?debug=speed)', () => {

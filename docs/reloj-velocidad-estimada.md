@@ -171,6 +171,36 @@ Demostración: el aviso ya no sale con `cinta=-0.6`; para verlo, `?debug=speed&c
 Pruebas: `tools/test-watch-speed.mjs` (138). La pantalla Ritmo del reloj sigue coloreando con su margen de 0,5 km/h
 (haría falta build nueva para cambiarlo).
 
+## 15 nov: la velocidad del reloj no sirve → se cambia por la cadencia — hecho en local, sin publicar
+
+Tercera clase real (bonus de 20 min, de 7,1 a 13 km/h, sin tocar la velocidad). De 8,3 a 13 km/h el reloj marcó casi
+lo mismo (9,8–10,9) y la cadencia no cambió (167–173): el podómetro saca la velocidad de la cadencia y este usuario
+cambia de velocidad alargando la zancada. Ninguna corrección lo arregla (el error no es proporcional); lo del 14 nov
+parecía acertar solo porque la clase iba cerca de ese «10» fijo. El usuario decidió: «cambiarla por cadencia».
+
+Qué cambia (web):
+- **Chip del reproductor:** `⌚ 172 p/min` (cadencia en directo) en vez de `⌚ ≈10,3`. En espera (`–`) hasta que el
+  reloj te ve andar o correr. Al tocarlo: cadencia y zancada (velocidad de la clase ÷ cadencia). Ninguna cifra de
+  km/h del reloj en pantalla.
+- **Fuera el aviso de desvío:** ni rótulo, ni voz (`watchDrift`), ni `reloj.desvio`.
+- **Fuera el aprendizaje:** ni `reloj.aprende`, ni `state.watchCal` (se queda guardado sin usar), ni `speedFactor`
+  hacia el reloj.
+- **Resumen:** la tarjeta pasa a «Cadencia y zancada»: medias y una línea por franja de velocidad de la clase. Si
+  corriendo (de 8 km/h arriba) la cadencia cambia 6 pasos o menos en 2 km/h o más, lo dice: «cuando vas más rápido,
+  alargas la zancada».
+- **Sesión:** sigue guardando `watchSeries` y `watchSpeed` con `cadence`, `stride` y `bands: { franja: { sec, kmh,
+  cadence, stride } }`. Ya no guarda `ratio`, `factor` ni `learn`. La cadencia y la zancada ya no dependen de que la
+  velocidad del reloj «cuadre».
+- En `watch-speed.js` se queda sin usar todo lo de la velocidad (por si un día hay una fuente de verdad: la cinta).
+
+¿Se puede sacar la distancia de la cadencia? No por sí sola: distancia = pasos × zancada, y el reloj no ve la zancada.
+
+En el reloj: **build 26 (1.0.1), subida a TestFlight el 15 nov a las 21:13** con el OK del usuario. En Clase, el
+`≈6:11 /KM` pasa a `⌚ 172 P/MIN`; la página «Ritmo» pasa a «Cadencia» (velocidad de la clase, pasos por minuto,
+zancada y pulso), sin veredicto ni velocidad o distancia del reloj. `native/` ae8d2fc. Sin probar aún en el reloj de
+verdad. Lo de la web de arriba sigue sin publicar (lo publica la sesión principal).
+Pruebas: `tools/test-watch-speed.mjs` (155). Demostración: `?debug=speed`.
+
 ## Qué falta probar con el reloj de verdad en el gimnasio
 
 1. **Permiso de Movimiento.** La primera vez el reloj pedirá «Movimiento y actividad física» (texto nuevo en

@@ -2,7 +2,7 @@
 // corto (forma 2 de las clases, sin tocar las ya guardadas) y bonus de la semana.
 // Datos inventados (no son de nadie). Uso: node tools/test-final-y-bonus.mjs   (sale con código ≠ 0 si algo falla)
 import { defaultState } from '../js/core/store.js';
-import { calmCaps, jogFloor, CALM_ZONES, nextSpeed, liveSpeed } from '../js/training/hr-control.js';
+import { calmCaps, jogFloor, CALM_ZONES, REC_MAX_SEC, nextSpeed, liveSpeed } from '../js/training/hr-control.js';
 import { buildWorkout, workoutFromId, GEN } from '../js/training/generator.js';
 import { TEMPLATES, getTemplate } from '../js/training/templates.js';
 import { segmentsOfSession } from '../js/training/class-analysis.js';
@@ -46,6 +46,21 @@ section('El trote no se hunde: tope contra tu velocidad de trote');
   eq(jogFloor(L, { pushy: true }), 7.9, 'con exigente: 0,6');
   eq(jogFloor(L, { pushy: true, minSpeed: 8.2 }), 8.2, 'nunca por debajo del mínimo de la cinta');
   eq(jogFloor(null, { minSpeed: 3 }), 3, 'sin niveles: el mínimo de la cinta');
+  // una recuperación corta entre esfuerzos puede bajar más que un rodaje, con o sin exigente
+  eq(jogFloor(L, { recovery: true }), 7.3, 'recuperación: hasta 1,2 por debajo de tu trote');
+  eq(jogFloor(L, { pushy: true, recovery: true }), 7.3, '…también con exigente (recuperar bien es parte de apretar)');
+  ok(jogFloor(L, { pushy: true, recovery: true }) < jogFloor(L, { pushy: true }), 'la recuperación queda por debajo del suelo del rodaje');
+  eq(REC_MAX_SEC, 180, 'hasta 3 min cuenta como recuperación');
+  {
+    // tras un sprint, con el pulso alto: la recuperación de 90 s planeada a 8,1 baja de verdad (antes se quedaba en 7,9)
+    const M2 = { b: 10, c: 4, d: 0.4, tauUp: 75, tauDown: 110, aTypical: 40, aSpread: 3 };
+    const rec = { zone: 'jog', speed: 8.1, sec: 90, incline: 0 };
+    const args = { cur: { zone: 'sprint', speed: 13, sec: 30 }, next: rec, hrEnd: 166, load: 12, target: { min: 120, max: 132 } };
+    const asJog = nextSpeed(M2, 46, { ...args, minSpeed: Math.min(jogFloor(L, { pushy: true }), rec.speed) });
+    const asRec = nextSpeed(M2, 46, { ...args, minSpeed: Math.min(jogFloor(L, { pushy: true, recovery: true }), rec.speed) });
+    ok(asJog === 7.9, `con el suelo del rodaje se quedaba en ${asJog}`);
+    ok(asRec != null && asRec <= 7.4 && asRec >= 7.3, `como recuperación baja a ${asRec}`);
+  }
   // con el suelo, una recuperación que ya viene rebajada no se baja otra vez hasta casi andar
   const M = { b: 10, c: 4, d: 0.4, tauUp: 75, tauDown: 110, aTypical: 40, aSpread: 3 };
   const T = { min: 120, max: 132 };

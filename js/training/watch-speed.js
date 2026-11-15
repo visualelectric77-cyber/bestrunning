@@ -1,4 +1,14 @@
-// RITMUP · lo que el Apple Watch calcula que corres de verdad en la cinta (app nativa, build 24).
+// RITMUP · lo que el Apple Watch mide mientras corres en la cinta (app nativa, build 24).
+//
+// ESTADO DESDE EL 15 NOV 2026: la VELOCIDAD del reloj no se enseña, no avisa y no se aprende. Tres clases reales
+// bastaron para verlo: el podómetro saca la velocidad de la cadencia, y hay quien cambia de velocidad alargando la
+// zancada sin mover la cadencia (de 8,3 a 13 km/h el reloj marcó casi lo mismo, 9,8–10,9). Ninguna corrección arregla
+// eso. Lo que el reloj SÍ mide bien es la CADENCIA (pasos por minuto), y con la velocidad de la clase sale la zancada:
+// eso es lo que se enseña (chip del reproductor, tarjeta del Resumen) y lo que se guarda (cadenceSummary, view().cadence).
+// Todo lo de la velocidad (correctSpeed, calAt, learnCal, el aviso de desvío, real()) se queda en el módulo sin que
+// nadie lo use en pantalla, por si un día llega una fuente de velocidad de verdad (la cinta por Bluetooth).
+//
+// Lo de abajo cuenta cómo se llegó hasta aquí.
 //
 // La app no sabe a qué velocidad va la cinta: enseña la que toca y tú la pones a mano. El reloj la estima por el braceo
 // (podómetro del sistema) y manda cada ~3 s un `speed { kmh, km, cadence, at, source: 'watch' }`. Es ORIENTATIVO (en
@@ -122,6 +132,8 @@ export const PLAUSIBLE_MAX = 1.6;
 /** Para aprender, además, la lectura (sin corregir) tiene que parecerse a la clase: entre el 70 % y el 140 %. */
 const LEARN_PAIR_MIN = 0.7;
 const LEARN_PAIR_MAX = 1.4;
+/** Zancada: tras un cambio de velocidad de la clase, la cinta tarda en llegar; estos segundos no cuentan. */
+const CAD_SETTLE_SEC = 30;
 const MAX_KMH = 30;
 const MAX_STEP_KM = 0.5;      // entre dos lecturas no caben más metros: lectura rota
 const MAX_PAIR_GAP_MS = 12000; // hueco entre lecturas a partir del cual ese trozo no sirve para aprender
@@ -455,6 +467,8 @@ export function createSpeedTracker(opts = {}) {
   let cadMs = 0;
   let strSum = 0;
   let strMs = 0;
+  const cb = {};              // cadencia y zancada por franja de la clase: { cad (Σ pasos/min·ms), ms, v (Σ km/h·ms) }
+  let moving = false;         // la última lectura es de andar o correr de verdad (vale para la cadencia)
   // serie de la sesión: [[s de clase, km/h del reloj sin corregir | null, cadencia | null, km/h de la clase], …]
   let series = [];
   let step = SERIES_STEP;
@@ -498,6 +512,12 @@ export function createSpeedTracker(opts = {}) {
     cadMs = Math.max(0, num(s0.cadMs) || 0);
     strSum = Math.max(0, num(s0.strSum) || 0);
     strMs = Math.max(0, num(s0.strMs) || 0);
+    if (s0.cb && typeof s0.cb === 'object') {
+      for (const key of BAND_KEYS) {
+        const b = s0.cb[key];
+        if (b && typeof b === 'object') cb[key] = { cad: Math.max(0, num(b.cad) || 0), ms: Math.max(0, num(b.ms) || 0), v: Math.max(0, num(b.v) || 0) };
+      }
+    }
     q1 = Math.max(0, num(s0.q1) || 0);
     q2 = Math.max(0, num(s0.q2) || 0);
     qw = Math.max(0, num(s0.qw) || 0);
@@ -620,7 +640,10 @@ export function createSpeedTracker(opts = {}) {
       }
       // Lo que el reloj ya ha comprobado (build 25, `moving: true`) vale al momento; si no, 2 lecturas seguidas
       const need = sample.moving === true ? 1 : MOVING_STREAK;
-      trust = streak >= need && (!running || appKmh == null || plausibleSpeed(appKmh, fix(sample.kmh).kmh));
+      moving = streak >= need;
+      // Para la cadencia y la zancada basta con que te muevas y la clase lleve 30 s a la misma velocidad
+      const calm = moving && settledFor(t, CAD_SETTLE_SEC) && appKmh >= RUN_MIN_KMH;
+      trust = moving && (!running || appKmh == null || plausibleSpeed(appKmh, fix(sample.kmh).kmh));
       const like = trust && appKmh > 0 && sample.kmh / appKmh >= LEARN_PAIR_MIN && sample.kmh / appKmh <= LEARN_PAIR_MAX;
       const steady = like && settledFor(t, LEARN_SETTLE_SEC) && appKmh >= LEARN_MIN_KMH;
       if (prev && Number.isFinite(appNow)) {
@@ -645,16 +668,22 @@ export function createSpeedTracker(opts = {}) {
             q1 += q * dT; q2 += q * q * dT; qw += dT;
           }
         }
-        // Cadencia y zancada (velocidad de la clase ÷ cadencia), solo moviéndote de verdad y sin huecos
-        if (trust && sample.cadence != null && sample.cadence >= MOVING_MIN_CADENCE && dT > 0 && dT <= MAX_PAIR_GAP_MS) {
+        // Cadencia y zancada (velocidad de la clase ÷ cadencia): solo moviéndote de verdad y sin huecos. No dependen de
+        // la velocidad que calcule el reloj: la zancada sale de lo que marca la clase.
+        if (moving && sample.cadence != null && sample.cadence >= MOVING_MIN_CADENCE && dT > 0 && dT <= MAX_PAIR_GAP_MS) {
           cadSum += sample.cadence * dT;
           cadMs += dT;
-          if (steady && prev.steady) { strSum += (appKmh / 0.06 / sample.cadence) * dT; strMs += dT; }
+          if (calm && prev.calm) {
+            strSum += (appKmh / 0.06 / sample.cadence) * dT;
+            strMs += dT;
+            const e = (cb[bandKey(appKmh)] ||= { cad: 0, ms: 0, v: 0 });
+            e.cad += sample.cadence * dT; e.ms += dT; e.v += appKmh * dT;
+          }
         }
       }
-      prev = { km: sample.km, appKm: Number.isFinite(appNow) ? appNow : prev?.appKm ?? 0, t, steady };
+      prev = { km: sample.km, appKm: Number.isFinite(appNow) ? appNow : prev?.appKm ?? 0, t, steady, calm };
       last = { ...sample, rx: t };
-      if (running) toSeries(num(ctx.elapsed), trust ? sample.kmh : null, trust ? sample.cadence : null);
+      if (running) toSeries(num(ctx.elapsed), trust ? sample.kmh : null, moving ? sample.cadence : null);
 
       const c = trust ? fix(sample.kmh) : null;
       if (c) {
@@ -707,8 +736,9 @@ export function createSpeedTracker(opts = {}) {
     },
     /**
      * Lo que se enseña ahora: null si el reloj no ha mandado nada en esta clase.
-     * { kmh (ya corregida; null si no hay lectura fresca, estás parado o no cuadra con la clase), raw, km, cadence,
-     *   calibrated, off (hay desvío de aviso: sostenido 45 s, o un cambio de la clase que el reloj no ha notado),
+     * { cadence (pasos/min; null parado o sin lectura de hace ≤ 9 s), stride (m: velocidad de la clase ÷ cadencia),
+     *   y, sin uso en pantalla desde el 15 nov: kmh (ya corregida; null si no hay lectura fresca, estás parado o no
+     *   cuadra con la clase), raw, km, calibrated, off (hay desvío de aviso: sostenido 45 s, o un cambio de la clase que el reloj no ha notado),
      *   dev (km/h frente a la clase), fresh }
      */
     view(t) {
@@ -717,8 +747,11 @@ export function createSpeedTracker(opts = {}) {
       const c = trust && last.kmh != null && t - last.rx <= SHOW_FRESH_MS ? fix(last.kmh) : null;
       const kmh = c ? r1(c.kmh) : null;
       const off = kmh != null && ((offSince != null && t - offSince >= DRIFT_SEC * 1000) || jumpOff === stretch);
+      // Cadencia en directo (lo que se enseña desde el 15 nov) y zancada con la velocidad de la clase
+      const cadence = moving && last.cadence != null && last.cadence >= MOVING_MIN_CADENCE && t - last.rx <= SHOW_FRESH_MS ? last.cadence : null;
+      const stride = cadence != null && running && appKmh >= RUN_MIN_KMH ? r2(appKmh / 0.06 / cadence) : null;
       return {
-        kmh, raw: fresh ? last.kmh : null, km: r3((firstKm + wKm) * k), cadence: fresh ? last.cadence : null,
+        kmh, raw: fresh ? last.kmh : null, km: r3((firstKm + wKm) * k), cadence, stride,
         calibrated: c ? c.calibrated : anyCal, off, dev: kmh != null && appKmh != null ? r1(kmh - appKmh) : null, fresh, source: last.source,
       };
     },
@@ -751,6 +784,7 @@ export function createSpeedTracker(opts = {}) {
       if (n < 5 || !(pairMs > 0)) return null;
       const out = {
         source: last?.source || 'watch',
+        // (lo que el reloj calculó de distancia y velocidad se guarda como dato, pero no se enseña: no es fiable)
         km: r3(firstKm + wKm),                              // lo que el reloj dice que has corrido (sin corregir)
         pairKm: r3(wKm),                                    // …y lo que midió en el mismo rato que `appKm` (para comparar)
         avgKmh: r1(wKm / (pairMs / 3600000)),               // su media mientras hubo lecturas
@@ -758,29 +792,20 @@ export function createSpeedTracker(opts = {}) {
         sec: Math.round(pairMs / 1000),
         samples: n,
       };
-      if (factor != null) out.factor = factor;
-      const ratio = this.classRatio();
-      if (ratio != null) out.ratio = ratio;
       if (touched) out.touched = true;
       // Cadencia media (pasos/min) y zancada media (m: velocidad de la clase ÷ cadencia, en tramos estables)
       if (cadMs >= 30000) out.cadence = Math.round(cadSum / cadMs);
       if (strMs >= 30000) out.stride = r2(strSum / strMs);
-      // Por franja de velocidad de la clase (tramos estables de al menos 30 s): clase / reloj, cadencia y zancada
+      // Por franja de velocidad de la clase (al menos 30 s estables): velocidad media de la clase, cadencia y zancada
       const byBand = {};
       for (const key of BAND_KEYS) {
-        const b = bands[key];
-        if (!b || b.ms < 30000 || !(b.w > 0)) continue;
-        const e = { sec: Math.round(b.ms / 1000), appKm: r3(b.a), km: r3(b.w), ratio: r3(b.a / b.w) };
-        if (b.cms >= 30000) {
-          e.cadence = Math.round(b.cad / b.cms);
-          e.stride = r2((b.a / (b.ms / 3600000)) / 0.06 / e.cadence);
-        }
-        byBand[key] = e;
+        const e = cb[key];
+        if (!e || e.ms < 30000) continue;
+        const cadence = Math.round(e.cad / e.ms);
+        const kmh = e.v / e.ms;
+        byBand[key] = { sec: Math.round(e.ms / 1000), kmh: r1(kmh), cadence, stride: r2(kmh / 0.06 / cadence) };
       }
       if (Object.keys(byBand).length) out.bands = byBand;
-      // Lo que esta clase enseña a tu corrección (para poder comprobarlo después, sesión a sesión)
-      const learn = this.learned();
-      if (learn) out.learn = learn;
       return out;
     },
     /** La serie de la clase para la sesión (session.watchSeries): [[s, km/h reloj | null, cadencia | null, km/h clase], …]. */
@@ -831,6 +856,7 @@ export function createSpeedTracker(opts = {}) {
         n, firstKm, wKm: r3(wKm), aKm: r3(aKm), pairMs: Math.round(pairMs), sW: r3(sW), sA: r3(sA), sMs: Math.round(sMs), touched,
         bands: bb, cadSum: Math.round(cadSum), cadMs: Math.round(cadMs), strSum: r2(strSum), strMs: Math.round(strMs),
         q1: r2(q1), q2: r2(q2), qw: Math.round(qw),
+        cb: Object.fromEntries(Object.entries(cb).map(([key, e]) => [key, { cad: Math.round(e.cad), ms: Math.round(e.ms), v: Math.round(e.v) }])),
         series: this.series(), step,
       };
     },
@@ -871,6 +897,64 @@ export function seriesCompare(seriesIn, { minSec = 60 } = {}) {
   }
   if (!bandsOut.length) return null;
   return { sec: Math.round(all.sec), diffPct: r1((all.w / all.a - 1) * 100), bands: bandsOut };
+}
+
+/**
+ * Cadencia y zancada de una serie guardada, por franjas de velocidad de la clase. Cuentan los puntos con cadencia de
+ * andar o correr; para la zancada y las franjas, además, la clase tiene que llevar 2 puntos a la misma velocidad.
+ * → { cadence, stride | null, bands: [{ key, label, sec, appKmh, cadence, stride }] } o null si no hay cadencia.
+ */
+export function cadenceBands(seriesIn, { minSec = 60 } = {}) {
+  const pts = Array.isArray(seriesIn) ? seriesIn.filter((p) => Array.isArray(p) && p.length >= 4 && num(p[3]) > 0) : [];
+  const all = { sec: 0, c: 0 };
+  const st = { sec: 0, s: 0 };
+  const acc = {};
+  for (let i = 1; i < pts.length; i++) {
+    const [t, , c, a] = pts[i];
+    const dt = t - pts[i - 1][0];
+    if (c == null || c < MOVING_MIN_CADENCE || !(dt > 0) || dt > 120) continue;
+    all.sec += dt; all.c += c * dt;
+    if (i < 2 || a < RUN_MIN_KMH || Math.abs(pts[i - 1][3] - a) >= 0.05 || Math.abs(pts[i - 2][3] - a) >= 0.05) continue;
+    const b = (acc[bandKey(a)] ||= { sec: 0, a: 0, c: 0, s: 0 });
+    b.sec += dt; b.a += a * dt; b.c += c * dt; b.s += (a / 0.06 / c) * dt;
+    st.sec += dt; st.s += (a / 0.06 / c) * dt;
+  }
+  if (all.sec < 30) return null;
+  const bands = [];
+  for (const key of BAND_KEYS) {
+    const b = acc[key];
+    if (!b || b.sec < minSec) continue;
+    bands.push({ key, label: bandLabel(key), sec: Math.round(b.sec), appKmh: r1(b.a / b.sec), cadence: Math.round(b.c / b.sec), stride: r2(b.s / b.sec) });
+  }
+  return { cadence: Math.round(all.c / all.sec), stride: st.sec >= 30 ? r2(st.s / st.sec) : null, bands };
+}
+
+/**
+ * Cadencia y zancada de una sesión guardada, listas para pintar (tarjeta del Resumen). De la serie si la hay; si no,
+ * de lo guardado en session.watchSpeed. `flat`: corriendo (de 8 km/h en adelante), tu cadencia cambia 6 pasos o menos
+ * aunque la velocidad cambie 2 km/h o más (cambias de velocidad con la zancada). → { cadence, stride | null, sim, flat, bands: [...] } o null si no hay cadencia.
+ */
+export function cadenceSummary(session) {
+  const ws = session?.watchSpeed && typeof session.watchSpeed === 'object' ? session.watchSpeed : null;
+  const fromSeries = cadenceBands(session?.watchSeries);
+  let bands = fromSeries?.bands || [];
+  if (!bands.length && ws?.bands && typeof ws.bands === 'object') {
+    for (const key of BAND_KEYS) {
+      const b = ws.bands[key];
+      if (!b || !(num(b.cadence) > 0) || !(num(b.sec) >= 60)) continue;
+      const kmh = num(b.kmh) > 0 ? b.kmh : num(b.appKm) > 0 ? b.appKm / (b.sec / 3600) : null;
+      bands.push({ key, label: bandLabel(key), sec: Math.round(b.sec), appKmh: kmh == null ? null : r1(kmh), cadence: Math.round(b.cadence), stride: num(b.stride) > 0 ? r2(b.stride) : null });
+    }
+  }
+  const cadence = num(ws?.cadence) > 0 ? Math.round(ws.cadence) : fromSeries?.cadence ?? null;
+  if (!cadence) return null;
+  const stride = num(ws?.stride) > 0 ? r2(ws.stride) : fromSeries?.stride ?? null;
+  // Solo corriendo (de 8 km/h en adelante: andando o trotando muy suave la cadencia sí baja)
+  const run = bands.filter((b) => b.appKmh != null && b.appKmh >= 8);
+  const speeds = run.map((b) => b.appKmh);
+  const cads = run.map((b) => b.cadence);
+  const flat = run.length >= 2 && Math.max(...speeds) - Math.min(...speeds) >= 2 && Math.max(...cads) - Math.min(...cads) <= 6;
+  return { cadence, stride, sim: !!ws?.sim, flat, bands };
 }
 
 /**
