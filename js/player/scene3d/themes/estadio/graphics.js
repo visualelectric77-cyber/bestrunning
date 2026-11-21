@@ -155,7 +155,99 @@ export function makeBug(THREE) {
   return out;
 }
 
-/** Gráfico final pintado en el césped: distancia total («6,42 KM») con etiqueta sobria. */
+/**
+ * Gráfico de luz proyectado en la pista (test VAM): «ESCALÓN / 11 / 13,0 KM/H» o «TU VAM / 13,2 / KM/H». Tres líneas:
+ * etiqueta arriba (la más lejana), el valor enorme y una línea de apoyo abajo. Se estira a lo largo de la pista (el
+ * escorzo lo vuelve a encoger), así que aquí se dibuja con proporciones normales.
+ */
+export function makeFloor(THREE, aniso) {
+  const W = 1024;
+  const H = 640;
+  const c = canvas(W, H);
+  const ctx = c.getContext('2d');
+  const t = tex(THREE, c, aniso);
+  let current = null;
+  const fit = (text, font, size, track, max) => {
+    ctx.font = `800 ${size}px ${font}`;
+    const w = measure(ctx, text, track * size);
+    if (w <= max) return size;
+    const s2 = Math.floor(size * (max / w));
+    ctx.font = `800 ${s2}px ${font}`;
+    return s2;
+  };
+  return {
+    texture: t,
+    /**
+     * aspect = ancho / alto del hueco de PANTALLA donde se proyecta. El lienzo (1,6:1) se estira a ese hueco, así que
+     * las letras se dibujan comprimidas a lo ancho para que en pantalla salgan con su proporción. Hueco alto ⇒ tres
+     * líneas apiladas; hueco bajo y ancho (HUD del test con pulso y botón) ⇒ una sola línea.
+     */
+    set(label, value, sub = '', aspect = 1.6) {
+      const a = Math.round(Math.max(0.8, Math.min(12, aspect)) * 8) / 8;
+      const key = `${label}|${value}|${sub}|${a}`;
+      if (key === current) return;
+      current = key;
+      const L = String(label).toLocaleUpperCase('es-ES');
+      const S = String(sub).toLocaleUpperCase('es-ES');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#fff';
+      ctx.textBaseline = 'middle';
+      const sx = 1.6 / a;                 // compresión horizontal
+      const WL = W / sx;                  // ancho lógico disponible
+      ctx.setTransform(sx, 0, 0, 1, 0, 0);
+      if (a <= 2.7) {
+        // apilado: etiqueta arriba (la más lejana), el valor enorme y, si hay, una línea de apoyo
+        const lf = fit(L, UI, 96, 0.16, WL - 70);
+        tracked(ctx, L, WL / 2, 74, 0.16 * lf, 'center');
+        const vs = fit(value, NUM, sub ? 330 : 400, -0.02, WL - 60);
+        tracked(ctx, value, WL / 2, sub ? 318 : 370, -0.02 * vs, 'center');
+        if (sub) {
+          const sf = fit(S, UI, 104, 0.1, WL - 70);
+          tracked(ctx, S, WL / 2, 560, 0.1 * sf, 'center');
+        }
+        ctx.fillRect(40 / sx, 136, WL - 80 / sx, 8);
+        ctx.fillRect(40 / sx, H - 14, WL - 80 / sx, 8);
+      } else {
+        // en línea: «ESCALÓN 11 · VAM ≈ 13,0–14,0» a toda la altura del hueco
+        const vsz = 470;
+        const lsz = 300;
+        const ssz = 250;
+        const gap = 70;
+        ctx.font = `800 ${lsz}px ${UI}`;
+        const lw = measure(ctx, L, 0.1 * lsz);
+        ctx.font = `800 ${vsz}px ${NUM}`;
+        const vw = measure(ctx, value, -0.02 * vsz);
+        ctx.font = `800 ${ssz}px ${UI}`;
+        const sw = sub ? measure(ctx, S, 0.06 * ssz) + gap * 1.4 : 0;
+        const total = lw + gap + vw + sw;
+        const k = Math.min(1, (WL - 90) / total);
+        ctx.setTransform(sx * k, 0, 0, 1, 0, 0);
+        let x = (WL / k - total) / 2;
+        const y = H / 2 + 6;
+        ctx.font = `800 ${lsz}px ${UI}`;
+        tracked(ctx, L, x, y + 30, 0.1 * lsz);
+        x += lw + gap;
+        ctx.font = `800 ${vsz}px ${NUM}`;
+        tracked(ctx, value, x, y, -0.02 * vsz);
+        x += vw + gap * 0.7;
+        if (sub) {
+          ctx.fillRect(x, y - 110, 14, 240);
+          x += gap * 0.7;
+          ctx.font = `800 ${ssz}px ${UI}`;
+          tracked(ctx, S, x, y + 36, 0.06 * ssz);
+        }
+        ctx.setTransform(sx, 0, 0, 1, 0, 0);
+        ctx.fillRect(30 / sx, 18, WL - 60 / sx, 14);
+        ctx.fillRect(30 / sx, H - 32, WL - 60 / sx, 14);
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      t.needsUpdate = true;
+    },
+  };
+}
+
+/** Gráfico final pintado en el césped: distancia total («6,42 KM») con etiqueta sobria; en el test, tu VAM. */
 export function makeFinalGraphic(THREE, aniso) {
   const W = 1024;
   const H = 512;
@@ -165,19 +257,36 @@ export function makeFinalGraphic(THREE, aniso) {
   return {
     texture: t,
     aspect: W / H,
-    set(value, label) {
+    /** sub (opcional): tercera línea bajo el valor («Nueva marca · +0,2 km/h»); accent: color del valor y del filete. */
+    set(value, label, sub = '', accent = '#ffffff') {
       ctx.clearRect(0, 0, W, H);
       ctx.textBaseline = 'middle';
+      if (sub) {
+        // con tres líneas (test VAM), una placa oscura translúcida detrás: se lee sobre el césped iluminado
+        ctx.fillStyle = 'rgba(6,9,14,0.5)';
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') ctx.roundRect(40, 8, W - 80, H - 16, 36); else ctx.rect(40, 8, W - 80, H - 16);
+        ctx.fill();
+      }
       ctx.fillStyle = 'rgba(235,235,245,0.8)';
       ctx.font = `700 54px ${UI}`;
-      tracked(ctx, String(label).toLocaleUpperCase('es-ES'), W / 2, 92, 14, 'center');
-      ctx.fillStyle = '#ffffff';
-      let size = 250;
+      tracked(ctx, String(label).toLocaleUpperCase('es-ES'), W / 2, sub ? 70 : 92, 14, 'center');
+      ctx.fillStyle = accent;
+      let size = sub ? 236 : 250;
       ctx.font = `800 ${size}px ${NUM}`;
       let w = measure(ctx, value, -6);
       if (w > W - 60) { size = Math.floor(size * ((W - 60) / w)); ctx.font = `800 ${size}px ${NUM}`; }
-      tracked(ctx, value, W / 2, 300, -0.024 * size, 'center');
-      ctx.fillRect(W / 2 - 60, 448, 120, 6);
+      tracked(ctx, value, W / 2, sub ? 250 : 300, -0.024 * size, 'center');
+      if (sub) {
+        ctx.fillStyle = 'rgba(235,235,245,0.92)';
+        let sf = 58;
+        ctx.font = `700 ${sf}px ${UI}`;
+        const sw = measure(ctx, String(sub).toLocaleUpperCase('es-ES'), 8);
+        if (sw > W - 60) { sf = Math.floor(sf * ((W - 60) / sw)); ctx.font = `700 ${sf}px ${UI}`; }
+        tracked(ctx, String(sub).toLocaleUpperCase('es-ES'), W / 2, 418, 8 * (sf / 58), 'center');
+        ctx.fillStyle = accent;
+      }
+      ctx.fillRect(W / 2 - 60, sub ? 476 : 448, 120, 6);
       t.needsUpdate = true;
     },
   };

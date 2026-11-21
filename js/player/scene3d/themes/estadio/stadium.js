@@ -36,6 +36,9 @@ export function buildSky(THREE, camera) {
     uHaze: { value: lin(THREE, 0.006, 0.0066, 0.0085) },
     uGlow: { value: lin(THREE, 0.046, 0.047, 0.056) },
     uHazeK: { value: 1 },
+    uStars: { value: 1 },
+    uSkyT: { value: null }, uSkyK: { value: new THREE.Vector4(0, 0, 0.5, 0) },
+    uSkyFx: { value: new THREE.Color(0, 0, 0) },
   };
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3));
@@ -52,11 +55,14 @@ export function buildGround(THREE, noiseChunk) {
   const banks = [];
   for (let i = 0; i < 6; i++) banks.push(new THREE.Vector4(0, 40, 0, 0));
   const u = {
-    uTrack: { value: lin(THREE, 0.036, 0.037, 0.041) },
-    uGrass: { value: lin(THREE, 0.012, 0.0175, 0.0128) },
-    uApron: { value: lin(THREE, 0.026, 0.027, 0.03) },
-    uPaint: { value: lin(THREE, 0.4, 0.41, 0.43) },
-    uFog: { value: lin(THREE, 0.014, 0.0145, 0.016) },
+    // tartán rojo ladrillo (sin la foto, este color liso), césped regado, arcén de caucho gris azulado, pintura blanca
+    uTrack: { value: lin(THREE, 0.105, 0.024, 0.017) },
+    uTint: { value: lin(THREE, 0.62, 0.56, 0.52) },
+    uGrass: { value: lin(THREE, 0.075, 0.2, 0.05) },
+    uApron: { value: lin(THREE, 0.075, 0.09, 0.115) },
+    uPaint: { value: lin(THREE, 0.62, 0.63, 0.64) },
+    uFog: { value: lin(THREE, 0.026, 0.028, 0.034) },
+    uWet: { value: 0.55 }, uNor: { value: 0 },
     uCur: { value: new THREE.Color() },
     uSweepCol: { value: new THREE.Color() },
     uSweepFrom: { value: new THREE.Color() },
@@ -77,6 +83,10 @@ export function buildGround(THREE, noiseChunk) {
     uLaneCam: { value: new THREE.Vector2(1.22, 2.44) },
     uFeel: { value: new THREE.Vector2(1, 2.5) },
     uTartanT: { value: null }, uTartanN: { value: null }, uGrassT: { value: null }, uPhoto: { value: 0 },
+    // test VAM (a cero fuera del test)
+    uWave: { value: new THREE.Vector4(0, 0, 10, 0.035) }, uWaveCol: { value: new THREE.Color() },
+    uLaneLed: { value: new THREE.Vector4(0, 0, 0, 0) }, uFxCol: { value: new THREE.Color() },
+    uVamLine: { value: new THREE.Vector4(1e5, 0, 0, 0) }, uEnvFx: { value: new THREE.Color(0, 0, 0) },
   };
   // plano único en XZ (espacio del estadio): cubre el interior hasta bajo las gradas
   const geo = new THREE.PlaneGeometry(2 * (A + R0 + WALL + 60), 2 * (R0 + WALL + 60), 1, 1);
@@ -135,7 +145,9 @@ export function buildStands(THREE, noiseChunk, specTex) {
   geo.setAttribute('aInfo', new THREE.BufferAttribute(info, 4));
   geo.setIndex(idx);
   const u = {
-    uFog: { value: lin(THREE, 0.014, 0.0145, 0.016) },
+    uFog: { value: lin(THREE, 0.026, 0.028, 0.034) },
+    uConc: { value: lin(THREE, 0.075, 0.076, 0.08) },      // hormigón
+    uSeat: { value: lin(THREE, 0.03, 0.036, 0.05) },       // asientos de plástico azul pizarra
     uBoardCol: { value: new THREE.Color('#e8ecf5') },
     uAccent: { value: new THREE.Color() },
     uFascia: { value: lin(THREE, 0.03, 0.031, 0.034) },
@@ -144,6 +156,7 @@ export function buildStands(THREE, noiseChunk, specTex) {
     uSweepB: { value: new THREE.Vector4(0, 0, 10, ref[n - 1].u) },
     uSweepBCol: { value: new THREE.Color(0.9, 0.93, 1.0) },
     uCrowd: { value: new THREE.Vector4(0, 0, 0, 0) }, uCrowdK: { value: new THREE.Vector2(0.55, 1) },
+    uShow: { value: new THREE.Vector4(0, 0, 0, 0) }, uShowT: { value: new THREE.Vector4(0, 0, 0, 0) }, uFxCol: { value: new THREE.Color() },
     uSpecTex: { value: specTex },
   };
   const mat = new THREE.ShaderMaterial({
@@ -179,52 +192,66 @@ export function buildLights(THREE, rand) {
     }
   }
   for (const b of banks) b.y = saddleY(ROOF_Y, b.en) - 0.6;
-  const count = banks.length;
+  // Por batería: 16 lámparas (2 filas de 8, separadas 0,62 m, en el plano inclinado 32° hacia el campo) y su resplandor
+  const LAMPS_X = 8;
+  const LAMPS_Y = 2;
+  const PER = LAMPS_X * LAMPS_Y + 1;
+  const count = banks.length * PER;
   const aPos = new Float32Array(count * 3);
-  const aTan = new Float32Array(count * 3);
   const aNrm = new Float32Array(count * 3);
   const aRnd = new Float32Array(count * 4);
   const tilt = (32 * Math.PI) / 180;
+  let k = 0;
   banks.forEach((b, i) => {
-    aPos[i * 3] = b.x; aPos[i * 3 + 1] = b.y; aPos[i * 3 + 2] = b.z;
-    aTan[i * 3] = b.tx; aTan[i * 3 + 1] = 0; aTan[i * 3 + 2] = b.tz;
-    // mira hacia el campo (−normal del contorno) e inclinada hacia abajo
-    aNrm[i * 3] = -b.nx * Math.cos(tilt); aNrm[i * 3 + 1] = -Math.sin(tilt); aNrm[i * 3 + 2] = -b.nz * Math.cos(tilt);
-    aRnd[i * 4] = 1;
-    aRnd[i * 4 + 1] = 0.9 + 0.2 * rand();
-    aRnd[i * 4 + 2] = 0.35 + 0.4 * rand();
-    aRnd[i * 4 + 3] = i;
+    // mira hacia el campo (−normal del contorno) e inclinada hacia abajo; «arriba» del panel = normal × tangente
+    const nx = -b.nx * Math.cos(tilt);
+    const ny = -Math.sin(tilt);
+    const nz = -b.nz * Math.cos(tilt);
+    const ux = ny * b.tz - nz * 0;
+    const uy = nz * b.tx - nx * b.tz;
+    const uz = nx * 0 - ny * b.tx;
+    const bright = 0.9 + 0.2 * rand();
+    const temp = 0.35 + 0.4 * rand();
+    const put = (x, y, z, radius, lv) => {
+      aPos[k * 3] = x; aPos[k * 3 + 1] = y; aPos[k * 3 + 2] = z;
+      aNrm[k * 3] = nx; aNrm[k * 3 + 1] = ny; aNrm[k * 3 + 2] = nz;
+      aRnd[k * 4] = radius; aRnd[k * 4 + 1] = lv; aRnd[k * 4 + 2] = temp; aRnd[k * 4 + 3] = i;
+      k++;
+    };
+    for (let ly = 0; ly < LAMPS_Y; ly++) {
+      for (let lx = 0; lx < LAMPS_X; lx++) {
+        const ox = (lx - (LAMPS_X - 1) / 2) * 0.62;
+        const oy = (ly - (LAMPS_Y - 1) / 2) * 0.62;
+        put(b.x + b.tx * ox + ux * oy, b.y + uy * oy, b.z + b.tz * ox + uz * oy, 0.22, bright * (0.9 + 0.2 * rand()));
+      }
+    }
+    put(b.x, b.y, b.z, 2, bright);     // (radio ≥ 1 ⇒ resplandor: su tamaño lo pone uGlow)
   });
   const geo = new THREE.InstancedBufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
   geo.setIndex([0, 1, 2, 0, 2, 3]);
   geo.setAttribute('aPos', new THREE.InstancedBufferAttribute(aPos, 3));
-  geo.setAttribute('aTan', new THREE.InstancedBufferAttribute(aTan, 3));
   geo.setAttribute('aNrm', new THREE.InstancedBufferAttribute(aNrm, 3));
   geo.setAttribute('aRnd', new THREE.InstancedBufferAttribute(aRnd, 4));
   geo.instanceCount = count;
   const u = {
-    uSize: { value: new THREE.Vector2(2.4, 0.6) },
-    uMargin: { value: 7.5 },
-    uCell: { value: 0.8 },
-    uHalo: { value: 1.3 },
+    uGlow: { value: new THREE.Vector3(3.6, 0.012, 0.0013) },
     uDim: { value: new THREE.Vector4(1, 1, 1, 0) },
     uAvoid: { value: new THREE.Vector4(2, 2, 2, 2) },
     uAvoid2: { value: new THREE.Vector4(2, 2, 2, 2) },
-    uAir: { value: new THREE.Vector2(3.4, 0.014) },
+    uAir: { value: new THREE.Vector2(0.62, 0.012) },
     uWarm: { value: new THREE.Color(1.0, 0.9, 0.78) },
     uCool: { value: new THREE.Color(0.86, 0.92, 1.0) },
   };
-  const mat = new THREE.ShaderMaterial({
+  const mesh = new THREE.Mesh(geo, new THREE.ShaderMaterial({
     uniforms: u, vertexShader: BANK_VERT, fragmentShader: BANK_FRAG, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
+    blending: THREE.AdditiveBlending,
+  }));
   mesh.frustumCulled = false;
   mesh.renderOrder = 20;
   // 6 baterías representativas (rectas y fondos) para el reflejo satinado de la pista
   const pick = (u0) => banks.reduce((best, b) => (Math.abs(b.u - u0) < Math.abs(best.u - u0) ? b : best), banks[0]);
   const lap = ol[ol.length - 1].u;
   const specBanks = [0.12, 0.25, 0.37, 0.62, 0.75, 0.87].map((f) => pick(f * lap));
-  return { mesh, u, count, specBanks };
+  return { mesh, u, count, specBanks, geometry: geo };
 }
