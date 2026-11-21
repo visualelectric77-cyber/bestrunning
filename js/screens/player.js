@@ -730,7 +730,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
           <div class="pl-ready__body">
             <div class="pl-ready__col pl-ready__col--a stagger">
             <header class="pl-ready__head" style="--i:0">
-              <div class="pl-ready__eyebrow">${esc(CAT_NAMES[cat] || 'Entrenamiento')} · ${minutes} min</div>
+              <div class="pl-ready__eyebrow">${esc(CAT_NAMES[cat] || 'Entrenamiento')}${workout.isTest ? '' : ` · ${minutes} min`}</div>
               <h1 class="pl-ready__title">${esc(workout.title || 'Entrenamiento')}</h1>
               ${workout.subtitle ? `<p class="pl-ready__sub">${esc(workout.subtitle)}</p>` : ''}
               ${dynNoteHtml()}
@@ -741,7 +741,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
             </div>
             <div class="pl-ready__col pl-ready__col--b stagger">
             <div class="pl-ready__stats" style="--i:2">
-              ${readyStat('Duración', String(minutes), 'min')}
+              ${workout.isTest
+    ? readyStat('Duración máx.', String(Math.round((workout.maxSec || workout.totalSec || 0) / 60)), 'min')
+    : readyStat('Duración', String(minutes), 'min')}
               ${readyStat('Distancia', fmt.dec1(workout.estDistanceKm || 0), 'km')}
               ${readyStat('Kcal', fmt.int(workout.estKcal || 0), '')}
               ${readyStat('Vel. máx.', fmt.speed(workout.maxSpeed || 0), 'km/h')}
@@ -2742,7 +2744,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       coachCall('say', 'km', { km: data.km, pace: data.pace });
       showBug({ lbl: 'KM', val: data.km, sub: data.pace ? `${data.pace} /km` : '', kind: 'km' });
     } else if (type === 'halfway') {
-      if (!race && performance.now() - testEndAt > 2500) {
+      // (en el test VAM no hay «mitad»: nadie sabe cuánto va a durar)
+      if (!race && !workout.isTest && performance.now() - testEndAt > 2500) {
         // la mitad de la clase (no la posición de llegada tras un ⏭) y la distancia que llevas de verdad
         const s = engine?.getState();
         const half = Math.round((s?.totalSec || workout.totalSec || 0) / 2);
@@ -2804,7 +2807,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     } else if (type === 'km') {
       if (!d.silent && !race) sceneEvent('km', { km: d.km });
     } else if (type === 'halfway') {
-      if (performance.now() - testEndAt > 2500) sceneEvent('halfway');
+      if (!workout.isTest && performance.now() - testEndAt > 2500) sceneEvent('halfway');
     } else if (type === 'pause' || type === 'resume') {
       sceneEvent(type);
       if (type === 'pause') stopHead(); else startHead();
@@ -2875,7 +2878,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // El bloque no repite el título de la clase («PIRÁMIDE · Pirámide 1» → «PIRÁMIDE · Serie 1/7 · 4/18»).
     let sub = `Tramo ${pos}`;
     const blk = blockLabel(seg.block);
-    if (seg.stage && workout.isTest) sub = `Escalón ${seg.stage} · ${pos}`;
+    // Test VAM: sin «11/25» (no hay un final conocido que contar): «Escalón 8», y fuera de los escalones, el bloque
+    if (workout.isTest) sub = seg.stage ? `Escalón ${seg.stage}` : blk || '';
     else if (seg.rep?.n) {
       sub = blk && blk !== 'Serie' && !sameText(blk, workout.title)
         ? `${blk} · ${pos}`
@@ -3236,8 +3240,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // queda de clase desde aquí. La posición en la clase sigue en la línea de progreso y en el cursor del perfil.
     const ran = Number.isFinite(s.activeSec) ? s.activeSec : s.totalElapsed;
     setText('elapsed', fmt.clock(Math.floor(ran + 1e-6)));
-    setText('remaining', `−${fmt.clock(Math.ceil((s.totalRemainingReal ?? s.totalRemaining) - 1e-6))}`);
-    setScale('topFill', s.progress);
+    // Test VAM: acaba cuando no puedas más, así que no hay cuenta atrás ni línea de progreso hasta que termina; en la
+    // vuelta a la calma, que sí tiene duración, vuelven (css: .pl.is-open-end)
+    const openEnd = !!workout.isTest && !s.test && s.status !== 'finished';
+    if (cache.openEnd !== openEnd) { cache.openEnd = openEnd; root.classList.toggle('is-open-end', openEnd); }
+    setText('remaining', openEnd ? '' : `−${fmt.clock(Math.ceil((s.totalRemainingReal ?? s.totalRemaining) - 1e-6))}`);
+    setScale('topFill', openEnd ? 0 : s.progress);
     const seg = s.segment;
     if (seg) {
       setScale('segFill', seg.sec ? s.segElapsed / seg.sec : 0);

@@ -542,6 +542,10 @@
 .hud-top__el { color: #fff; }
 .hud-top__div { align-self: center; width: var(--hairline); height: 12px; background: rgba(255, 255, 255, 0.24); }
 .hud-top__rem { color: var(--lbl); }
+/* Test VAM: mientras dura el test no hay cuenta atrás ni línea de progreso (acaba cuando no puedas más) */
+.pl.is-open-end .hud-top__div,
+.pl.is-open-end .hud-top__rem,
+.pl.is-open-end .hud-top__bar { display: none; }
 .hud-top__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(255, 255, 255, 0.08); }
 .hud-top__bar > i {
   display: block;
