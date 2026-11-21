@@ -913,7 +913,7 @@ export function createNativeBridge(opts = {}) {
       d.title = title;
       d.isTest = !!workout.isTest;
       if (!s) {
-        d.total = int(workout.totalSec);
+        d.total = int(workout.maxSec || workout.totalSec);
         d.voice = !x.muted;
         d.music = musicState(x, st);
         return d;
@@ -999,7 +999,7 @@ export function createNativeBridge(opts = {}) {
       const d = {
         classId, title, ...catInfo(workout.category),
         minutes: int(workout.minutes || num(workout.totalSec) / 60),
-        totalSec: int(workout.totalSec || segs.reduce((a, s) => a + num(s.sec), 0)),
+        totalSec: int(workout.maxSec || workout.totalSec || segs.reduce((a, s) => a + num(s.sec), 0)),
         firstKmh: round1(num(first.speed)), firstZone: String(first.zone || 'jog'),
       };
       if (rec != null) d.recordKm = r3(rec);

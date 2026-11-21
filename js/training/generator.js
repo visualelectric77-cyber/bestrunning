@@ -4,7 +4,7 @@
 import { shapeForHr } from './hr-shape.js';
 import { isRaceTemplate, buildRaceWorkout, RACE_PREFIX } from './race.js';
 import { round1, roundTo, clamp, hashStr, makeRng, fmt } from '../core/utils.js';
-import { ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, kcalPerMinute, clampSpeed } from './levels.js';
+import { ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, kcalPerMinute, clampSpeed, vamFromLevels } from './levels.js';
 import { getTemplate } from './templates.js';
 
 const DEFAULT_TREADMILL = { hasIncline: false, maxIncline: 12, minSpeed: 1.0, maxSpeed: 18.0, announceLead: 10 };
@@ -155,6 +155,12 @@ export function parseWorkoutId(id) {
   return { templateId, minutes, seed, loadFactor: load / 100 };
 }
 
+/** Los tramos de un test VAM que es razonable prever: sin los escalones por encima de tu VAM esperada + 2 km/h. */
+function expectedTestPart(segs, levels) {
+  const top = Math.max(levels.fast + 1, vamFromLevels(levels) + 2);
+  return segs.filter((s) => !(Number(s.stage) > 0 && s.speed > top + 1e-9));
+}
+
 /** Construye la clase completa. Devuelve null si la plantilla no existe. */
 export function buildWorkout(templateId, {
   minutes, levels, seed = 1, loadFactor = 1, hasIncline = false, treadmill, weightKg = 78, weekInCycle = 1, cycleIndex = 0,
@@ -178,7 +184,11 @@ export function buildWorkout(templateId, {
   segs = mergeAdjacent(segs);
   // A tu pulso: trote más suave al final de las clases largas y en las recuperaciones entre arreones (hr-shape.js)
   segs = shapeForHr(segs, { isTest, minSpeed: tm.minSpeed ?? 1, jog: lv.jog });
-  const sum = summarizeSegments(segs, weightKg);
+  // Test VAM: los escalones siguen hasta el tope de la cinta (nadie te corta el test), pero lo previsto (duración,
+  // distancia, energía, carga, velocidad máxima) se calcula hasta tu VAM esperada + 2 km/h, que es hasta donde es
+  // razonable llegar: así el plan cuenta el test igual que antes. `maxSec` es el máximo teórico: lo que duraría si
+  // aguantases todos los escalones (el reproductor cuenta siempre con los tramos, no con `totalSec`).
+  const sum = summarizeSegments(isTest ? expectedTestPart(segs, lv) : segs, weightKg);
   return {
     id: workoutId({ templateId, minutes: mins, seed: sd, loadFactor: load }),
     templateId,
@@ -198,6 +208,7 @@ export function buildWorkout(templateId, {
     load: sum.load,
     intensity: sum.intensity,
     isTest,
+    ...(isTest ? { maxSec: segs.reduce((a, g) => a + g.sec, 0) } : {}),
     seed: sd,
     loadFactor: load,
     gen: ctx.gen,

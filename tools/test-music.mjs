@@ -146,7 +146,8 @@ function checkPlan(w, plan, label) {
   const must = (cond, key, msg) => { if (!cond) good = fail(key, `${label}: ${msg}`); };
 
   must(cues.length >= segs.length, 'count', `menos cues (${cues.length}) que segmentos (${segs.length})`);
-  must(near(plan.totalSec, w.totalSec), 'total', 'totalSec del plan');
+  // el plan de música cubre todos los tramos: en el test VAM, hasta el último escalón (maxSec), no solo lo previsto
+  must(near(plan.totalSec, w.maxSec || w.totalSec), 'total', 'totalSec del plan');
   // Cobertura: un cue de tramo por segmento, en su inicio exacto
   for (let i = 0; i < segs.length; i++) {
     const own = cues.filter((c) => c.kind === 'segment' && c.segIndex === i);

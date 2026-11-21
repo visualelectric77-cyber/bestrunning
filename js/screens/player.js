@@ -8,7 +8,7 @@
 // + siguiente + mini perfil), una línea de métricas y «Sonando», «bugs» de momento arriba a la derecha y controles
 // que se ocultan mientras corres. Sin máscaras, sin desenfoques, sin destellos (§15, §15.3).
 import { fmt, esc, clamp, hashStr, todayKey } from '../core/utils.js';
-import { ZONES, hrTargetForZone, fmtPaceKmh, hrZones, hrMaxFromAge, isHardEffort } from '../training/levels.js';
+import { ZONES, hrTargetForZone, fmtPaceKmh, hrZones, hrMaxFromAge, isHardEffort, vamNow } from '../training/levels.js';
 import { getState, setState, saveActiveSession, loadActiveSession } from '../core/store.js';
 import { navigate, back } from '../core/router.js';
 import { icon, profileChart, openSheet, toast, confirmDialog, actionSheet } from '../ui/components.js';
@@ -27,6 +27,7 @@ import {
   CALM_ZONES, jogFloor, calmCaps, REC_MAX_SEC,
 } from '../training/hr-control.js';
 import { createVamAssist, vamPreCheck, VAM_TEXT } from '../training/vam-assist.js';
+import { createVamProjection, vamProjectionText } from '../training/vam-projection.js';
 import { createTracker, hrAfter } from '../training/hr-dynamics.js';
 import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
@@ -1722,7 +1723,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
         canvas.addEventListener('webglcontextrestored', onContextRestored);
         const segs = engine ? engine.getSegments() : workout.segments;
         return mod.createScene3D(canvas, {
-          workout: { ...workout, segments: segs },
+          // (test VAM: tu VAM de ahora — la misma que enseña la app —, para la línea dorada «tu VAM» del Estadio)
+          workout: { ...workout, segments: segs, vamRef: workout.isTest ? vamNow(getState()).vam : 0 },
           levels: getState().levels,
           quality: visuals.quality,
           reducedMotion: reducedMotion(),
@@ -2794,7 +2796,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (d.silent) return;
       const stage = Number(d.segment?.stage);
       const testStage = workout.isTest && stage > 0 && d.reason !== 'restart';
-      if (testStage) showBug({ lbl: 'Escalón', val: stage, kind: 'stage' });
+      // (con la proyección en directo, si ya la hay: «Escalón 9 · VAM ≈ 13,0–14,0»)
+      if (testStage) showBug({ lbl: 'Escalón', val: stage, sub: vamProjLabel(), kind: 'stage' });
       if (!scene) return;
       sceneEvent('segment', { index: idx, reason: d.reason || 'auto' });
       if (testStage) sceneEvent('testStage', { stage });
@@ -2937,6 +2940,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function liveHr() {
     const v = nb.liveHr?.();
     if (v || !DEBUG_HR || !engine) return v || null;
+    // Solo con ?debug=hr: una prueba puede poner su propio pulso (window.__brDebugHr(estado) → { bpm, at }), por ejemplo
+    // el de un test VAM realista; el de serie baila alrededor de la zona y no sirve para probar la proyección
+    if (typeof globalThis.__brDebugHr === 'function') {
+      try { const r = globalThis.__brDebugHr(engine.getState()); if (r && Number(r.bpm) > 0) return r; } catch { /* sigue el de serie */ }
+    }
     const seg = engine.getState().segment;
     if (!seg) return null;
     let t;
@@ -3091,7 +3099,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         } catch { /* sin predicción */ }
       }
     } else if (bpm) st = 'in';
-    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}|${vamView?.st || ''}|${vamView ? Math.round((vamView.pct || 0) * 100) : ''}|${raceView ? `${raceView.pred}/${raceView.hrMax}` : ''}`;
+    const key = `${bpm}|${target?.min}|${target?.max}|${st}|${pred}|${vamView?.st || ''}|${vamView ? Math.round((vamView.pct || 0) * 100) : ''}|${vamView?.proj || ''}|${raceView? `${raceView.pred}/${raceView.hrMax}` : ''}`;
     if (cache.pulseKey === key) return;
     cache.pulseKey = key;
     // el escenario (Modo visión) late con tu pulso y se tiñe de la zona si vas en ella
@@ -3113,7 +3121,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // Test VAM: durante los escalones no hay zona objetivo; se ve cuánto te queda hasta tu máximo
     if (vamView) {
       box.dataset.st = vamView.st === 'margin' ? 'in' : vamView.st === 'wait' ? 'wait' : 'high';
-      setText('pulseObj', vamView.pct ? `${Math.round(vamView.pct * 100)} % de tu FC máx.` : '');
+      // … y, desde el quinto escalón, entre qué velocidades saldrá tu VAM a este paso (js/training/vam-projection.js)
+      const pctTxt = vamView.pct ? `${Math.round(vamView.pct * 100)} %` : '';
+      // (espacios duros y «word joiner» tras la raya: el rango «13,0–14,0» no se parte entre dos líneas)
+      setText('pulseObj', vamView.proj ? `${pctTxt ? `${pctTxt} · ` : ''}VAM\u00a0≈\u00a0${vamView.proj.replace('–', '–\u2060')}` : pctTxt ? `${pctTxt} de tu FC máx.` : '');
       setText('pulseSt', VAM_TEXT[vamView.st] || '');
     }
     // Carrera: no hay zona que cumplir. La barra enseña con qué pulso cruzarías la meta a este ritmo frente a tu máxima
@@ -3785,6 +3796,12 @@ export function mount(el, { params = {}, query = {} } = {}) {
       st.vamAssist = createVamAssist({ hrMax: p.hrMax || hrMaxFromAge(p.age || 46) });
     }
     if (!st.vamSafe && s.totalElapsed >= 40) { st.vamSafe = true; coachCall('say', 'vamAssist', { cue: 'safe' }); }
+    // Proyección en directo (solo informa: no cambia velocidades, avisos ni resultado). Se alimenta desde el calentamiento
+    if (!st.vamProj) {
+      const p = getState().profile || {};
+      st.vamProj = createVamProjection({ hrMax: p.hrMax || hrMaxFromAge(p.age || 46), segments: workout.segments, model: vamModel });
+    }
+    if (bpm) st.vamProj.add(s.totalElapsed, bpm);
     if (!s.inTestStage) {
       if (vamView) { vamView = null; cache.pulseKey = ''; }
       if (vamModel && seg) {
@@ -3804,12 +3821,37 @@ export function mount(el, { params = {}, query = {} } = {}) {
       return;
     }
     const r = st.vamAssist.step(s.totalElapsed, bpm, Number(seg?.stage) || 0);
-    vamView = { st: r.st, pct: r.pct };
+    const pj = st.vamProj.at(s.totalElapsed);
+    const proj = vamProjectionText(pj);
+    if (proj !== (st.vamProjTxt || '')) {
+      st.vamProjTxt = proj;
+      if (pj) {
+        diagMark('vam.proyeccion', { e: pj.stage, lo: pj.lo, hi: pj.hi, base: pj.basis });
+        sceneEvent('testProjection', { lo: pj.lo, hi: pj.hi, stage: pj.stage });
+      }
+    }
+    vamView = { st: r.st, pct: r.pct, proj };
     if (r.cue) {
       diagMark('vam.aviso', { cue: r.cue, pct: Math.round((r.pct || 0) * 100) });
       coachCall('say', 'vamAssist', { cue: r.cue });
       if (r.cue === 'over' || r.cue === 'odd') timerHaptic('warning');
     }
+  }
+
+  /** Test VAM: la proyección en directo para el rótulo del escalón («VAM ≈ 13,0–14,0») o '' si aún no la hay. Nunca lanza. */
+  function vamProjLabel() {
+    try {
+      const pj = hrCoachTick.st?.vamProj;
+      const t = Number(engine?.getState?.().totalElapsed);
+      // (+1 s: el rótulo sale justo al cambiar de escalón y el que acaba de terminar ya tiene que contar)
+      const txt = pj && Number.isFinite(t) ? vamProjectionText(pj.at(t + 1)) : '';
+      return txt ? `VAM ≈ ${txt}` : '';
+    } catch { return ''; }
+  }
+
+  /** Test VAM: lo que fue diciendo la proyección ([[escalones terminados, mín, máx], …]) para guardarlo con la sesión. */
+  function vamProjLog() {
+    try { return hrCoachTick.st?.vamProj?.log?.() || []; } catch { return []; }
   }
 
   function hrCoachTick(s) {
@@ -4405,6 +4447,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
       let stageStart = 0;
       for (const g of workout.segments) { if (Number(g.stage) > 0) break; stageStart += Number(g.sec) || 0; }
       session.vamAssist = { stageStart, dayHigh: vamDayHigh };
+      // Lo que fue diciendo la proyección en directo, para contrastarlo luego con el resultado
+      const projLog = vamProjLog();
+      if (projLog.length) session.vamAssist.proj = projLog;
     }
     // Carrera en la cinta: tu tiempo oficial (de la salida a la meta) para el resumen y tu historial
     if (raceResult) session.race = { ...raceResult };

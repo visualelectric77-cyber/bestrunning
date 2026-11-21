@@ -17,7 +17,7 @@ import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, round1,
 } from '../core/utils.js';
 import {
-  openSwapSheet, seasonOf, seasonLine, seasonChips, sessionsOn, sessionRow, ensureSeasonStyles, eventIntro, altItem,
+  openSwapSheet, seasonOf, seasonLine, seasonChips, sessionsOn, sessionRow, ensureSeasonStyles, eventIntro, altItem, chooseDuration,
 } from './plan.js';
 import { eventOn } from '../training/season.js';
 import { goalStatus, fmtGoalTime, paceText } from '../training/goal.js';
@@ -27,6 +27,7 @@ import { dayState, planFix, applyFix, undoFix, fixOn } from '../training/day-fix
 import { BONUS_MINUTES, bonusOffer, bonusPick } from '../training/bonus.js';
 import { diagMark } from '../core/diag.js';
 import { syncFocus } from '../training/focus-sync.js';
+import { durationChoices } from '../training/duration-choices.js';
 import { cachedHealthMetrics, fetchHealthMetrics, syncPlanDays } from '../integrations/ai.js';
 
 const INSTALL_KEY = 'br.td.installDismissed';
@@ -158,8 +159,12 @@ function trainHero(day, state, today, animate) {
   const intro = day.intro || w.intro || '';
   const play = `#/play/${enc(w.id)}?date=${day.date}`;
   const detail = `#/workout/${enc(w.id)}?date=${day.date}&from=today`;
+  // Los minutos se tocan: si la clase admite otra duración, abren «¿Cuánto tiempo tienes?» (de 5 en 5 min)
+  const canDur = !isTest && safe(() => durationChoices(day.templateId, mins(w)).length > 1, false);
   const meta = [
-    metaNum(mins(w), 'min'),
+    canDur
+      ? `<button type="button" class="td-meta__item td-meta__dur" data-dur="${day.date}" aria-label="${esc(`Duración: ${mins(w)} minutos. Cambiar`)}"><b class="num">${mins(w)}</b> min${icon('chevron-down', 13)}</button>`
+      : metaNum(mins(w), 'min'),
     w.estDistanceKm ? metaNum(`~${fmt.dec1(w.estDistanceKm)}`, 'km') : '',
     w.estKcal ? metaNum(fmt.int(w.estKcal), 'kcal') : '',
   ].filter(Boolean).join('<span class="td-meta__sep" aria-hidden="true">·</span>');
@@ -691,6 +696,13 @@ export function mount(el) {
       setState((d) => { ok = undoFix(d, undo.dataset.undoFix); });
       if (ok) { diagMark('plan.deshecho', { id: undo.dataset.undoFix }); haptic('light'); }
       render();
+      return;
+    }
+    const dur = e.target.closest('[data-dur]');
+    if (dur) {
+      haptic('light');
+      const d = safe(() => planDay(getState(), dur.dataset.dur), null);
+      if (d?.workout) chooseDuration(d);
       return;
     }
     const swap = e.target.closest('[data-swap]');

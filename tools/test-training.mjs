@@ -121,7 +121,12 @@ function checkWorkout(w, t, minutes, opts, tag) {
   ok(w && Array.isArray(w.segments) && w.segments.length >= 3, `${tag}: segmentos`);
   if (!w) return;
   const total = w.segments.reduce((a, s) => a + s.sec, 0);
-  ok(total === w.totalSec, `${tag}: totalSec coherente`);
+  // Test VAM (21 nov 2026): los escalones llegan al tope de la cinta; `maxSec` es lo que duran todos y `totalSec`,
+  // lo previsto (hasta tu VAM esperada + 2 km/h), que es con lo que cuenta el plan
+  const expTop = test ? Math.max(opts.levels.fast + 1, vamFromLevels(opts.levels) + 2) : Infinity;
+  const planned = test ? w.segments.filter((s) => !(s.stage > 0 && s.speed > expTop + 1e-9)) : w.segments;
+  ok(total === (test ? w.maxSec : w.totalSec), `${tag}: totalSec coherente`);
+  if (test) ok(planned.reduce((a, s) => a + s.sec, 0) === w.totalSec && w.totalSec <= w.maxSec, `${tag}: lo previsto del test llega hasta VAM + 2`);
   if (!test) ok(total === minutes * 60, `${tag}: total ${total} ≠ ${minutes * 60}`);
   let fastRun = 0;
   for (const [i, s] of w.segments.entries()) {
@@ -157,23 +162,23 @@ function checkWorkout(w, t, minutes, opts, tag) {
     ok(stages.length >= 10 && stages.every((s) => s.sec === 60), `${tag}: escalones de 60 s`);
     ok(Math.abs(stages[0].speed - Math.max(tm.minSpeed, opts.levels.jog - 0.3)) < 0.051, `${tag}: primer escalón en trote − 0,3`);
     ok(stages.every((s, i) => i === 0 || Math.abs(s.speed - stages[i - 1].speed - 0.5) < 0.051), `${tag}: +0,5 km/h por escalón`);
-    const topExp = Math.min(tm.maxSpeed, Math.max(opts.levels.fast + 1, vamFromLevels(opts.levels) + (minutes >= 30 ? 3 : 2)));
-    ok(stages[stages.length - 1].speed <= topExp + 1e-9 && stages[stages.length - 1].speed > topExp - 0.5 - 1e-9, `${tag}: llega al techo (VAM + 2, o la cinta) ${stages[stages.length - 1].speed}/${topExp}`);
+    const topExp = tm.maxSpeed;
+    ok(stages[stages.length - 1].speed <= topExp + 1e-9 && stages[stages.length - 1].speed > topExp - 0.5 - 1e-9, `${tag}: llega al tope de la cinta ${stages[stages.length - 1].speed}/${topExp}`);
     const preJog = w.segments[w.segments.indexOf(stages[0]) - 1];
     ok(preJog && preJog.speed < stages[0].speed, `${tag}: el calentamiento queda por debajo del primer escalón`);
-    ok(Math.abs(total / 60 - minutes) <= minutes * 0.45, `${tag}: duración real cercana a la anunciada (${Math.round(total / 60)}′)`);
+    ok(Math.abs(w.totalSec / 60 - minutes) <= minutes * 0.45, `${tag}: duración prevista cercana a la anunciada (${Math.round(w.totalSec / 60)}′)`);
     ok(w.isTest === true, `${tag}: isTest`);
   }
   ok([1, 2, 3].includes(w.intensity), `${tag}: intensidad 1–3`);
   ok(w.estDistanceKm > 0 && w.estKcal > 0 && w.load > 0, `${tag}: estimaciones`);
   ok(Object.values(w.timeInZone).reduce((a, x) => a + x, 0) === w.totalSec, `${tag}: timeInZone suma total`);
-  ok(w.maxSpeed === Math.max(...w.segments.map((s) => s.speed)), `${tag}: maxSpeed`);
+  ok(w.maxSpeed === Math.max(...planned.map((s) => s.speed)), `${tag}: maxSpeed`);
   const p = parseWorkoutId(w.id);
   ok(p && p.templateId === t.id && p.minutes === w.minutes && p.seed === w.seed && Math.abs(p.loadFactor - w.loadFactor) < 1e-9, `${tag}: id reversible ${w.id}`);
   ok(workoutId(p || {}) === w.id, `${tag}: workoutId(parse(id)) === id`);
   const groups = groupSegments(w.segments);
   const gsum = groups.reduce((a, g) => a + g.times * g.segments.reduce((b, s) => b + s.sec, 0), 0);
-  ok(gsum === w.totalSec && groups.every((g) => g.label && !/undefined|NaN/.test(g.label)), `${tag}: groupSegments`);
+  ok(gsum === (test ? w.maxSec : w.totalSec) && groups.every((g) => g.label && !/undefined|NaN/.test(g.label)), `${tag}: groupSegments`);
 }
 
 for (const t of TEMPLATES) {

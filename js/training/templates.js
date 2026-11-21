@@ -5,7 +5,7 @@
 // carga, inclinación y la semilla.
 import { round1, roundTo, clamp } from '../core/utils.js';
 import { PACE_ID, PACE_LABEL, PACE_PLANS, parsePaceSeed } from './goal-pace.js';
-import { ZONES, LEVEL_KEYS, speedForZone, zoneForSpeed, clampSpeed, vamFromLevels } from './levels.js';
+import { ZONES, LEVEL_KEYS, speedForZone, zoneForSpeed, clampSpeed } from './levels.js';
 import { defineExtraTemplates } from './templates-extra.js';
 
 export const CATEGORIES = {
@@ -1283,10 +1283,10 @@ T({
     const tm = ctx.treadmill || {};
     const maxS = Number(tm.maxSpeed) || 18;
     let sp = round1(k.J - 0.3);
-    // Techo del test: tu VAM esperada + 2 km/h (+3 en la versión de 30′), así la duración real se acerca a la
-    // anunciada; nunca por debajo de rápido + 1 ni por encima de la cinta.
-    const vam = vamFromLevels(ctx.levels);
-    const top = Math.min(maxS, Math.max(k.F + 1, vam + (k.minutes >= 30 ? 3 : 2)));
+    // El test no tiene techo: los escalones siguen hasta la velocidad máxima de tu cinta (Perfil → Cinta). Hasta el
+    // 21 nov 2026 paraban en tu VAM esperada + 2 km/h (+3 en la versión de 30′) y, si aguantabas ese escalón, el test
+    // se acababa solo: quien llega más lejos de lo previsto tiene que poder seguir. Lo corta «No puedo más».
+    const top = maxS;
     // El trote de calentamiento queda por debajo del primer escalón (la carga siempre sube)
     const mid = round1((k.wu + Math.min(k.J, sp - 0.3)) / 2);
     const segs = [
@@ -1294,7 +1294,7 @@ T({
       k.seg('warmup', 90, { speed: Math.min(mid, sp - 0.4), label: 'Calentamiento', block: 'Calentamiento' }),
       k.jog(90, { speed: round1(sp - 0.3), label: 'Trote suave', block: 'Calentamiento', cue: 'Prepárate: en nada empieza el primer escalón' }),
     ];
-    for (let n = 1; sp <= top + 1e-9 && n <= 30; n++) {
+    for (let n = 1; sp <= top + 1e-9 && n <= 40; n++) {
       const cue = n === 1 ? 'Primer escalón: suave, lo duro llega solo'
         : Math.abs(sp - k.F) < 0.26 ? 'Ritmo rápido: aquí empieza el test de verdad'
           : sp > k.S ? 'Aguanta el minuto entero si puedes' : '';

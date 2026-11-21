@@ -1008,6 +1008,23 @@
   color: var(--text);
 }
 .td-meta__sep { color: var(--text-4); }
+/* Los minutos de la clase de hoy se tocan para cambiar la duración (js/training/duration-choices.js) */
+.td-meta__dur {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: -6px -8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.td-meta__dur svg { align-self: center; color: var(--text-3); }
+.td-meta__dur:active { background: var(--fill-2, rgba(127, 127, 127, 0.16)); }
 .td-meta__dots { align-self: center; }
 .td-hero__chart {
   display: block;

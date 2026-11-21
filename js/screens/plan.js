@@ -26,11 +26,11 @@ import {
   todayKey, addDays, mondayOf, parseKey, daysBetween, weekdayOf, fmt, esc, capitalize, hashStr, makeRng,
 } from '../core/utils.js';
 import { focusView } from '../training/focus.js';
+import { durationChoices, setDayMinutes } from '../training/duration-choices.js';
 
 const MORE_SVG =
   '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>';
 const MAX_WEEKS_AHEAD = 12;
-const DURATIONS = [20, 30, 45, 60];
 
 /* ───────────── Utilidades privadas ───────────── */
 
@@ -947,23 +947,21 @@ function createDrag(root, { onSwap }) {
 
 /* ───────────── Menú ⋯ ───────────── */
 
-async function chooseDuration(day) {
-  const tpl = safe(() => getTemplate(day.templateId), null);
+/** Duración a mano de una clase del plan: de 5 en 5 min (js/training/duration-choices.js). La usan Plan y Hoy. */
+export async function chooseDuration(day) {
   const cur = mins(day.workout) || day.minutes;
-  let opts = Array.isArray(tpl?.durations) && tpl.durations.length ? tpl.durations.slice() : DURATIONS.slice();
-  if (!opts.includes(cur)) opts.push(cur);
-  opts = [...new Set(opts)].sort((a, b) => a - b);
+  const opts = safe(() => durationChoices(day.templateId, cur), []);
   if (opts.length < 2) {
     toast('Esta clase tiene duración fija. Prueba «Cambiar clase».', { icon: 'info' });
     return;
   }
   const v = await actionSheet({
-    title: 'Duración',
+    title: '¿Cuánto tiempo tienes?',
     options: opts.map((m) => ({ label: `${m} min${m === cur ? ' · actual' : ''}`, value: m, icon: m === cur ? 'check' : 'timer' })),
   });
   if (v == null || Number(v) === cur) return;
   setState((d) => {
-    setDayOverride(d, day.date, { templateId: day.templateId, minutes: Number(v) });
+    setDayMinutes(d, day, Number(v));
   });
   haptic('success');
   toast(`${capitalize(dayName(day.date))}: ${v} min`, { icon: 'timer' });

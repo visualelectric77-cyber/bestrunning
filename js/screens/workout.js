@@ -9,6 +9,7 @@ import {
 import { workoutFromId, parseWorkoutId, workoutId, groupSegments } from '../training/generator.js';
 import { planDay, setDayOverride } from '../training/planner.js';
 import { CATEGORIES, getTemplate } from '../training/templates.js';
+import { durationChoices, setDayMinutes } from '../training/duration-choices.js';
 import { ZONES, LEVEL_KEYS } from '../training/levels.js';
 import { todayKey, addDays, parseKey, weekdayOf, fmt, esc, capitalize } from '../core/utils.js';
 
@@ -83,20 +84,23 @@ function heroBlock(w, state, ctx) {
     ${w.subtitle ? `<p class="wk-sub">${esc(w.subtitle)}</p>` : ''}
     <div class="card wk-chart">
       ${profileChart(w.segments || [], { height: 172, showLevels: true, levels: lv, radius: 2 })}
-      ${axis(w.totalSec)}
+      ${axis(w.maxSec || w.totalSec)}
       <div class="wk-legend">${legend}</div>
     </div>
   </section>`;
 }
 
 function statsBlock(w) {
+  // Test VAM: la duración y la velocidad son las máximas (todos los escalones, hasta el tope de la cinta); la
+  // distancia y la energía, lo previsto (hasta donde es razonable llegar)
+  const top = w.isTest ? Math.max(0, ...(w.segments || []).map((s) => Number(s.speed) || 0)) : w.maxSpeed || 0;
   return `<div class="card wk-stats"><div class="stat-grid stat-grid--2">
     ${w.isTest
-      ? stat({ label: 'Duración máx.', value: fmt.int(Math.round((w.totalSec || 0) / 60)), unit: 'min' })
+      ? stat({ label: 'Duración máx.', value: fmt.int(Math.round((w.maxSec || w.totalSec || 0) / 60)), unit: 'min' })
       : stat({ label: 'Duración', value: fmt.int(minutesOf(w)), unit: 'min' })}
     ${stat({ label: 'Distancia est.', value: fmt.dec1(w.estDistanceKm || 0), unit: 'km' })}
     ${stat({ label: 'Energía est.', value: fmt.int(w.estKcal || 0), unit: 'kcal' })}
-    ${stat({ label: 'Velocidad máx.', value: fmt.speed(w.maxSpeed || 0), unit: 'km/h' })}
+    ${stat({ label: 'Velocidad máx.', value: fmt.speed(top), unit: 'km/h' })}
   </div></div>`;
 }
 
@@ -108,9 +112,13 @@ function durationBlock(w) {
   if (ds.length && !ds.includes(cur)) ds.push(cur);
   ds = [...new Set(ds)].sort((a, b) => a - b);
   if (ds.length < 2) return '';
+  // Las de siempre, a un toque; «Otra…» abre la lista de 5 en 5 min (js/training/duration-choices.js)
+  const more = safe(() => durationChoices(w.templateId, cur), []).some((m) => !ds.includes(m));
+  const options = ds.map((d) => ({ value: d, label: more && ds.length > 3 ? `${d}′` : `${d} min` }));
+  if (more) options.push({ value: 'other', label: 'Otra…' });
   return `<div class="wk-dur">
     <h2 class="list-header wk-dur__label">Duración</h2>
-    ${segmented({ name: 'wk-dur', options: ds.map((d) => ({ value: d, label: `${d} min` })), value: cur })}
+    ${segmented({ name: 'wk-dur', options, value: cur })}
   </div>`;
 }
 
@@ -200,7 +208,7 @@ function view(w, state, ctx) {
 function ctaHtml(w, ctx) {
   const play = `#/play/${encodeURIComponent(w.id)}${ctx.date ? `?date=${ctx.date}` : ''}`;
   return `<div class="wk-cta">
-    <button type="button" class="btn btn--primary btn--lg btn--block wk-go" data-href="${play}">${icon('play', 18)}<span>Empezar</span><span class="wk-go__min">· ${w.isTest ? `≤ ${Math.round((w.totalSec || 0) / 60)}` : minutesOf(w)} min</span></button>
+    <button type="button" class="btn btn--primary btn--lg btn--block wk-go" data-href="${play}">${icon('play', 18)}<span>Empezar</span><span class="wk-go__min">· ${w.isTest ? `≤ ${Math.round((w.maxSec || w.totalSec || 0) / 60)}` : minutesOf(w)} min</span></button>
   </div>`;
 }
 
@@ -305,12 +313,38 @@ export function mount(el, { params, query } = {}) {
     }
     id = nid;
     w = nw;
+    // Si es la clase del plan de ese día, el plan se queda con la duración nueva: Hoy y Plan enseñan lo mismo
+    if (ctx.date) {
+      const day = safe(() => planDay(getState(), ctx.date), null);
+      if (day && day.templateId === nw.templateId && day.status !== 'done') {
+        setState((d) => { setDayMinutes(d, day, minutes); });
+        const same = safe(() => planDay(getState(), ctx.date)?.workout?.id, null);
+        if (same && same !== id) {
+          const pw = safe(() => workoutFromId(same, getState()), null);
+          if (pw) { id = same; w = pw; }
+        }
+      }
+    }
     updateUrl();
     render();
   }
 
+  /** «Otra…»: la lista de 5 en 5 min. Si se cancela, el selector vuelve a marcar la duración que hay. */
+  async function chooseOtherDuration() {
+    const cur = minutesOf(w);
+    const opts = safe(() => durationChoices(w.templateId, cur), []);
+    const v = opts.length > 1 ? await actionSheet({
+      title: '¿Cuánto tiempo tienes?',
+      options: opts.map((m) => ({ label: `${m} min${m === cur ? ' · actual' : ''}`, value: m, icon: m === cur ? 'check' : 'timer' })),
+    }) : null;
+    if (v != null && Number(v) !== cur) changeDuration(Number(v));
+    else render();
+  }
+
   const onChange = (e) => {
-    if (e.detail && e.detail.name === 'wk-dur') changeDuration(Number(e.detail.value));
+    if (!e.detail || e.detail.name !== 'wk-dur') return;
+    if (e.detail.value === 'other') chooseOtherDuration();
+    else changeDuration(Number(e.detail.value));
   };
   const onClick = (e) => {
     if (e.target.closest('[data-schedule]')) {
