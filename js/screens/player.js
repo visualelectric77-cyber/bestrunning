@@ -1847,6 +1847,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         });
       }
       scall('setHead', (now) => head?.pose(now) ?? null);
+      scall('setHeadWindow', m.headWindowOn(), m.headWindowGain());   // ventana 3D (laboratorio): solo actúa en Modo visión
       head.start();
     }).catch(() => {});
   }

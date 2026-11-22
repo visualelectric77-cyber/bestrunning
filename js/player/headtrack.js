@@ -22,6 +22,24 @@ export function setHeadTrackOn(on) {
 }
 
 /**
+ * Ventana 3D (beta, Ajustes › Laboratorio): con la cabeza activa, los escenarios que la admiten (Modo visión) pintan un
+ * marco dentro de la pantalla y dejan cosas por delante del cristal (scene.setHeadWindow; js/player/scene3d/rig.js).
+ * No abre nada nuevo: usa la misma pose de la cabeza. HEAD_WINDOW_GAIN_KEY (opcional, 0,05–1) ajusta cuánto se mueve
+ * el mundo sin publicar otra versión.
+ */
+export const HEAD_WINDOW_KEY = 'ritmup.headwindow';
+export const HEAD_WINDOW_GAIN_KEY = 'ritmup.headwindow.gain';
+export function headWindowOn() {
+  try { return globalThis.localStorage?.getItem(HEAD_WINDOW_KEY) === 'on'; } catch { return false; }
+}
+export function headWindowGain() {
+  try {
+    const g = Number(globalThis.localStorage?.getItem(HEAD_WINDOW_GAIN_KEY));
+    return Number.isFinite(g) && g > 0 ? g : undefined;
+  } catch { return undefined; }
+}
+
+/**
  * Capacidad que exige la página. La build 18 anunciaba 'head' (ARKit) y con la cámara en marcha el iPhone se quedaba sin
  * música ni coach (2 nov 2026): la página ya NO la usa nunca. Solo 'head-v2' (build 19+: cámara propia sin tocar la
  * sesión de audio y con vigilante del audio en la app).

@@ -839,9 +839,15 @@ const labYtOn = () => safe(() => localStorage.getItem(LAB_YT_KEY) === 'on', fals
 /* Sigue tu cabeza (beta): localStorage 'ritmup.headtrack' = 'on' (contrato con ../player/headtrack.js). */
 const LAB_HEAD_KEY = 'ritmup.headtrack';
 const labHeadOn = () => safe(() => localStorage.getItem(LAB_HEAD_KEY) === 'on', false);
+/* Ventana 3D (beta): localStorage 'ritmup.headwindow' = 'on' (contrato con ../player/headtrack.js). Solo actúa con
+   «Sigue tu cabeza» activado y en Modo visión. */
+const LAB_WIN_KEY = 'ritmup.headwindow';
+const labWinOn = () => safe(() => localStorage.getItem(LAB_WIN_KEY) === 'on', false);
 function labHtml() {
   return group('Laboratorio', `${toggleRow('st-lab-head', 'Sigue tu cabeza (beta)',
     'El escenario 3D se mueve contigo como una ventana: asómate a un lado o levanta la cabeza para ver más. Solo en la app de RITMUP: usa el sensor de Face ID, todo se procesa en tu iPhone y no se guarda ninguna imagen', labHeadOn())}
+    ${toggleRow('st-lab-win', 'Ventana 3D (beta)',
+    'Con «Sigue tu cabeza» activado y en Modo visión: la pantalla se vuelve una ventana con marco, y tu marcador y el escalón que pisas salen por delante del cristal', labWinOn())}
     ${toggleRow('st-lab-yt', 'Clase con vídeo de YouTube (beta)',
     'En la preparación, elige «Vídeo de YouTube» como fondo y pega un enlace o una lista: se ve arriba y tus datos debajo. Sin mundo 3D ni música DJ en esa clase', labYtOn())}`,
   'Funciones en pruebas: pueden cambiar o desaparecer.');
@@ -2850,6 +2856,9 @@ const PAGES = {
       } else if (id === 'st-lab-head') {
         haptic('selection');
         safe(() => localStorage.setItem(LAB_HEAD_KEY, v ? 'on' : 'off'));
+      } else if (id === 'st-lab-win') {
+        haptic('selection');
+        safe(() => localStorage.setItem(LAB_WIN_KEY, v ? 'on' : 'off'));
       } else if (id === 'st-lab-yt') {
         haptic('selection');
         safe(() => { if (v) localStorage.setItem(LAB_YT_KEY, 'on'); else localStorage.removeItem(LAB_YT_KEY); });

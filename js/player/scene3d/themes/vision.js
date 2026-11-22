@@ -36,6 +36,7 @@ const BELT_FADE = 18;     // los listones de la cinta se apagan a esta distancia
 const SLAT_M = 1;         // un listón por metro de cinta recorrido
 const CUT_START = 0.4;    // detrás de ti, a esta distancia (u) la escalera empieza a fundirse con el suelo…
 const CUT_END = 3.4;      // …y aquí ya no existe
+const TONGUE = 0.4;       // ventana 3D: medio ancho de la lengua que sale del cristal, en fracción del medio camino
 
 const VERT = /* glsl */ `
 attribute vec3 aCol;
@@ -77,7 +78,7 @@ const STATE = /* glsl */ `
 // acercarse a la línea del final y bajo tus pies; en las paredes, la luz del filo cae y se apaga hacia el suelo.
 // uRefl = 1: la misma malla del revés, como reflejo en el suelo pulido (se apaga con la profundidad).
 const BODY_FRAG = /* glsl */ `
-uniform float uCur, uIn, uFront, uFogD, uCutZ, uRefl, uYouZ, uRise, uFlow, uFlowAll, uBeat, uTick;
+uniform float uCur, uIn, uFront, uFogD, uCutZ, uRefl, uYouZ, uRise, uFlow, uFlowAll, uBeat, uTick, uWinZ, uTongue;
 uniform vec3 uFogCol, uGroundCol;
 varying vec3 vCol;
 varying float vSeg;
@@ -90,6 +91,15 @@ void main() {
   // lo que ya has corrido se funde con el suelo justo detrás de ti: al cambiar de tramo no te queda el bloque anterior debajo
   float behind = vZ - uCutZ;
   if (behind > ${CUT_END.toFixed(1)}) discard;
+  // ventana 3D: por delante del cristal solo sale tu carril (una lengua del escalón, más estrecha que el marco para que
+  // se vea que lo pisa); el resto del escalón y su reflejo se quedan detrás. La lengua se deshace en puntos al acabar
+  float tongue = 0.0;
+  if (uWinZ > 0.0 && gl_FragCoord.z < uWinZ) {
+    if (uRefl > 0.5 || vFx.x > 0.5 || uTongue < 0.03 || abs(vFx.y) > uTongue) discard;
+    float gone = smoothstep(${CUT_START.toFixed(1)}, ${CUT_END.toFixed(1)}, behind);
+    if (gone > 0.0 && gone > fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
+    tongue = 1.0;
+  }
   ${STATE}
   float y = abs(vY);
   float shade = 0.0;
@@ -105,6 +115,10 @@ void main() {
     // los últimos metros se calientan hacia la línea; en la cuenta atrás 3-2-1 laten con cada número
     shade = 0.038 + 0.026 * (1.0 - ax * ax) + 0.060 * exp(-vFx.w * 0.30) * (1.0 + 2.4 * uTick * isCur) + 0.045 * spot;
     emis = edge * (0.95 + 0.75 * isCur) * live + exp(-(1.0 - ax) * 11.0) * 0.10;
+    // la lengua lleva su propio filo encendido y es algo más clara: se lee como una pieza que sale del cristal
+    float tEdge = smoothstep(uTongue - 0.035 - fw, uTongue - 0.035 + fw, ax);
+    emis += tongue * tEdge * 1.5 * live;
+    shade += tongue * 0.05;
   } else {
     float dTop = max(0.0, vFx.y * uRise - y);
     float fwy = fwidth(dTop) + 1e-4;
@@ -122,7 +136,7 @@ void main() {
 
 // la luz de cada escalón derramada en el suelo, a sus dos lados (aditiva)
 const SPILL_FRAG = /* glsl */ `
-uniform float uCur, uIn, uFront, uFogD, uCutZ, uLast, uRise;
+uniform float uCur, uIn, uFront, uFogD, uCutZ, uLast, uRise, uWinZ;
 varying vec3 vCol;
 varying float vSeg;
 varying float vDist;
@@ -131,7 +145,7 @@ varying vec4 vFx;
 FOG_CHUNK
 void main() {
   float behind = vZ - uCutZ;
-  if (behind > ${CUT_END.toFixed(1)}) discard;
+  if (behind > ${CUT_END.toFixed(1)} || gl_FragCoord.z < uWinZ) discard;   // la luz del suelo no cruza el cristal
   ${STATE}
   float u = clamp(vFx.y, 0.0, 1.0);
   float g = exp(-u * 4.2) * (1.0 - u);
@@ -225,13 +239,14 @@ void main() {
 
 // metas (aditivas, color HDR: el bloom las enciende sin quemarlas)
 const GATE_FRAG = /* glsl */ `
-uniform float uCur, uCurK, uPrevK, uFront, uFogD, uCutZ;
+uniform float uCur, uCurK, uPrevK, uFront, uFogD, uCutZ, uWinZ;
 varying vec3 vCol;
 varying float vSeg;
 varying float vDist;
 varying float vZ;
 FOG_CHUNK
 void main() {
+  if (gl_FragCoord.z < uWinZ) discard;      // ventana 3D: las líneas del final no cruzan el cristal
   float k = vSeg < uCur - 1.5 ? 0.04 : (vSeg < uCur - 0.5 ? uPrevK : (vSeg < uCur + 0.5 ? uCurK : 0.32));
   if (uFront > -0.5) k = vSeg < uFront ? 0.9 : 0.06;
   k *= 1.0 - smoothstep(${CUT_START.toFixed(1)}, ${CUT_END.toFixed(1)}, vZ - uCutZ);
@@ -252,7 +267,7 @@ void main() {
 // lo que te queda (todo en un solo plano aditivo, suavizado con fwidth)
 const BELT_FRAG = /* glsl */ `
 uniform vec3 uCol;
-uniform float uLen, uBelt, uSlat, uCue, uOn, uPov;
+uniform float uLen, uBelt, uSlat, uCue, uOn, uPov, uWinZ, uTongue;
 varying vec2 vUv;
 float lineAA(float ph, float w) {
   float fw = fwidth(ph) + 1e-4;
@@ -264,6 +279,7 @@ void main() {
   float s = vUv.y * uLen;                 // u desde tus pies hacia el final del tramo
   float x = (vUv.x - 0.5) * ${W.toFixed(1)};
   float ax = abs(x);
+  if (gl_FragCoord.z < uWinZ && (uTongue < 0.03 || ax > uTongue * ${(W / 2).toFixed(1)})) discard;   // ventana 3D: fuera del cristal, solo tu carril
   float near = 1.0 - smoothstep(${(BELT_FADE * 0.6).toFixed(1)}, ${BELT_FADE.toFixed(1)}, s);
   float slat = lineAA(s / uSlat + uBelt, 0.09) * near * (1.0 - smoothstep(${(W / 2 - 0.3).toFixed(2)}, ${(W / 2 - 0.15).toFixed(2)}, ax));
   float fwx = fwidth(x) + 1e-4;
@@ -282,10 +298,11 @@ void main() {
 // suelo infinito con una rejilla fina que se pierde a lo lejos
 const GROUND_FRAG = /* glsl */ `
 uniform vec3 uCol, uLine, uFogCol;
-uniform float uFogD, uGloss;
+uniform float uFogD, uGloss, uWinZ;
 varying vec3 vW;
 FOG_CHUNK
 void main() {
+  if (gl_FragCoord.z < uWinZ) discard;      // ventana 3D: el suelo empieza en el cristal
   vec2 p = vW.xz / 5.0;
   vec2 fw = fwidth(p);
   float d = length(vW.xz - cameraPosition.xz);
@@ -334,15 +351,15 @@ export async function createTheme(ctx) {
     uniforms, vertexShader: extra.vert || VERT, fragmentShader: frag.replace('FOG_CHUNK', FOG), ...extra.opts,
   });
 
-  const bodyU = { uCur: { value: 0 }, uIn: { value: 1 }, uFront: { value: -1 }, uFogD: { value: FOG_D }, uFogCol: { value: FOG_COL }, uCutZ: { value: 1e6 }, uGroundCol: { value: C('#05090f') }, uRefl: { value: 0 }, uYouZ: { value: 0 }, uRise: { value: 1 }, uGate: { value: 0 }, uLast: { value: 0 }, uSquash: { value: 1 }, uZEnd: { value: 1 }, uIntroF: { value: 1e6 }, uFlow: { value: 0 }, uFlowAll: { value: 0 }, uBeat: { value: 0 }, uTick: { value: 0 } };
+  const bodyU = { uCur: { value: 0 }, uIn: { value: 1 }, uFront: { value: -1 }, uFogD: { value: FOG_D }, uFogCol: { value: FOG_COL }, uCutZ: { value: 1e6 }, uGroundCol: { value: C('#05090f') }, uRefl: { value: 0 }, uYouZ: { value: 0 }, uRise: { value: 1 }, uGate: { value: 0 }, uLast: { value: 0 }, uSquash: { value: 1 }, uZEnd: { value: 1 }, uIntroF: { value: 1e6 }, uFlow: { value: 0 }, uFlowAll: { value: 0 }, uBeat: { value: 0 }, uTick: { value: 0 }, uWinZ: rig.windowDepth, uTongue: { value: TONGUE } };
   const bodyMat = shader(BODY_FRAG, bodyU, { opts: { side: THREE.DoubleSide } });
   const reflMat = shader(BODY_FRAG, { ...bodyU, uRefl: { value: 1 } }, { opts: { side: THREE.DoubleSide } });
   const spillMat = shader(SPILL_FRAG, bodyU, { opts: { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending } });
-  const gateU = { uCur: bodyU.uCur, uFront: bodyU.uFront, uCurK: { value: 1 }, uPrevK: { value: 0.1 }, uFogD: bodyU.uFogD, uCutZ: bodyU.uCutZ, uRise: bodyU.uRise, uGate: { value: 1 }, uSquash: bodyU.uSquash, uZEnd: bodyU.uZEnd, uIntroF: bodyU.uIntroF };
+  const gateU = { uCur: bodyU.uCur, uFront: bodyU.uFront, uCurK: { value: 1 }, uPrevK: { value: 0.1 }, uFogD: bodyU.uFogD, uCutZ: bodyU.uCutZ, uRise: bodyU.uRise, uGate: { value: 1 }, uSquash: bodyU.uSquash, uZEnd: bodyU.uZEnd, uIntroF: bodyU.uIntroF, uWinZ: rig.windowDepth };
   const gateMat = shader(GATE_FRAG, gateU, { opts: { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending } });
 
   // suelo y horizonte
-  const groundU = { uCol: { value: C('#05090f') }, uLine: { value: C('#1a2a38') }, uFogCol: { value: FOG_COL }, uFogD: { value: FOG_D }, uGloss: { value: 0 } };
+  const groundU = { uCol: { value: C('#05090f') }, uLine: { value: C('#1a2a38') }, uFogCol: { value: FOG_COL }, uFogD: { value: FOG_D }, uGloss: { value: 0 }, uWinZ: rig.windowDepth };
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000), shader(GROUND_FRAG, groundU, { vert: PLANE_VERT, opts: { transparent: true } }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.03;
@@ -354,7 +371,7 @@ export async function createTheme(ctx) {
   hzLine.frustumCulled = false;
   root.add(hzLine);
   // la cinta de tu tramo
-  const beltU = { uCol: { value: new THREE.Color() }, uLen: { value: 1 }, uBelt: { value: 0 }, uSlat: { value: 0.42 }, uCue: { value: 1 }, uOn: { value: 1 }, uPov: { value: 0 } };
+  const beltU = { uCol: { value: new THREE.Color() }, uLen: { value: 1 }, uBelt: { value: 0 }, uSlat: { value: 0.42 }, uCue: { value: 1 }, uOn: { value: 1 }, uPov: { value: 0 }, uWinZ: rig.windowDepth, uTongue: bodyU.uTongue };
   const beltMat = shader(BELT_FRAG, beltU, { vert: PLANE_VERT, opts: { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 } });
   const beltGeo = new THREE.PlaneGeometry(1, 1);
   beltGeo.translate(0, 0.5, 0);           // y local 0 = tus pies, 1 = final del tramo
@@ -706,6 +723,9 @@ export async function createTheme(ctx) {
   const tmpC = new THREE.Color();
   const hzBase = C('#5fa8d8');
   const anchor = new THREE.Vector3();
+  const winP = new THREE.Vector3();      // ventana 3D: el punto de tu escalón que toca el cristal
+  const winQ = new THREE.Vector3();
+  let winOn = 1;
   const dbg = {};
   const rectOf = (kind) => { for (const r of ctx.hud.rects || []) if (r.kind === kind) return r; return null; };
 
@@ -819,7 +839,9 @@ export async function createTheme(ctx) {
         }
         yFrac = clamp(yFrac, 0.45, 0.86);
         dbg.yFrac = yFrac; dbg.band = hud.band;
-        anchor.set(0, gYou + 0.05, -d - 5 * m).project(camera);
+        // con la ventana 3D, la composición se hace con la cámara SIN tu cabeza: si no, perseguiría lo que se asoma
+        anchor.set(0, gYou + 0.05, -d - 5 * m);
+        if (rig.windowEnabled) { if (!(rig.projectBase(anchor) > 0)) anchor.z = 2; } else anchor.project(camera);
         if (Number.isFinite(anchor.y) && anchor.z < 1) {
           const ndc0 = anchor.y - rig.current.shift.y;
           const ndcX0 = anchor.x - rig.current.shift.x;   // en escorzo, tu marcador sigue centrado
@@ -827,6 +849,35 @@ export async function createTheme(ctx) {
           dbg.ndc = anchor.y; dbg.shift = T.shift.y;
         }
       }
+
+      // ── ventana 3D (laboratorio): el cristal pasa por tu escalón, un poco por delante de ti: tu marcador, tu latido y
+      // el trozo de escalón que pisas quedan fuera del cristal y pisan el marco; el hueco acaba donde el escalón lo toca.
+      // En primera persona el cristal va unos metros más allá; en el plano final se retira (ese plano es a pantalla entera)
+      winOn = clamp01(winOn + ((finale ? 0 : 1) - winOn) * Math.min(1, dt * 2.5));
+      if (rig.windowEnabled) {
+        // en primera persona la cámara va a ras de suelo y una lengua lo taparía todo: ahí no sale nada del suelo (las
+        // motas de luz sí cruzan el cristal) y el cristal se aleja unos metros
+        bodyU.uTongue.value = TONGUE * (1 - m);
+        winP.set(0, gYou + 0.05, -d - (1.1 + 2.9 * m));
+        const wd = rig.projectBase(winP);
+        if (wd > 0.5 && Number.isFinite(winP.y)) {
+          rig.window.dist = wd;
+          rig.window.bottom = clamp(winP.y, -0.8, -0.05);
+        }
+        rig.window.on = smooth(winOn) * introK;
+        rig.window.floorY = gYou + 0.45;
+        // sombra de la lengua sobre el marco: sus cuatro esquinas en pantalla (con tu cabeza, como se ve)
+        const sh = rig.window.shadow;
+        const hx = TONGUE * W / 2;
+        const zA = -d - 1.1, zB = -d + 2.7;
+        let okSh = m < 0.98;
+        for (let i = 0; i < 4 && okSh; i++) {
+          winQ.set(i === 0 || i === 3 ? -hx : hx, gYou + 0.05, i < 2 ? zA : zB).project(camera);
+          if (!(winQ.z < 1) || !Number.isFinite(winQ.x) || !Number.isFinite(winQ.y)) okSh = false;
+          sh[i * 2] = winQ.x; sh[i * 2 + 1] = winQ.y;
+        }
+        rig.window.shadowK = okSh ? 1 - m : 0;
+      } else rig.window.dist = 0;
 
       // ── tu marcador y tu latido ──
       you.position.set(0, gYou + 0.05, -d);

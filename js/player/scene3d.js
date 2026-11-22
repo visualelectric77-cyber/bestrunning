@@ -29,6 +29,7 @@
 //   scene.setStrideBob(bool) (alias setStride) · scene.resize() · scene.getInfo() · scene.destroy({ releaseContext })
 //   scene.setRunning(bool)                // false: creada pero sin pintar (preparación); true: vuelve a pintar
 //   scene.setHead(fn | null)              // perspectiva acoplada a la cabeza: fn(nowMs) → pose filtrada (headpose.js)
+//   scene.setHeadWindow(bool)             // ventana 3D (laboratorio): marco y proyección de cristal (scene3d/rig.js)
 //   scene.setSpeedFeel('real'|'viva'|'intensa')  // sensación de velocidad (scene3d/speedfeel.js); sin llamarla se lee
 //                                         //   localStorage 'ritmup.speedfeel' al crear la escena y en cada escenario
 //   Calidad 'auto': baja por cadencia Y coste de CPU por fotograma (un rAF a 30 fps del modo de bajo consumo con poco
@@ -162,7 +163,7 @@ function noopController() {
   const f = () => {};
   return {
     setState: f, setBeat: f, event: f, resize: f, setQuality: f, setTvMode: f, destroy: f, setHudRects: f, setGhost: f,
-    setAnalyser: f, setHead: f, setStride: f, setStrideBob: f, setRunning: f, setSpeedFeel: f, setTheme: async () => false, getTheme: () => null,
+    setAnalyser: f, setHead: f, setHeadWindow: f, setStride: f, setStrideBob: f, setRunning: f, setSpeedFeel: f, setTheme: async () => false, getTheme: () => null,
     getInfo: () => ({ fps: 0, quality: 'off', level: -1 }),
   };
 }
@@ -234,6 +235,7 @@ export async function createScene3D(canvas, {
   const spectrum = createSpectrum(THREE);
   const post = createPost(THREE, renderer, scene, camera);
   const rig = createRig(THREE, camera);
+  scene.add(rig.frame);     // marco de la ventana 3D (invisible salvo con scene.setHeadWindow(true) y un escenario que la admita)
   const layout = createLayout();
   const ghost = createGhostTrace();
   const director = createDirector(); // planos de retransmisión + golpe de sprint + arco del KM (scene3d/director.js)
@@ -885,6 +887,10 @@ export async function createScene3D(canvas, {
       let hp = HEAD_ZERO;
       if (headFn && !reduced) { try { hp = headFn(now) || HEAD_ZERO; } catch { hp = HEAD_ZERO; } }
       headCamera(hp, rig.head);
+      // ventana 3D (rig.window): la cabeza en metros, ya por el peso de la cara, y el color del tramo para el canto del marco
+      const wn = rig.window;
+      wn.px = hp.x * hp.w; wn.py = hp.y * hp.w; wn.pw = hp.w;
+      if (wn.enabled) wn.tint.copy(F.accent);
     }
     rig.update(dt, aspect, bobX, bobY);
     // luces de tu récord: con la cámara final (desplazamiento de lente incluido). Tres fallos seguidos ⇒ se apagan y
@@ -1187,6 +1193,11 @@ export async function createScene3D(canvas, {
 
     /** Perspectiva acoplada a la cabeza: fn(nowMs) → { x, y, z, yaw, pitch, w } (headpose.js) o null para quitarla. */
     setHead(fn) { headFn = typeof fn === 'function' ? fn : null; },
+    /** Ventana 3D (laboratorio): con la cabeza activa, los escenarios que la admiten pintan marco y cruzan el cristal. */
+    setHeadWindow(on, gain) {
+      rig.window.enabled = !!on;
+      if (Number.isFinite(gain) && gain > 0) rig.window.gain = clamp(gain, 0.05, 1);
+    },
 
     setStride(on) { strideOn = on !== false; },
     setStrideBob(on) { strideOn = on !== false; },
@@ -1258,6 +1269,7 @@ export async function createScene3D(canvas, {
         retireTheme(theme);
         theme = null;
         post.dispose();
+        try { rig.frame.geometry.dispose(); rig.frame.material.dispose(); } catch { /* nada */ }
         spectrum.dispose();
         renderer.renderLists.dispose();
         renderer.dispose();
