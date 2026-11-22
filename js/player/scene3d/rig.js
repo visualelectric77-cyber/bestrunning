@@ -65,7 +65,7 @@ export function createRigFacade(THREE, rig) {
     window: { dist: 0, on: 1, bottom: -0.7, floorY: -1e9, shadowK: 0, shadow: new Float32Array(8) },
     /** ¿Está activada la ventana 3D en Ajustes? (vivo) */
     get windowEnabled() { return rig.window.enabled; },
-    /** Peso real de la ventana ahora mismo (0..1): activada × escenario × cara a la vista. */
+    /** Peso real de la ventana ahora mismo (0..1): activada × escenario. No depende de que se vea tu cara. */
     get windowWeight() { return rig.window.w; },
     /** Uniforme compartido { value }: profundidad del cristal en gl_FragCoord.z (−1 = sin ventana). Para recortar lo que no debe salirse. */
     get windowDepth() { return rig.window.depth; },
@@ -247,8 +247,9 @@ export function createRig(THREE, camera) {
       e[9] = -(c.shift.y + (e[5] * dy) / win);
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
       camera.updateMatrixWorld();
-      // marco: entra desde los bordes con el peso de la ventana (cara a la vista × escenario) y se retira igual
-      const ww = asWindow ? clamp01(wn.pw) * wn.on : 0;
+      // marco: está SIEMPRE que la ventana esté activada y el escenario la admita, se vea o no tu cara (la cabeza solo
+      // añade el movimiento). Entra desde los bordes y se retira con el peso que da el escenario (plano final, entrada)
+      const ww = asWindow ? wn.on : 0;
       wn.w = ww;
       if (ww > 0.002) {
         const k = ww * ww * (3 - 2 * ww);

@@ -22,9 +22,10 @@ export function setHeadTrackOn(on) {
 }
 
 /**
- * Ventana 3D (beta, Ajustes › Laboratorio): con la cabeza activa, los escenarios que la admiten (Modo visión) pintan un
+ * Ventana 3D (beta, Perfil › Pantalla de entreno › Laboratorio): los escenarios que la admiten (Modo visión) pintan un
  * marco dentro de la pantalla y dejan cosas por delante del cristal (scene.setHeadWindow; js/player/scene3d/rig.js).
- * No abre nada nuevo: usa la misma pose de la cabeza. HEAD_WINDOW_GAIN_KEY (opcional, 0,05–1) ajusta cuánto se mueve
+ * Basta con ese interruptor: el reproductor sigue la cabeza aunque «Sigue tu cabeza» esté apagado, y sin cabeza (web,
+ * sin permiso, movimiento reducido) la ventana se ve igual, quieta. No abre nada nuevo: usa la misma pose de la cabeza. HEAD_WINDOW_GAIN_KEY (opcional, 0,05–1) ajusta cuánto se mueve
  * el mundo sin publicar otra versión.
  */
 export const HEAD_WINDOW_KEY = 'ritmup.headwindow';

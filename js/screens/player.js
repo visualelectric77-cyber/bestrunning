@@ -1811,6 +1811,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     computeDrops();
     pushHudRects();
     startSceneLoop();
+    // ventana 3D (laboratorio): se enciende con la escena, sin depender de la cámara ni de «Sigue tu cabeza»
+    scall('setHeadWindow', headWindowWanted(), headWindowGainPref());
     startHead();
     // Fundido de entrada cuando la escena ya pinta (dos fotogramas): el 2D queda debajo como respaldo
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -1830,11 +1832,14 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!scene || disposed || reducedMotion()) return;
     if (engine && engine.getState().status !== 'running') return;
     import('../player/headtrack.js').then((m) => {
-      if (!scene || disposed || !m.headTrackOn()) return;
+      // con la Ventana 3D activada la cabeza se sigue sola: no hace falta activar además «Sigue tu cabeza»
+      if (!scene || disposed || !(m.headTrackOn() || m.headWindowOn())) return;
+      const onlyWindow = !m.headTrackOn();
       if (!head) {
         head = m.createHeadTracker({
           onState: (st, why) => {
-            if (st === 'error' && !headWarned) {
+            // solo con la ventana y sin app nativa no hay aviso: la ventana se ve igual, quieta
+            if (st === 'error' && !headWarned && !(onlyWindow && why === 'unsupported')) {
               headWarned = true;
               const msg = why === 'unsupported'
                 ? (isNative() ? 'Para seguir tu cabeza, actualiza la app de RITMUP' : '«Sigue tu cabeza» solo funciona en la app de RITMUP')
@@ -1858,7 +1863,23 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /** Escenario de esta clase: elección de Preparación › preferencia de Perfil ('auto' = según el tipo de clase). */
   function themePick() {
-    return resolveTheme(visuals.theme, workout, sessionTheme);
+    const r = resolveTheme(visuals.theme, workout, sessionTheme);
+    // Ventana 3D activada (laboratorio): la clase va en Modo visión, que es donde existe, aunque en Perfil tengas otro
+    // mundo. Se respeta el mundo propio de la clase (test, carrera, especiales) y el que elijas a mano para esta clase
+    if (r.id !== 'vision' && headWindowWanted() && (sessionTheme == null || sessionTheme === AUTO_THEME)
+      && resolveTheme(AUTO_THEME, workout).id === 'vision') return { id: 'vision', auto: true, reason: 'Ventana 3D' };
+    return r;
+  }
+
+  /** Ventana 3D (Perfil › Pantalla de entreno › Laboratorio): mismas claves que js/player/headtrack.js. */
+  function headWindowWanted() {
+    try { return localStorage.getItem('ritmup.headwindow') === 'on'; } catch { return false; }
+  }
+  function headWindowGainPref() {
+    try {
+      const g = Number(localStorage.getItem('ritmup.headwindow.gain'));
+      return Number.isFinite(g) && g > 0 ? g : undefined;
+    } catch { return undefined; }
   }
 
   /** Lleva la escena (si existe) al escenario elegido; la API setTheme es asíncrona y nunca lanza aquí. */
