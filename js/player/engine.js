@@ -606,6 +606,8 @@ export function buildSession(workout, engineState, { levels = null, planDate = n
       lastStageSpeed: round1(Number(es.test.lastStageSpeed) || 0),
       secondsInLastStage: Math.round(Number(es.test.secondsInLastStage) || 0),
       vam: round2(Number(es.test.vam) || 0),
+      // el escalón en el que acabó: sin él, la comprobación con el pulso (vam-assist.js) no sabe dónde mirar
+      ...(Number(es.test.stage) > 0 ? { stage: Math.round(Number(es.test.stage)) } : {}),
     }
     : null;
 

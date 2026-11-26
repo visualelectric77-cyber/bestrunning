@@ -96,6 +96,36 @@ ok(vamValidity({ ...session(170), hrSeries: [] }, { hrMax: 176 }).verdict === 'u
   ok(vamValidity(spike, { hrMax: 176 }).peak < 200, 'un pico suelto del sensor no cuenta');
 }
 
+// 8b · Sesiones guardadas sin el escalón (todas las de antes del 26 nov 2026): se deduce del trazado de velocidad.
+// Caso real del 26 nov: 10 escalones completos (hasta 13,3) y «No puedo más» 1 s después de empezar el de 13,8; el
+// resumen decía «Sin pulso del reloj» aunque había 105 lecturas.
+{
+  const traceFor = (stages, secs) => {
+    const tr = [[0, 7.9], [300, 8.8]];
+    for (let k = 1; k < stages; k++) tr.push([300 + k * 60, 8.8 + 0.5 * k]);
+    const end = 300 + (stages - 1) * 60 + secs;
+    tr.push([end + 540, 8.8 + 0.5 * (stages - 1)], [end + 540, 8.3]);
+    return tr;
+  };
+  const real = session(174, { stage: 11, secs: 1 });
+  const { stage: _drop, ...noStage } = real.test;
+  const old = { ...real, test: noStage, speedTrace: traceFor(11, 1) };
+  const vOld = vamValidity(old, { hrMax: 178 });
+  const vNew = vamValidity(real, { hrMax: 178 });
+  ok(vOld.verdict === 'valid', `sin escalón guardado, con pulso: válido (era «sin pulso»): ${vOld.verdict}`);
+  ok(vOld.stages === 10 && vOld.stages === vNew.stages, `10 escalones completos, como con el escalón guardado (${vOld.stages})`);
+  ok(vOld.peak === vNew.peak, 'mismo pico que con el escalón guardado');
+  for (const [stages, secs] of [[5, 30], [8, 59], [12, 10], [4, 45]]) {
+    const r = session(170, { stage: stages, secs });
+    const { stage: _s, ...ns } = r.test;
+    const a1 = vamValidity({ ...r, test: ns, speedTrace: traceFor(stages, secs) }, { hrMax: 176 });
+    const a2 = vamValidity(r, { hrMax: 176 });
+    ok(a1.verdict === a2.verdict && a1.stages === a2.stages && a1.peak === a2.peak, `escalón ${stages} (+${secs} s): igual con y sin escalón guardado`);
+  }
+  ok(vamValidity({ ...old, speedTrace: [] }, { hrMax: 178 }).verdict === 'unknown', 'sin escalón ni trazado: no se juzga');
+  ok(vamValidity({ ...old, speedTrace: 'x' }, { hrMax: 178 }).verdict === 'unknown', 'trazado roto: no se juzga');
+}
+
 // 9 · Las velocidades
 {
   const st = defaultState();

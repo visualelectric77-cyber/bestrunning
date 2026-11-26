@@ -251,6 +251,7 @@ section('Test: endTest salta a la vuelta a la calma', () => {
   ok(s.status === 'finished', 'termina');
   const ses = buildSession(w, s, { levels: { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13 }, planDate: '2026-10-17' });
   ok(ses.isTest === true && ses.test && near(ses.test.vam, 8.25), 'Session.test');
+  ok(ses.test.stage === 2, `la sesión guarda el escalón en el que acabó (${ses.test.stage}): sin él no se comprueba con el pulso`);
   ok(ses.completed === true && ses.completionPct === 1, 'test completado (sin contar escalones no corridos)');
   // Test completo sin endTest
   const h2 = harness(w);

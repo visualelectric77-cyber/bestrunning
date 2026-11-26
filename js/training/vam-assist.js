@@ -87,6 +87,21 @@ export function vamPreCheck(history, today) {
 }
 
 /**
+ * Escalón en el que acabó el test, deducido del trazado de velocidad (para las sesiones guardadas sin `test.stage`,
+ * todas las de antes del 26 nov 2026): el escalón más rápido que llegó a correrse empieza la primera vez que aparece
+ * su velocidad. → número de escalón (1…) o 0 si no se puede saber.
+ */
+function stageFromTrace(session, stageStart) {
+  const tr = (Array.isArray(session?.speedTrace) ? session.speedTrace : [])
+    .filter((p) => Array.isArray(p) && Number.isFinite(Number(p[0])) && Number(p[1]) > 0 && Number(p[0]) >= stageStart - 0.5);
+  if (!tr.length) return 0;
+  const top = Math.max(...tr.map((p) => Number(p[1])));
+  const t0 = Number(tr.find((p) => Number(p[1]) === top)[0]);
+  const k = Math.round((t0 - stageStart) / STAGE_SEC) + 1;
+  return k >= 1 && k <= 60 ? k : 0;
+}
+
+/**
  * ¿Es fiable el resultado? session: con hrSeries [[s, ppm]…], test { stage, secondsInLastStage }, timeline y vamAssist
  * { stageStart, dayHigh }. prevDelta: VAM de hoy menos la referencia.
  * → { verdict: 'valid' | 'doubtful' | 'unknown', reasons: [], peak, peakPct, plateau, stages, suggestHrMax }
@@ -97,7 +112,9 @@ export function vamValidity(session, { hrMax, prevDelta = 0 } = {}) {
   const va = session?.vamAssist;
   const stageStart = Number(va?.stageStart);
   if (!va || !Number.isFinite(stageStart)) return base;
-  const stage = Number(session?.test?.stage) || 0;
+  const stage = Number(session?.test?.stage) || stageFromTrace(session, stageStart);
+  // Sin saber en qué escalón acabó no se puede juzgar (y no es que falte el pulso): sin mensaje
+  if (!(stage > 0)) return base;
   const secs = Number(session?.test?.secondsInLastStage) || STAGE_SEC;
   const stageEnd = stageStart + Math.max(0, stage - 1) * STAGE_SEC + secs;
   const max = Number(hrMax) > 0 ? Number(hrMax) : 176;
