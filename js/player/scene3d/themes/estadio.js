@@ -36,6 +36,7 @@ import { buildSky, buildGround, buildStands, buildLights } from './estadio/stadi
 import { DECAL_VERT, DECAL_FRAG } from './estadio/shaders.js';
 import { laneNumbersTexture, makePaint, makeBug, makeFinalGraphic, makeFloor } from './estadio/graphics.js';
 import { buildFireworks } from './estadio/show.js';
+import { nightOn, createNight } from './estadio/noche.js';
 import { worldUrl, loadTex } from './kit/world.js';
 import { vamFromLevels } from '../../../training/levels.js';
 
@@ -124,6 +125,12 @@ export async function createTheme(ctx) {
   world.add(lights.mesh);
   const G = ground.u;
   const SU = stands.u;
+  // MODO RETRANSMISIÓN (beta, Perfil › Laboratorio): estadio de noche con lluvia, luz horneada por baterías, agua y arco
+  // de meta (estadio/noche.js). Sin el interruptor, o si faltan sus recursos, el Estadio de siempre.
+  let night = null;
+  if (nightOn()) {
+    try { night = await createNight(ctx, { world, ground, stands, lights, sky }); } catch (err) { night = null; console.warn('estadio noche:', err); }
+  }
 
   // ── decals (shader propio: niebla del estadio y fundido al acercarse: nada enorme bajo el rótulo inferior) ──
   function decalMat(map, color, opacity = 1, near = [0, 0], extra = {}) {
@@ -934,6 +941,10 @@ export async function createTheme(ctx) {
       // ── post: exposición por zona, sin destellos (objeto reutilizado) ──
       postOpts.exposure = mood.exp * (f.finale ? 1 + 0.04 * fe : 1);
       post.set(postOpts);
+      if (night) {
+        const ct = Math.max(0, f.t || 0);
+        night.update(f, { power, punch: tx.punch || 0, clock: `${Math.floor(ct / 60)}:${String(Math.floor(ct % 60)).padStart(2, '0')}` });
+      }
     },
 
     event(type, data = {}) {

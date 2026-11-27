@@ -33,6 +33,7 @@ import { briefingInput, briefingTextOk } from '../training/briefing.js';
 import { hrZoneOf } from '../integrations/watch-hr.js';
 import { resolveTheme, AUTO_THEME, SCENE_IDS, SCENE_NAMES, SPECIAL_SCENES } from '../player/scene-pick.js';
 import { diagMark, diagWatch } from '../core/diag.js';
+import { wordmarkSvg } from '../ui/wordmark.js';
 import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
 import { createRaceGuide } from '../training/race-guide.js';
@@ -78,7 +79,7 @@ const CTL_MS = 4000;          // un toque muestra los controles 4 s mientras cor
 const BUG_MS = 3000;          // «bugs» de retransmisión (KM, MITAD, SERIE, RÉCORD): 3 s y salen
 const GOLD = '#FFD60A';
 // Bloques del HUD cuyo rectángulo recibe la escena: solo información de composición (§15.3: nunca máscaras)
-const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on';
+const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on, .bc, .bc-prof';
 // Subtítulos del coach: solo frases (motivación, mitad, km, final); nunca avisos de tramo ni cifras deletreadas
 const CAP_SKIP = new Set(['pre', 'change', 'tick', 'countdown', 'intro', 'adjust', 'resume', 'testStage', 'finishStats']);
 // Laboratorio YouTube: en iPhone/iPad el volumen del vídeo no se puede bajar desde la página (iOS lo ignora), así que los
@@ -427,6 +428,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let hudRaf = 0;
   let ghost = null;           // { trace, label, km, times, cum } mejor marca en esta clase (§14.1-1)
   let tvOn = visuals.tvMode === true;
+  // Modo retransmisión (beta, Perfil › Laboratorio): marcador de televisión arriba y Estadio de noche (un solo interruptor)
+  const bcast = bcastOn();
   let tvHintT = null;
   let finale = false;         // plano final en curso
   let vpTimer = null;
@@ -884,7 +887,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
   function readySceneHtml() {
     if (visuals.quality === 'off') return '<div data-slot="scene" hidden></div>';
     const pick = themePick();
-    const auto = resolveTheme(AUTO_THEME, workout);
+    const auto0 = resolveTheme(AUTO_THEME, workout);
+    // (modo retransmisión: en «Auto» la clase irá en el Estadio de noche; la miniatura lo dice)
+    const auto = bcast && auto0.id === 'vision' ? { ...auto0, id: 'estadio' } : auto0;
     const name = (id) => SCENE_NAMES[id] || SPECIAL_SCENES[id] || id;
     const thumb = (id) => `<img src="./assets/scenes/${encodeURIComponent(id)}.jpg" width="240" height="428" alt="" decoding="async">`;
     const opt = (id, label, inner, on) => `<button type="button" class="pl-scn__opt${id === AUTO_THEME ? ' pl-scn__opt--auto' : ''}" role="radio" aria-checked="${on}" data-act="scene" data-scene="${id}">
@@ -1133,7 +1138,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const zc = zoneColor(first?.zone);
     const musicLbl = !appMusic ? 'Modo Mi música' : musicOn ? 'Apagar música' : 'Encender música';
     el.innerHTML = `
-      <div class="pl pl--live${ytLive ? ' pl--yt' : ''}${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
+      <div class="pl pl--live${ytLive ? ' pl--yt' : ''}${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}${bcast && !ytLive ? ' is-bcast' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
         <div class="pl-bg pl-bg--live" aria-hidden="true">
           <i class="pl-bg__tint is-on" data-ref="tint0" style="--tc:${zc}"></i>
           <i class="pl-bg__tint" data-ref="tint1" style="--tc:${zc}"></i>
@@ -1143,6 +1148,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         <div class="pl-world" data-ref="world" aria-hidden="true"></div>
         ${ytLive ? ytLiveHtml() : ''}
         <div class="hud" data-ref="hud">
+          ${bcast ? bcastHtml() : ''}
           <header class="hud-top hud-plate">
             <div class="hud-top__l">
               <span class="hud-top__title">${esc(workout.title || 'Entrenamiento')}</span>
@@ -1866,9 +1872,139 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const r = resolveTheme(visuals.theme, workout, sessionTheme);
     // Ventana 3D activada (laboratorio): la clase va en Modo visión, que es donde existe, aunque en Perfil tengas otro
     // mundo. Se respeta el mundo propio de la clase (test, carrera, especiales) y el que elijas a mano para esta clase
+    // Modo retransmisión: la clase va en el Estadio (de noche), salvo mundo propio de la clase o elección a mano
+    if (bcast && r.id !== 'estadio' && (sessionTheme == null || sessionTheme === AUTO_THEME)
+      && resolveTheme(AUTO_THEME, workout).id === 'vision') return { id: 'estadio', auto: true, reason: 'Retransmisión' };
     if (r.id !== 'vision' && headWindowWanted() && (sessionTheme == null || sessionTheme === AUTO_THEME)
       && resolveTheme(AUTO_THEME, workout).id === 'vision') return { id: 'vision', auto: true, reason: 'Ventana 3D' };
     return r;
+  }
+
+  /** Modo retransmisión (Perfil › Pantalla de entreno › Laboratorio): misma clave que themes/estadio/noche.js. */
+  function bcastOn() {
+    try { return localStorage.getItem('ritmup.retransmision') === 'on'; } catch { return false; }
+  }
+
+  /** Marcador de retransmisión (arriba a la izquierda) y perfil de la clase (abajo), como en televisión. */
+  function bcastHtml() {
+    const segs = workout.segments || [];
+    const total = segs.reduce((a, x) => a + (x.sec || 0), 0) || 1;
+    const sp = segs.map((x) => x.speed || 0);
+    const lo = Math.min(...sp, 99); const hi = Math.max(...sp, 0);
+    let acc = 0;
+    const bars = segs.map((x) => {
+      const l = (100 * acc) / total; const w = (100 * (x.sec || 0)) / total; acc += x.sec || 0;
+      const h = hi > lo ? 22 + (78 * ((x.speed || 0) - lo)) / (hi - lo) : 60;
+      return `<i style="left:${l.toFixed(3)}%;width:calc(${w.toFixed(3)}% - 1.5px);height:${h.toFixed(1)}%;background:var(--z-${esc(x.zone || 'jog')})"></i>`;
+    }).join('');
+    return `<section class="bc">
+            <div class="bc-adj"><button class="hud-adj bc-adjbtn" data-adj="1" aria-label="Subir 0,1 km/h">${icon('plus', 22, { stroke: 2.6 })}</button><button class="hud-adj bc-adjbtn" data-adj="-1" aria-label="Bajar 0,1 km/h">${icon('minus', 22, { stroke: 2.6 })}</button></div>
+            <div class="bc-head"><span class="bc-acc"></span>${wordmarkSvg({ cls: 'bc-logo', label: '' })}<span class="bc-live"><i></i><span class="bc-live__on">EN DIRECTO</span><span class="bc-live__off">EN PAUSA</span></span><span class="bc-clock num" data-ref="bcClock"></span></div>
+            <div class="bc-main">
+              <div class="bc-row"><span class="bc-spd num" data-ref="bcSpd">0,0</span><span class="bc-unit"><span class="bc-zone" data-ref="bcZone"></span><b>KM/H<span class="bc-incl" data-ref="bcIncl"></span></b></span></div>
+              <div class="bc-grid">
+                <div class="bc-cell"><div class="bc-lab">RITMO</div><div class="bc-val num"><span data-ref="bcPace">–:––</span><small>/KM</small></div></div>
+                <div class="bc-cell"><div class="bc-lab">PULSO</div><div class="bc-val num"><span data-ref="bcHr">–</span><span class="bc-hrz" data-ref="bcHrZ"></span></div></div>
+                <div class="bc-cell"><div class="bc-lab">DISTANCIA</div><div class="bc-val num"><span data-ref="bcKm">0,00</span><small>KM</small></div></div>
+              </div>
+              <div class="bc-hr" data-ref="bcHrLine" data-st="off">
+                <div class="bc-hr__top"><i class="bc-hr__dot"></i><b data-ref="bcHrSt">SIN PULSO</b><span class="bc-hr__obj num" data-ref="bcHrObj"></span></div>
+                <div class="bc-hr__gauge"><i class="bc-hr__band"></i><i class="bc-hr__mark"></i></div>
+                <div class="bc-hr__avg num" data-ref="bcHrAvg"></div>
+              </div>
+            </div>
+            <div class="bc-foot"><span class="bc-seg" data-ref="bcSeg"></span><span class="bc-left num" data-ref="bcLeft"></span><span class="bc-prog"><i data-ref="bcFill"></i></span></div>
+            <div class="bc-next"><span>SIGUIENTE</span><i></i><b data-ref="bcNext">—</b></div>
+            <div class="bc-tags"><span class="bc-tag bc-tag--incl" data-ref="bcInclTag" hidden></span><span class="bc-tag bc-tag--ghost" data-ref="bcGhost" hidden></span></div>
+          </section>
+          <section class="bc-prof" aria-hidden="true">
+            <div class="bc-prof__head"><span class="bc-acc"></span><b>PERFIL DE LA CLASE</b><span data-ref="bcProfSeg"></span></div>
+            <div class="bc-prof__body"><div class="bc-prof__bars">${bars}<span class="bc-prof__done" data-ref="bcDone"></span><span class="bc-prof__cur" data-ref="bcCur"></span></div>
+              <div class="bc-prof__ax num"><span>0:00</span><span data-ref="bcProfNow">0:00</span><span>${fmt.clock(Math.round(total))}</span></div></div>
+          </section>`;
+  }
+
+  /** Lleva al marcador de retransmisión los mismos datos que el HUD (sin duplicar cálculos). */
+  function bcSync(s) {
+    const seg = s.segment;
+    if (!refs.bcSpd || !seg) return;
+    setText('bcSpd', fmt.speed(s.currentSpeed));
+    const name = seg.stage > 0 ? `Escalón ${seg.stage}` : (seg.label || zoneName(seg.zone));
+    setText('bcZone', String(name).toUpperCase());
+    setText('bcPace', refs.pace?.textContent || '–:––');
+    bcPulse();
+    // inclinación actual (junto a km/h) y aviso de cambio de inclinación (el mismo texto del HUD de siempre)
+    const inc = (refs.incline?.textContent || '').replace(/^[·\s]+/, '').trim();
+    setText('bcIncl', inc ? ` · ${inc.toUpperCase()}` : '');
+    const ib = refs.incl;
+    const incOn = !!ib && !ib.hidden && !!(refs.inclTxt?.textContent);
+    if (refs.bcInclTag) {
+      if (refs.bcInclTag.hidden === incOn) refs.bcInclTag.hidden = !incOn;
+      if (incOn) setText('bcInclTag', `${refs.inclTxt.textContent} ${refs.inclCd?.textContent || ''}`.trim().toUpperCase());
+    }
+    // fantasma (tu mejor marca): «+35 m» → chip
+    const gh = refs.ghost;
+    const ghOn = !!gh && !gh.hidden && !!gh.textContent;
+    if (refs.bcGhost) {
+      if (refs.bcGhost.hidden === ghOn) refs.bcGhost.hidden = !ghOn;
+      if (ghOn) setText('bcGhost', `RÉCORD ${gh.textContent}`.toUpperCase());
+    }
+    setText('bcKm', fmt.km(s.distanceKm));
+    const n = workout.segments?.length || 0;
+    const segTxt = `${workout.isTest && seg.stage > 0 ? 'TEST VAM' : `TRAMO ${s.segIndex + 1}/${n}`} · ${String(name).toUpperCase()}`;
+    setText('bcSeg', segTxt);
+    setText('bcProfSeg', `TRAMO ${s.segIndex + 1}/${n}`);
+    setText('bcLeft', refs.segLeft?.textContent || '');
+    setScale('bcFill', seg.sec ? s.segElapsed / seg.sec : 0);
+    setText('bcNext', (refs.nextTxt?.textContent || '').toUpperCase() || '—');
+    const d = new Date();
+    setText('bcClock', `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+    const pr = clamp(Number(s.progress) || 0, 0, 1);
+    const pk = Math.round(pr * 1000) / 10;
+    if (cache.bcPk !== pk) {
+      cache.bcPk = pk;
+      if (refs.bcCur) refs.bcCur.style.left = `${pk}%`;
+      if (refs.bcDone) refs.bcDone.style.width = `${pk}%`;
+    }
+    const ran = Number.isFinite(s.activeSec) ? s.activeSec : s.totalElapsed;
+    setText('bcProfNow', fmt.clock(Math.floor(ran + 1e-6)));
+  }
+
+  /**
+   * Pulso del marcador: el ACTUAL (el del bloque de pulso del HUD, no la media), su zona, el rango objetivo con la barra
+   * (banda y marca, mismas variables CSS) y si vas dentro, alto o bajo; la media de la clase aparte. Sin reloj: «SIN PULSO»
+   * y el objetivo del tramo.
+   */
+  function bcPulse() {
+    const pb = refs.pulse;
+    const line = refs.bcHrLine;
+    if (!line) return;
+    const live = !!pb && !pb.hidden;
+    const bpmTxt = live ? (refs.pulseNum?.textContent || '–') : '–';
+    setText('bcHr', bpmTxt);
+    const bpm = Number(bpmTxt);
+    let z = 0;
+    if (bpm > 0) {
+      if (cache.bcZb !== bpm) { cache.bcZb = bpm; try { cache.bcZ = hrZoneOf(bpm, getState().profile || {}); } catch { cache.bcZ = 0; } }
+      z = cache.bcZ || 0;
+    }
+    setText('bcHrZ', z ? `Z${z}` : '');
+    refs.bcHrZ?.classList.toggle('is-on', !!z);
+    const st = live ? (pb.dataset.st || 'wait') : 'off';
+    if (line.dataset.st !== st) line.dataset.st = st;
+    const stTxt = live ? (refs.pulseSt?.textContent || '') : 'Sin pulso';
+    setText('bcHrSt', stTxt.toUpperCase());
+    // objetivo: el del bloque de pulso; sin reloj, el del tramo (que el HUD de siempre enseña en «FC»)
+    const obj = live ? (refs.pulseObj?.textContent || '') : (refs.hrZone?.textContent && refs.hrZone.textContent !== 'Media' ? `${refs.hrZone.textContent} · ${refs.hr?.textContent || ''}` : '');
+    setText('bcHrObj', obj ? `OBJETIVO ${obj}`.toUpperCase() : '');
+    // media de la clase (el HUD de siempre la enseña en «FC · Media»)
+    setText('bcHrAvg', refs.hrZone?.textContent === 'Media' ? `MEDIA ${refs.hr?.textContent || '–'}` : '');
+    if (live) {
+      for (const v of ['--b0', '--bw', '--m', '--tz']) {
+        const val = pb.style.getPropertyValue(v);
+        if (cache[`bcv${v}`] !== val) { cache[`bcv${v}`] = val; line.style.setProperty(v, val); }
+      }
+    }
   }
 
   /** Ventana 3D (Perfil › Pantalla de entreno › Laboratorio): mismas claves que js/player/headtrack.js. */
@@ -2533,7 +2669,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (engine) return;
     // Laboratorio YouTube: se decide ANTES del desbloqueo (la sesión nace ya en 'playback') y de initMusic (la DJ ni
     // se carga). El modo TV no aplica: el reproductor necesita su recuadro y nuestros datos completos.
-    if (ytWanted()) { ytLive = true; ytSession = true; musicOn = false; tvOn = false; }
+    if (ytWanted()) { ytLive = true; ytSession = true; musicOn = false; tvOn = false; root?.classList.remove('is-bcast'); }
     else if (ytBg === 'youtube') ytBg = 'world'; // «Vídeo de YouTube» sin enlace: la clase de siempre
     unlockAudioNow();
     const packId = getState().audio?.packId;
@@ -3299,6 +3435,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { speedTick(s); } catch (err) { reportOnce(err); }
     updateGhost(s);
     updateProfile(s);
+    if (bcast) { try { bcSync(s); } catch (err) { reportOnce(err); } }
     mo('tick', s);
   }
 

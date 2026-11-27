@@ -489,7 +489,7 @@ void main() {
     em += uSweepBCol * sweep * 0.9 * (1.0 - gap);
     // vallas LED encendidas (test): el color del escalón con puntas de flecha que corren en tu sentido; de lejos, liso
     if (uShow.z > 0.001) {
-      float cz = fract((u - uShowT.x) / 3.2 - abs(bv - 0.5) * 0.55);
+      float cz = fract((u - uShowT.x) / 3.2 + abs(bv - 0.5) * 0.55);   // (punta hacia +u = tu sentido de carrera; antes apuntaba hacia atrás)
       float chev = mix(smoothstep(0.0, 0.08, cz) * (1.0 - smoothstep(0.5, 0.62, cz)), 0.5, smoothstep(0.1, 0.4, fwU / 3.2));
       // de cerca se ve la matriz de diodos (paso de 4 cm)
       vec2 dq = vec2(u, along) / 0.04;

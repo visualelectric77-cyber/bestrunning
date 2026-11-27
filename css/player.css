@@ -2034,3 +2034,113 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .pl-ready__hr { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; font: 500 14px/1.35 var(--font); color: var(--text-2); }
 .pl-ready__hr .icon { flex: none; margin-top: 2px; color: #ff375f; }
 
+
+/* ═════════════ MODO RETRANSMISIÓN (beta, Perfil › Laboratorio) ═════════════
+   Marcador de televisión arriba a la izquierda y perfil de la clase abajo; el resto del HUD grande se recoge (la cuenta
+   atrás sigue saliendo). Letra de marcador (DIN en iOS/macOS), naranja de marca y los colores de zona de la app. */
+.bc, .bc-prof { display: none; }
+.pl.is-bcast .bc, .pl.is-bcast .bc-prof { display: block; }
+.pl.is-bcast .hud-top, .pl.is-bcast .hud-speed, .pl.is-bcast .hud-info { display: none; }
+.pl.is-bcast:not(.is-cd) .hud-lt { display: none; }
+.pl.is-bcast.is-finale .bc, .pl.is-bcast.is-finale .bc-prof, .pl.is-bcast.is-cd .bc-prof { display: none; }
+.bc { position: absolute; z-index: 3; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 12px; width: 252px; color: #fff;
+  font-family: "DIN Alternate", "DIN Condensed", var(--font-display); filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .45));
+  transform-origin: 0 0; transform: scale(1.28); transition: transform .35s cubic-bezier(.2, .8, .2, 1); pointer-events: none; }
+/* corriendo, el móvil queda lejos (en la cinta): marcador grande; al tocar vuelve a su tamaño y baja bajo los botones */
+.pl.is-bcast.is-ctl .bc { transform: translateY(92px); }
+/* avisos y rótulos de momento: debajo del marcador */
+.pl.is-bcast .hud-bugs { transform: translateY(312px); }
+.pl.is-bcast.is-ctl .hud-bugs { transform: translateY(280px); }
+.bc .num, .bc-prof .num { font-variant-numeric: tabular-nums; }
+.bc-head { display: flex; align-items: center; height: 24px; background: rgba(6, 7, 9, .92); padding-right: 8px; }
+.bc-acc { width: 5px; align-self: stretch; background: #FF5A1F; margin-right: 8px; flex: none; }
+.bc-logo { height: 12px; width: auto; color: #fff; }
+.bc-live { margin-left: 9px; display: flex; align-items: center; gap: 5px; font: 700 10px/1 "DIN Alternate", var(--font); letter-spacing: 1.4px; color: rgba(255, 255, 255, .85); }
+.bc-live i { width: 6px; height: 6px; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+.bc-live__off { display: none; }
+.pl[data-status="paused"] .bc-live i { background: #8e8e93; box-shadow: none; }
+.pl[data-status="paused"] .bc-live__on { display: none; }
+.pl[data-status="paused"] .bc-live__off { display: inline; }
+.bc-clock { margin-left: auto; font: 700 11px/1 "DIN Alternate", var(--font); letter-spacing: .6px; color: rgba(255, 255, 255, .7); }
+.bc-main { position: relative; padding: 8px 22px 9px 13px; background: linear-gradient(100deg, rgba(14, 15, 19, .86), rgba(14, 15, 19, .74) 70%, rgba(14, 15, 19, .6));
+  clip-path: polygon(0 0, 100% 0, calc(100% - 16px) 100%, 0 100%); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); }
+.bc-main::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--zc); }
+.bc-row { display: flex; align-items: flex-end; gap: 10px; }
+.bc-spd { font: 700 58px/.86 "DIN Condensed", var(--font-display); letter-spacing: -.5px; }
+.bc-unit { display: flex; flex-direction: column; gap: 3px; padding-bottom: 4px; }
+.bc-unit b { font: 700 13px/1 "DIN Condensed", var(--font-display); letter-spacing: 1.2px; color: rgba(255, 255, 255, .7); }
+.bc-zone { align-self: flex-start; font: 700 12px/1 "DIN Condensed", var(--font-display); letter-spacing: 1.6px; padding: 4px 7px 2px; background: var(--zc); color: #000; white-space: nowrap; }
+.bc-grid { display: grid; grid-template-columns: 1fr 1.05fr 1fr; margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(255, 255, 255, .14); }
+.bc-cell + .bc-cell { border-left: 1px solid rgba(255, 255, 255, .12); padding-left: 9px; }
+.bc-lab { font: 700 9px/1 "DIN Alternate", var(--font); letter-spacing: 1.5px; color: rgba(255, 255, 255, .55); }
+.bc-val { font: 700 22px/1.05 "DIN Condensed", var(--font-display); margin-top: 3px; white-space: nowrap; }
+.bc-val small { font: 700 11px "DIN Condensed", var(--font-display); letter-spacing: .8px; color: rgba(255, 255, 255, .6); margin-left: 2px; }
+.bc-hrz { display: none; font: 700 10px/1 "DIN Condensed", var(--font-display); padding: 2px 3px 1px; margin-left: 3px; background: #ff9f0a; color: #000; vertical-align: 3px; }
+.bc-hrz.is-on { display: inline-block; }
+.bc-foot { position: relative; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 26px 0 13px; background: rgba(6, 7, 9, .9);
+  clip-path: polygon(0 0, calc(100% - 16px) 0, calc(100% - 22px) 100%, 0 100%); }
+.bc-seg { font: 700 12px/1 "DIN Condensed", var(--font-display); letter-spacing: 1.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc-left { margin-left: auto; font: 700 14px/1 "DIN Alternate", var(--font); color: #FF5A1F; }
+.bc-prog { position: absolute; left: 0; bottom: 0; height: 2px; width: calc(100% - 22px); background: rgba(255, 255, 255, .12); }
+.bc-prog i { display: block; height: 100%; background: #FF5A1F; transform-origin: 0 50%; transform: scaleX(0); }
+.bc-next { display: inline-flex; align-items: center; gap: 6px; height: 20px; margin-top: 4px; padding: 0 9px; background: rgba(6, 7, 9, .72);
+  font: 700 10px/1 "DIN Alternate", var(--font); letter-spacing: 1.3px; color: rgba(255, 255, 255, .75); }
+.bc-next i { width: 7px; height: 7px; background: var(--nc); }
+.bc-next b { color: #fff; font: 700 13px/1 "DIN Condensed", var(--font-display); letter-spacing: .6px; }
+/* inclinación junto a km/h, «AHORA» en el pulso */
+.bc-incl { color: #fff; }
+.bc-lab__now { color: rgba(255, 255, 255, .35); margin-left: 3px; }
+/* ajuste ±0,1 km/h: aparece con los controles (al tocar), en columna a la derecha del marcador (+ arriba, − abajo) */
+.bc-adj { position: absolute; left: calc(100% + 10px); top: 30px; display: flex; flex-direction: column; gap: 10px; }
+.bc .bc-adjbtn { position: static; margin: 0; width: 48px; height: 48px; pointer-events: none; }
+.pl.is-ctl .bc .bc-adjbtn { pointer-events: auto; }
+/* pulso: estado (en zona / alto / bajo / subiendo…), objetivo, barra con tu rango y la marca de dónde vas, media */
+.bc-hr { margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(255, 255, 255, .12); --b0: 0%; --bw: 0%; --m: 0%; --tz: #30d158; }
+.bc-hr__top { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.bc-hr__dot { width: 8px; height: 8px; border-radius: 50%; background: #8e8e93; flex: none; }
+.bc-hr__top b { font: 700 13px/1 "DIN Condensed", var(--font-display); letter-spacing: 1.1px; }
+.bc-hr__obj { margin-left: auto; font: 700 10px/1 "DIN Alternate", var(--font); letter-spacing: .8px; color: rgba(255, 255, 255, .62); overflow: hidden; text-overflow: ellipsis; }
+.bc-hr[data-st="in"] .bc-hr__dot { background: var(--tz); box-shadow: 0 0 8px var(--tz); }
+.bc-hr[data-st="in"] b { color: var(--tz); }
+.bc-hr[data-st="high"] .bc-hr__dot { background: #ff9f0a; box-shadow: 0 0 8px #ff9f0a; }
+.bc-hr[data-st="high"] b { color: #ff9f0a; }
+.bc-hr[data-st="low"] .bc-hr__dot { background: #64d2ff; box-shadow: 0 0 8px #64d2ff; }
+.bc-hr[data-st="low"] b { color: #64d2ff; }
+.bc-hr[data-st="rising"] .bc-hr__dot, .bc-hr[data-st="falling"] .bc-hr__dot { background: #fff; }
+.bc-hr__gauge { position: relative; height: 5px; margin-top: 6px; background: rgba(255, 255, 255, .12); }
+.bc-hr__band { position: absolute; top: 0; bottom: 0; left: var(--b0); width: var(--bw); background: var(--tz); opacity: .55; }
+.bc-hr__mark { position: absolute; top: -3px; bottom: -3px; left: var(--m); width: 3px; margin-left: -1.5px; background: #fff; box-shadow: 0 0 6px rgba(255, 255, 255, .8); }
+.bc-hr[data-st="off"] .bc-hr__gauge, .bc-hr[data-st="wait"] .bc-hr__mark { display: none; }
+.bc-hr__avg { margin-top: 5px; font: 700 9px/1 "DIN Alternate", var(--font); letter-spacing: 1.2px; color: rgba(255, 255, 255, .5); }
+.bc-hr__avg:empty { display: none; }
+/* chips de momento: cambio de inclinación y fantasma (tu mejor marca) */
+.bc-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.bc-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: rgba(6, 7, 9, .82); font: 700 11px/1 "DIN Condensed", var(--font-display); letter-spacing: 1px; }
+.bc-tag[hidden] { display: none; }
+.bc-tag--incl { background: #FF5A1F; color: #000; }
+.bc-tag--ghost { border-left: 3px solid #fff; }
+/* perfil de la clase abajo */
+.bc-prof { position: absolute; z-index: 3; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); color: #fff;
+  font-family: "DIN Alternate", var(--font); filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .5)); pointer-events: none; transition: opacity .3s; }
+.pl.is-bcast.is-ctl .bc-prof { opacity: 0; }
+/* test VAM: el botón «No puedo más» manda; el perfil sube por encima de él */
+.pl.is-bcast:has(.hud-test:not([hidden])) .bc-prof { bottom: calc(env(safe-area-inset-bottom, 0px) + 112px); }
+.bc-prof__head { display: flex; align-items: center; height: 20px; width: max-content; min-width: 54%; padding-right: 26px; background: rgba(6, 7, 9, .9);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%); }
+.bc-prof__head b { font: 700 11px/1 "DIN Condensed", var(--font-display); letter-spacing: 1.6px; }
+.bc-prof__head span:last-child { margin-left: 10px; font: 700 10px/1 "DIN Alternate", var(--font); letter-spacing: 1.2px; color: rgba(255, 255, 255, .6); }
+.bc-prof__body { position: relative; height: 64px; padding: 8px 10px 16px; background: linear-gradient(180deg, rgba(14, 15, 19, .82), rgba(14, 15, 19, .68));
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.bc-prof__bars { position: relative; height: 100%; }
+.bc-prof__bars i { position: absolute; bottom: 0; display: block; opacity: .95; }
+.bc-prof__done { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(10, 11, 14, .62); }
+.bc-prof__cur { position: absolute; top: -4px; bottom: -4px; left: 0; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 8px rgba(255, 255, 255, .8); }
+.bc-prof__cur::after { content: ""; position: absolute; left: -4px; top: -6px; border: 5px solid transparent; border-top-color: #fff; }
+.bc-prof__ax { position: absolute; left: 10px; right: 10px; bottom: 3px; display: flex; justify-content: space-between; font: 700 9px/1 "DIN Alternate", var(--font); letter-spacing: 1px; color: rgba(255, 255, 255, .55); }
+/* apaisado: el marcador algo más pequeño y el perfil más corto */
+@media (orientation: landscape) and (max-height: 520px) {
+  .bc { transform: scale(1); }
+  .pl.is-bcast.is-ctl .bc { transform: scale(.82) translateY(92px); }
+  .pl.is-bcast .hud-bugs { transform: translateY(150px); }
+  .bc-prof { left: auto; width: 46%; }
+}

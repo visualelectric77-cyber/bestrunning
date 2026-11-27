@@ -843,8 +843,14 @@ const labHeadOn = () => safe(() => localStorage.getItem(LAB_HEAD_KEY) === 'on', 
    Basta con este interruptor: la clase va en Modo visión, el marco sale siempre y la cabeza se sigue sola en la app. */
 const LAB_WIN_KEY = 'ritmup.headwindow';
 const labWinOn = () => safe(() => localStorage.getItem(LAB_WIN_KEY) === 'on', false);
+/* Modo retransmisión (beta): localStorage 'ritmup.retransmision' = 'on' (contrato con ../screens/player.js y
+   ../player/scene3d/themes/estadio/noche.js). Basta con este interruptor: marcador de televisión y Estadio de noche. */
+const LAB_BC_KEY = 'ritmup.retransmision';
+const labBcOn = () => safe(() => localStorage.getItem(LAB_BC_KEY) === 'on', false);
 function labHtml() {
-  return group('Laboratorio', `${toggleRow('st-lab-head', 'Sigue tu cabeza (beta)',
+  return group('Laboratorio', `${toggleRow('st-lab-bc', 'Modo retransmisión (beta)',
+    'Actívalo y empieza una clase: corres en el Estadio de noche bajo la lluvia y tus datos salen arriba como en una retransmisión de televisión, con el perfil de la clase abajo. Toca la pantalla para ver los controles', labBcOn())}
+    ${toggleRow('st-lab-head', 'Sigue tu cabeza (beta)',
     'El escenario 3D se mueve contigo como una ventana: asómate a un lado o levanta la cabeza para ver más. Solo en la app de RITMUP: usa el sensor de Face ID, todo se procesa en tu iPhone y no se guarda ninguna imagen', labHeadOn())}
     ${toggleRow('st-lab-win', 'Ventana 3D (beta)',
     'Actívala y empieza una clase: la pantalla se vuelve una ventana con marco y tu marcador y tu carril salen por delante del cristal. La clase va en Modo visión. En la app de RITMUP, además, el mundo se mueve con tu cabeza', labWinOn())}
@@ -2856,6 +2862,9 @@ const PAGES = {
       } else if (id === 'st-lab-head') {
         haptic('selection');
         safe(() => localStorage.setItem(LAB_HEAD_KEY, v ? 'on' : 'off'));
+      } else if (id === 'st-lab-bc') {
+        haptic('selection');
+        safe(() => { if (v) localStorage.setItem(LAB_BC_KEY, 'on'); else localStorage.removeItem(LAB_BC_KEY); });
       } else if (id === 'st-lab-win') {
         haptic('selection');
         safe(() => localStorage.setItem(LAB_WIN_KEY, v ? 'on' : 'off'));
