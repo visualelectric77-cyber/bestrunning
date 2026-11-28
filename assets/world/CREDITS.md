@@ -46,6 +46,12 @@ Los rótulos de Neón (HOTEL, BAR, CINE…) se dibujan en la app. No hay marcas 
 | Aurora | (usa `desierto/sky.*`) | HDRI «Qwantani Night (Pure Sky)»: estrellas y Vía Láctea |
 | Halloween | `mud_*` | textura «Forest Floor» |
 | Grafito | `floor_*` | textura «Smooth Concrete Floor» |
+| Box (AMRAP) | `tex/caucho*` | textura «Rubber Tiles» (Amal Kumar) |
+| Box (AMRAP) | `tex/pista*` | textura «Rubberized Track» (Charlotte Baglioni) |
+| Box (AMRAP) | `tex/ladrillo*` | textura «Red Brick 03» (Rob Tuytel) |
+
+El resto del Box (`box/mod-*.bin`, `cinta.bin`, `lm.jpg`, `env.png`, `meta.json`) es geometría y luz propias, modeladas y
+horneadas en Blender con `tools/box-bake/`.
 
 
 ## Ciudades reales (prototipos ocultos: Berlín, Berlín 10 km y Madrid)

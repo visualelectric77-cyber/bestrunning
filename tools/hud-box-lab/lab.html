@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="es" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Marcador del box · laboratorio</title>
+<!--
+  RITMUP · laboratorio del marcador del box con el MOTOR REAL (js/player/engine.js) y una clase AMRAP de verdad
+  (js/training/generator.js). El fondo son las capturas del box (docs/capturas/3d/box/), una por luz del mundo.
+    node tools/snap-server.mjs 8097  →  http://localhost:8097/tools/hud-box-lab/lab.html
+    ?id=amrap-400 (plantilla) &min=20 &t=540 (segundo de clase al que saltar) &rate=1 (velocidad del reloj; 0 = parado)
+    &rec=1 (el resultado es récord) &hr=0 (sin pulso) &guias=1
+  En la consola: L.goto(seg) · L.fase('work' | 'rest' | 'last' | 'result') · L.medir() · L.estado()
+-->
+<link rel="stylesheet" href="/css/hud-box.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  .pl { position: fixed; inset: 0; overflow: hidden; background: #000 center/cover no-repeat; }
+  /* perfil de la clase (abajo): el de retransmisión, con el texto a 12 px */
+  .bx-prof { position: absolute; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); color: #fff; font-family: "DIN Alternate", -apple-system, sans-serif; }
+  .bx-prof[hidden] { display: none; }
+  .bx-prof__head { display: inline-flex; align-items: center; gap: 10px; height: 24px; padding: 0 22px 0 0; background: rgba(6, 7, 9, .95); clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%); font: 700 12px/1 "DIN Alternate", -apple-system, sans-serif; letter-spacing: 1.4px; }
+  .bx-prof__head i { width: 6px; align-self: stretch; background: #FF5A1F; }
+  .bx-prof__head span { color: rgba(255, 255, 255, .7); font-variant-numeric: tabular-nums; }
+  .bx-prof__body { position: relative; background: rgba(8, 9, 11, .9); padding: 8px 10px 6px; }
+  .bx-prof__bars { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 34px; }
+  .bx-prof__now { position: absolute; top: -4px; bottom: 0; width: 2px; background: #fff; left: 0; }
+  .bx-prof__now::before { content: ""; position: absolute; left: -5px; top: -4px; border: 6px solid transparent; border-top-color: #fff; }
+  .bx-prof__time { display: flex; justify-content: space-between; margin-top: 5px; font: 700 12px/1 "DIN Alternate", -apple-system, sans-serif; letter-spacing: .8px; color: rgba(255, 255, 255, .78); font-variant-numeric: tabular-nums; }
+  .guia { display: none; position: absolute; left: 0; right: 0; border: 1px dashed rgba(255, 255, 255, .7); font: 700 12px/1 -apple-system, sans-serif; padding: 6px 10px; color: #fff; text-shadow: 0 1px 3px #000; pointer-events: none; }
+  .pl.guias .guia { display: block; }
+</style>
+</head>
+<body>
+<div class="pl" id="pl">
+  <div class="guia" id="guia"></div>
+  <div class="bx-prof" id="prof">
+    <div class="bx-prof__head"><i></i>PERFIL DE LA CLASE<span id="pseg"></span></div>
+    <div class="bx-prof__body"><div class="bx-prof__bars" id="bars"></div><div class="bx-prof__time"><span>0:00</span><span id="pnow"></span><span id="ptot"></span></div></div>
+  </div>
+</div>
+<script type="module">
+  import { buildWorkout } from '/js/training/generator.js';
+  import { createEngine } from '/js/player/engine.js';
+  import { ZONES, hrZones } from '/js/training/levels.js';
+  import { wordmarkSvg } from '/js/ui/wordmark.js';
+  import { boxHudModel, mountBoxHud, LAST_SEC } from '/js/player/hud-box.js';
+
+  const q = new URLSearchParams(location.search);
+  const num = (k, d) => (q.has(k) && Number.isFinite(Number(q.get(k))) ? Number(q.get(k)) : d);
+  const LEVELS = { jog: 8.3, run: 10.1, fast: 11.5, sprint: 13.0 };
+  const TM = { hasIncline: false, maxIncline: 12, minSpeed: 1, maxSpeed: 18 };
+  const workout = buildWorkout(q.get('id') || 'amrap-400', { minutes: num('min', 20), levels: LEVELS, seed: 3, hasIncline: false, treadmill: TM });
+  const clockRef = { t: 1_700_000_000_000 };
+  let lastResult = null;
+  const engine = createEngine(workout, { now: () => clockRef.t, autoTick: false, treadmill: TM, onEvent: (type, data) => { if (type === 'amrapEnd') lastResult = { ...data }; if (type === 'amrapPhase' && data?.phase === 'work') lastResult = null; } });
+  engine.start();
+
+  const pl = document.getElementById('pl');
+  const hud = mountBoxHud(pl, { logoHtml: wordmarkSvg({ cls: 'bx-logo', label: '' }) });
+  const IMG = '/docs/capturas/3d/box/';
+  const BG = { seg: 'final/01-salida.jpg', work: 'v3/02-trabajo.jpg', rest: 'v3/04-recuperacion.jpg', last: 'final/06-ultimo-minuto.jpg', result: 'final/07-final.jpg', record: 'v3/08-record.jpg' };
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  // perfil con los tramos reales
+  const segs = engine.getSegments();
+  const maxV = Math.max(...segs.map((g) => g.speed));
+  document.getElementById('bars').innerHTML = segs.map((g, i) => `<i data-i="${i}" style="flex:${g.sec};height:${Math.round(12 + 22 * g.speed / maxV)}px;background:${ZONES[g.amrap ? g.amrap.workZone : g.zone]?.color || '#888'};opacity:.5"></i>`).join('') + '<div class="bx-prof__now" id="now"></div>';
+  document.getElementById('ptot').textContent = fmt(workout.totalSec);
+
+  // pulso simulado: sube en el trabajo y baja en la recuperación
+  const HRMAX = 180;
+  const zones = hrZones(HRMAX, 55);
+  let hr = 118;
+  const hrStep = (s, dt) => { const z = s.amrap ? (s.amrap.phase === 'work' ? 0.93 : 0.74) : ({ warmup: 0.62, jog: 0.72, run: 0.8, fast: 0.9, cooldown: 0.64 }[s.segment?.zone] || 0.6); hr += (HRMAX * z - hr) * Math.min(1, dt / 45); };
+  const hrZoneOf = (v) => { for (let i = zones.length - 1; i >= 0; i--) if (v >= zones[i].min) return zones[i].zone; return 1; };
+
+  const rec = q.get('rec') === '1';
+  let bgNow = '';
+  function paint() {
+    const s = engine.getState();
+    const withHr = q.get('hr') !== '0';
+    const m = boxHudModel(s, { title: `${workout.title} · ${Math.round((segs.find((g) => g.amrap)?.sec || 0) / 60)}′`, hr: withHr ? hr : null, hrZone: withHr ? hrZoneOf(hr) : null,
+      result: lastResult, record: lastResult ? (rec ? 'new' : null) : null, recordText: lastResult ? (rec ? '3 rondas + 310 m' : '5 rondas + 120 m') : '' });
+    hud.update(m);
+    const key = m.mode === 'result' ? (rec ? 'record' : 'result') : m.mode === 'seg' ? 'seg' : m.last ? 'last' : m.phase;
+    const want = q.get('bg') || BG[key];   // &bg=hud-mundo/portico-15m.jpg fuerza una captura concreta
+    if (want !== bgNow) { bgNow = want; pl.style.backgroundImage = `url(${IMG}${bgNow})`; }
+    document.getElementById('prof').hidden = m.mode === 'result';
+    for (const b of document.querySelectorAll('#bars i')) b.style.opacity = Number(b.dataset.i) === s.segIndex ? 1 : 0.5;
+    document.getElementById('now').style.left = `${(s.progress * 100).toFixed(2)}%`;
+    document.getElementById('pnow').textContent = fmt(s.totalElapsed);
+    document.getElementById('pseg').textContent = `TRAMO ${s.segIndex + 1}/${s.segCount}`;
+    if (q.get('guias')) {
+      pl.classList.add('guias');
+      const a = hud.el.getBoundingClientRect(), b = (m.mode === 'result' ? hud.resEl : document.getElementById('prof')).getBoundingClientRect(), g = document.getElementById('guia');
+      g.style.top = `${Math.round(a.bottom + 8)}px`; g.style.height = `${Math.round(b.top - a.bottom - 16)}px`;
+      g.textContent = `LIBRE PARA EL MUNDO · ${Math.round((b.top - a.bottom - 16) / innerHeight * 100)} %`;
+    }
+    return m;
+  }
+  function advance(sec) { let left = sec; while (left > 0) { const d = Math.min(1, left); clockRef.t += d * 1000; engine.tick(); hrStep(engine.getState(), d); left -= d; } }
+
+  let rate = num('rate', 1);
+  advance(num('t', 0));
+  paint();
+  let prev = performance.now();
+  setInterval(() => { const n = performance.now(); const dt = (n - prev) / 1000; prev = n; if (rate > 0) { advance(dt * rate); paint(); } }, 250);
+
+  const amSeg = () => { let t = 0; for (const g of segs) { if (g.amrap) return { a: t, b: t + g.sec }; t += g.sec; } return null; };
+  window.L = {
+    engine, workout,
+    estado: () => engine.getState(),
+    modelo: () => paint(),
+    rate: (r) => { rate = r; },
+    goto: (sec) => { const s = engine.getState(); if (sec > s.totalElapsed) advance(sec - s.totalElapsed); return paint(); },
+    /** Salta a la primera vez que el marcador está en esa fase (desde donde esté el reloj). */
+    fase: (f) => { rate = 0; for (let i = 0; i < 4000; i++) { const s = engine.getState(); const a = s.amrap; const now = a ? (a.capLeft <= LAST_SEC ? 'last' : a.phase) : lastResult ? 'result' : 'seg';
+        if (now === f && (f !== 'work' || a.phaseDoneM > 60) && (f !== 'rest' || a.phaseLeftSec < 45)) break; if (s.status === 'finished') break; advance(1); } return paint(); },
+    amrap: amSeg,
+    medir: () => {
+      const out = [];
+      for (const e of pl.querySelectorAll('.bx *, .bx-res *, .bx-prof *')) {
+        if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+        const r = e.getBoundingClientRect(); if (!r.width || !r.height) continue;
+        out.push({ txt: e.textContent.trim().slice(0, 24), px: Math.round(parseFloat(getComputedStyle(e).fontSize) * 10) / 10, corta: e.scrollWidth > e.clientWidth + 1 });
+      }
+      const a = hud.el.getBoundingClientRect();
+      return { minPx: Math.min(...out.map((o) => o.px)), cortados: out.filter((o) => o.corta).map((o) => o.txt), marcadorPct: Math.round(a.bottom / innerHeight * 100), textos: out.map((o) => `${o.txt}:${o.px}`).join(' | ') };
+    },
+  };
+</script>
+</body>
+</html>

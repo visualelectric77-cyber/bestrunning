@@ -1,0 +1,113 @@
+/* RITMUP · marcador del box (mundo «box de CrossFit» de las AMRAP; lo monta js/player/hud-box.js desde el reproductor).
+   Reglas: ningún número por debajo de 30 px, ninguna etiqueta por debajo de 12 px, todo sobre placa oscura (≥ 0,9 de
+   opacidad) para que se lea igual con la luz ámbar, la azul con niebla y la roja, y la franja central libre para el mundo.
+   Medidas pensadas para 375 pt de ancho; con --bx-s se escala todo a la vez (pantallas más anchas, modo TV). */
+.bx, .bx-res { --bx-s: 1; --zc: #FF9F0A; --nc: #30D158; --bx-acc: #FF5A1F;
+  --bx-cond: "DIN Condensed", "Arial Narrow", sans-serif; --bx-alt: "DIN Alternate", -apple-system, "Helvetica Neue", sans-serif;
+  color: #fff; font-family: var(--bx-alt); -webkit-font-smoothing: antialiased; }
+.bx .num, .bx-res .num { font-variant-numeric: tabular-nums; }
+.bx [hidden], .bx-res[hidden] { display: none !important; }
+
+.bx { position: absolute; z-index: 3; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 12px); filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .45)); }
+.bx-head { display: flex; align-items: center; height: calc(28px * var(--bx-s)); background: rgba(6, 7, 9, .96); padding-right: 12px; }
+.bx-acc { width: 6px; align-self: stretch; background: var(--bx-acc); margin-right: 10px; flex: none; }
+.bx-logo { height: calc(13px * var(--bx-s)); width: auto; color: #fff; display: block; }
+.bx-live { margin-left: 10px; display: flex; align-items: center; gap: 6px; font: 700 calc(12px * var(--bx-s))/1 var(--bx-alt); letter-spacing: 1.4px; color: rgba(255, 255, 255, .9); white-space: nowrap; }
+.bx-live i { width: 7px; height: 7px; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 6px #ff3b30; flex: none; }
+.bx-name { margin-left: auto; padding-left: 10px; font: 700 calc(13px * var(--bx-s))/1 var(--bx-alt); letter-spacing: 1px; color: rgba(255, 255, 255, .78); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+.bx-main { position: relative; padding: 10px 14px 11px 18px; background: rgba(12, 13, 16, .93); }
+.bx-main::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--zc); }
+.bx-top { display: flex; align-items: flex-end; gap: 10px; }
+.bx-spd { font: 700 calc(84px * var(--bx-s))/.8 var(--bx-cond); letter-spacing: -1px; padding-top: 6px; flex: none; }
+.bx-unit { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; min-width: 0; flex: 1 1 auto; }
+.bx-zone { align-self: flex-start; max-width: 100%; font: 700 calc(15px * var(--bx-s))/1 var(--bx-cond); letter-spacing: 1.6px; padding: 5px 8px 3px; background: var(--zc); color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bx-unit b { font: 700 calc(14px * var(--bx-s))/1 var(--bx-cond); letter-spacing: 1.4px; color: rgba(255, 255, 255, .72); }
+.bx-round { margin-left: auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.bx-lab { font: 700 calc(12px * var(--bx-s))/1 var(--bx-alt); letter-spacing: 1.6px; color: rgba(255, 255, 255, .68); white-space: nowrap; }
+.bx-round b { font: 700 calc(62px * var(--bx-s))/.8 var(--bx-cond); padding-top: 4px; }
+/* «TRAMO 3/7» fuera de la AMRAP: cabe a 44 px */
+.bx[data-mode="seg"] .bx-round b { font-size: calc(44px * var(--bx-s)); }
+
+.bx-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255, 255, 255, .16); }
+.bx-cell { min-width: 0; }
+.bx-cell + .bx-cell { border-left: 1px solid rgba(255, 255, 255, .14); padding-left: 11px; }
+.bx-val { font: 700 calc(38px * var(--bx-s))/1 var(--bx-cond); margin-top: 5px; white-space: nowrap; }
+.bx-val small { font: 700 calc(15px * var(--bx-s)) var(--bx-cond); letter-spacing: 1px; color: rgba(255, 255, 255, .7); margin-left: 3px; }
+.bx-val small:empty { display: none; }
+.bx-val.is-zc { color: var(--zc); }
+.bx-val.is-cap { color: #FF6A3D; }
+.bx[data-mode="seg"] .bx-val.is-cap { color: #fff; }
+.bx-hrz { display: inline-block; font: 700 calc(13px * var(--bx-s))/1 var(--bx-cond); padding: 3px 4px 1px; margin-left: 5px; color: #000; vertical-align: 6px; }
+.bx-bar { position: relative; height: 6px; margin-top: 10px; background: rgba(255, 255, 255, .16); overflow: hidden; }
+.bx-bar i { position: absolute; inset: 0; background: var(--zc); transform-origin: 0 50%; transform: scaleX(0); transition: transform 240ms linear; }
+
+.bx-next { display: flex; align-items: center; gap: 8px; height: calc(30px * var(--bx-s)); padding: 0 30px 0 18px; background: rgba(6, 7, 9, .95); width: fit-content; max-width: 100%;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%); font: 700 calc(12px * var(--bx-s))/1 var(--bx-alt); letter-spacing: 1.4px; color: rgba(255, 255, 255, .78); white-space: nowrap; }
+.bx-next i { width: 9px; height: 9px; background: var(--nc); flex: none; }
+.bx-next b { color: #fff; font: 700 calc(17px * var(--bx-s))/1 var(--bx-cond); letter-spacing: .8px; padding-top: 2px; overflow: hidden; text-overflow: ellipsis; }
+
+/* pantallas estrechas (menos de 360 pt, p. ej. iPhone SE de 4″): los números bajan un punto para que la fase no se corte;
+   las etiquetas se quedan en 12 px y ningún número baja de 33 px */
+@media (max-width: 359px) {
+  .bx-main { padding: 9px 11px 10px 15px; }
+  .bx-top { gap: 8px; flex-wrap: wrap; }
+  /* la fase baja a su propia línea, a todo el ancho: junto a la velocidad no cabe entera */
+  .bx-unit { order: 3; flex: 1 0 100%; flex-direction: row; align-items: center; gap: 8px; padding: 7px 0 0; }
+  .bx-spd { font-size: 64px; }
+  .bx-round b { font-size: 50px; }
+  .bx[data-mode="seg"] .bx-round b { font-size: 36px; }
+  .bx-zone { font-size: 14px; letter-spacing: .8px; padding: 5px 6px 3px; }
+  .bx-val { font-size: 33px; }
+  .bx-cell + .bx-cell { padding-left: 8px; }
+  .bx-lab { letter-spacing: 1px; }
+  .bx-res__n { font-size: 52px; }
+  .bx-res__t { font-size: 23px; }
+}
+
+/* último minuto del tope: cabecera y tope en rojo */
+.bx[data-last="1"] .bx-head { background: #B3140C; }
+.bx[data-last="1"] .bx-head .bx-acc { background: #fff; }
+.bx[data-last="1"] .bx-val.is-cap { color: #fff; background: #D21B10; padding: 2px 6px 0; margin-left: -6px; width: fit-content; }
+
+/* resultado: el marcador se recoge a la cabecera (la pizarra del mundo ocupa el centro) y el resultado va en una placa abajo */
+.bx[data-mode="result"] .bx-main, .bx[data-mode="result"] .bx-next { display: none; }
+.bx-res { position: absolute; z-index: 3; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); background: rgba(8, 9, 11, .95); padding: 12px 16px 13px 20px; --rc: #fff; }
+.bx-res[data-record="1"] { --rc: #FFD60A; }
+.bx-res::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--rc); }
+.bx-res__row { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.bx-res__n { font: 700 calc(60px * var(--bx-s))/.8 var(--bx-cond); padding-top: 6px; }
+.bx-res__t { font: 700 calc(26px * var(--bx-s))/1 var(--bx-cond); letter-spacing: 1px; white-space: nowrap; }
+.bx-res__sub { margin-top: 8px; font: 700 calc(15px * var(--bx-s))/1.15 var(--bx-alt); letter-spacing: .6px; color: var(--rc); }
+.bx-res__sub:empty { display: none; }
+.bx-res[data-record="0"] .bx-res__sub { color: rgba(255, 255, 255, .8); }
+
+/* ── En la app (js/screens/player.js) ──
+   El mundo box reutiliza el andamiaje del modo retransmisión (.is-bcast: el HUD grande se recoge, el perfil de la clase
+   queda abajo y los controles salen al tocar) y cambia el marcador de televisión por esta placa (.is-box). */
+/* css/player.css pone var(--font-display) a todo «.pl .num»: aquí los números van en la letra de marcador */
+.pl .bx .num, .pl .bx-res .num { font-family: var(--bx-cond); }
+.pl .bx .bx-name { font-family: var(--bx-alt); }
+.bx { transition: transform .35s cubic-bezier(.2, .8, .2, 1); pointer-events: none; }
+.bx-res { pointer-events: none; }
+/* del marcador de TV solo quedan los botones ± (salen con los controles), en columna a la derecha, en la franja libre */
+.pl.is-box .bc > :not(.bc-adj) { display: none; }
+.pl.is-box .bc, .pl.is-box.is-ctl .bc { left: auto; right: 12px; top: 46%; width: 0; transform: none; }
+.pl.is-box .bc-adj { left: auto; right: 0; top: 0; }
+/* al tocar, la placa baja bajo los botones de arriba, como el marcador de TV */
+.pl.is-box.is-ctl .bx { transform: translateY(92px); }
+.pl.is-box .hud-bugs { transform: translateY(calc(var(--bx-bottom, 262px) + 12px)); }
+.pl.is-box.is-ctl .hud-bugs { transform: translateY(calc(var(--bx-bottom, 262px) + 104px)); }
+/* plano final de la clase y resultado de la AMRAP */
+.pl.is-box.is-finale .bx, .pl.is-box.is-finale .bx-res { display: none; }
+.pl.is-box.is-box-res .bc-prof { display: none; }
+/* apaisado (móvil tumbado, modo TV): la placa no ocupa todo el ancho */
+@media (orientation: landscape) {
+  .bx, .bx-res { right: auto; width: min(351px, 46vw); }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  .bx, .bx-res { --bx-s: .8; width: 300px; }
+  .bx-main { padding: 7px 11px 8px 15px; }
+  .bx-grid { margin-top: 6px; padding-top: 6px; }
+  .bx-bar { margin-top: 6px; }
+}

@@ -41,6 +41,7 @@ import { buildHrModel } from '../training/hr-model.js';
 import { createRaceGuide } from '../training/race-guide.js';
 import { createSpeedTracker, createSpeedSim } from '../training/watch-speed.js';
 import { amrapResultText, amrapCompare } from '../training/amrap.js';
+import { boxHudModel, mountBoxHud } from '../player/hud-box.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -82,7 +83,7 @@ const CTL_MS = 4000;          // un toque muestra los controles 4 s mientras cor
 const BUG_MS = 3000;          // «bugs» de retransmisión (KM, MITAD, SERIE, RÉCORD): 3 s y salen
 const GOLD = '#FFD60A';
 // Bloques del HUD cuyo rectángulo recibe la escena: solo información de composición (§15.3: nunca máscaras)
-const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-check, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on, .bc, .bc-prof';
+const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-check, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on, .bc, .bc-prof, .bx, .bx-res';
 // Subtítulos del coach: solo frases (motivación, mitad, km, final); nunca avisos de tramo ni cifras deletreadas
 const CAP_SKIP = new Set(['pre', 'change', 'tick', 'countdown', 'intro', 'adjust', 'resume', 'testStage', 'finishStats']);
 // Laboratorio YouTube: en iPhone/iPad el volumen del vídeo no se puede bajar desde la página (iOS lo ignora), así que los
@@ -438,6 +439,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let tvOn = visuals.tvMode === true;
   // Modo retransmisión (beta, Perfil › Laboratorio): marcador de televisión arriba y Estadio de noche (un solo interruptor)
   const bcast = bcastOn();
+  // Mundo box (beta, Perfil › Laboratorio): las clases con AMRAP van en el box de CrossFit con su marcador (hud-box.js)
+  const boxLab = boxLabOn();
+  let boxHud = null;          // { update, destroy } del marcador del box, mientras la clase va en ese mundo
+  let boxRes = null;          // resultado del último bloque AMRAP (dato del motor + récord) para el marcador y la pizarra
   let tvHintT = null;
   let finale = false;         // plano final en curso
   let vpTimer = null;
@@ -897,7 +902,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const pick = themePick();
     const auto0 = resolveTheme(AUTO_THEME, workout);
     // (modo retransmisión: en «Auto» la clase irá en el Estadio de noche; la miniatura lo dice)
-    const auto = bcast && auto0.id === 'vision' ? { ...auto0, id: 'estadio' } : auto0;
+    // (mundo box: la clase con AMRAP irá en el box)
+    const auto = boxWanted() ? { ...auto0, id: 'box' } : bcast && auto0.id === 'vision' ? { ...auto0, id: 'estadio' } : auto0;
     const name = (id) => SCENE_NAMES[id] || SPECIAL_SCENES[id] || id;
     const thumb = (id) => `<img src="./assets/scenes/${encodeURIComponent(id)}.jpg" width="240" height="428" alt="" decoding="async">`;
     const opt = (id, label, inner, on) => `<button type="button" class="pl-scn__opt${id === AUTO_THEME ? ' pl-scn__opt--auto' : ''}" role="radio" aria-checked="${on}" data-act="scene" data-scene="${id}">
@@ -1146,7 +1152,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const zc = zoneColor(first?.zone);
     const musicLbl = !appMusic ? 'Modo Mi música' : musicOn ? 'Apagar música' : 'Encender música';
     el.innerHTML = `
-      <div class="pl pl--live${ytLive ? ' pl--yt' : ''}${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}${bcast && !ytLive ? ' is-bcast' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
+      <div class="pl pl--live${ytLive ? ' pl--yt' : ''}${appMusic ? '' : ' is-own-music'}${appMusic && !musicOn ? ' is-music-off' : ''}${tvOn ? ' is-tv' : ''}${(bcast || boxHudOn()) && !ytLive ? ' is-bcast' : ''}${boxHudOn() ? ' is-box' : ''}" data-status="ready" data-zone="${esc(first?.zone || 'jog')}" style="--zc:${zc};--nc:${zc}">
         <div class="pl-bg pl-bg--live" aria-hidden="true">
           <i class="pl-bg__tint is-on" data-ref="tint0" style="--tc:${zc}"></i>
           <i class="pl-bg__tint" data-ref="tint1" style="--tc:${zc}"></i>
@@ -1156,7 +1162,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
         <div class="pl-world" data-ref="world" aria-hidden="true"></div>
         ${ytLive ? ytLiveHtml() : ''}
         <div class="hud" data-ref="hud">
-          ${bcast ? bcastHtml() : ''}
+          ${bcast || boxHudOn() ? bcastHtml() : ''}
           <header class="hud-top hud-plate">
             <div class="hud-top__l">
               <span class="hud-top__title">${esc(workout.title || 'Entrenamiento')}</span>
@@ -1313,6 +1319,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
     bugCur = null;
     bugBusy = false;
     blockLabel = blockLabeler(engine ? engine.getSegments() : workout.segments);
+    boxHud = null;
+    if (boxHudOn() && refs.hud) {
+      try { boxHud = mountBoxHud(refs.hud, { logoHtml: wordmarkSvg({ cls: 'bx-logo', label: '' }) }); } catch (err) { boxHud = null; reportOnce(err); }
+    }
     mo('destroy');
     try {
       motion = motionMod?.createMotion?.(root, refs, { captions: visuals.captions !== false, isTest: !!workout.isTest, onLayout: () => scheduleHudRects() }) || null;
@@ -1898,6 +1908,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
   /** Escenario de esta clase: elección de Preparación › preferencia de Perfil ('auto' = según el tipo de clase). */
   function themePick() {
     const r = resolveTheme(visuals.theme, workout, sessionTheme);
+    // Mundo box (laboratorio): la clase con AMRAP va en el box, salvo que elijas otro mundo a mano para esta clase
+    if (boxWanted() && r.id !== 'box') return { id: 'box', auto: true, reason: 'AMRAP' };
     // Ventana 3D activada (laboratorio): la clase va en Modo visión, que es donde existe, aunque en Perfil tengas otro
     // mundo. Se respeta el mundo propio de la clase (test, carrera, especiales) y el que elijas a mano para esta clase
     // Modo retransmisión: la clase va en el Estadio (de noche), salvo mundo propio de la clase o elección a mano
@@ -1911,6 +1923,39 @@ export function mount(el, { params = {}, query = {} } = {}) {
   /** Modo retransmisión (Perfil › Pantalla de entreno › Laboratorio): misma clave que themes/estadio/noche.js. */
   function bcastOn() {
     try { return localStorage.getItem('ritmup.retransmision') === 'on'; } catch { return false; }
+  }
+
+  /** Mundo box de las AMRAP (Perfil › Pantalla de entreno › Laboratorio; misma clave que ../screens/settings.js). */
+  function boxLabOn() {
+    try { return localStorage.getItem('ritmup.box') === 'on'; } catch { return false; }
+  }
+  /** ¿Esta clase va en el box? Interruptor activado, la clase tiene un bloque AMRAP y no se ha elegido otro mundo a mano. */
+  function boxWanted() {
+    return boxLab && (sessionTheme == null || sessionTheme === AUTO_THEME) && !!workout?.segments?.some((g) => g && g.amrap);
+  }
+  /** ¿Lleva el marcador del box? (con vídeo de YouTube o sin 3D no hay mundo: el marcador de siempre). */
+  function boxHudOn() {
+    return boxWanted() && !ytLive && visuals.quality !== 'off';
+  }
+  /** Marcador del box: lo mismo que ve el motor, más el pulso del HUD de siempre y el resultado del último bloque. */
+  function boxSync(s) {
+    if (!boxHud) return;
+    const pb = refs.pulse;
+    const bpm = pb && !pb.hidden ? Number(refs.pulseNum?.textContent) || 0 : 0;
+    let z = 0;
+    if (bpm > 0) {
+      if (cache.bxZb !== bpm) { cache.bxZb = bpm; try { cache.bxZ = hrZoneOf(bpm, getState().profile || {}); } catch { cache.bxZ = 0; } }
+      z = cache.bxZ || 0;
+    }
+    const res = !s.amrap && boxRes && performance.now() < boxRes.until ? boxRes : null;
+    const m = boxHudModel(s, { title: workout.title || '', hr: bpm || null, hrZone: z || null, result: res ? res.data : null, record: res && res.isRecord ? 'new' : null, recordText: res ? res.bestText : '', first: !!res?.first });
+    if (s.status === 'paused' && m.mode !== 'result') m.live = 'EN PAUSA';
+    boxHud.update(m);
+    const resOn = m.mode === 'result';
+    if (cache.bxRes !== resOn) { cache.bxRes = resOn; root.classList.toggle('is-box-res', resOn); scheduleHudRects(); }
+    // dónde acaba la placa (para colocar los avisos de momento debajo y para que el mundo sepa qué queda tapado)
+    const bot = Math.round(boxHud.el.offsetTop + boxHud.el.offsetHeight);
+    if (bot > 0 && cache.bxBot !== bot) { cache.bxBot = bot; root.style.setProperty('--bx-bottom', `${bot}px`); scheduleHudRects(); }
   }
 
   /** Marcador de retransmisión (arriba a la izquierda) y perfil de la clase (abajo), como en televisión. */
@@ -2125,6 +2170,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       distanceKm: s.distanceKm,
       rate: Number(s.rate) > 0 ? Number(s.rate) : 1,
     });
+    // El box integra él la distancia con la velocidad de la fase: recibe el estado de la AMRAP en cada tick ({} fuera)
+    if (sceneThemeId === 'box') scall('event', 'amrap', s.status !== 'finished' && s.amrap ? s.amrap : {});
   }
 
   function startSceneLoop() {
@@ -2708,7 +2755,10 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (engine) return;
     // Laboratorio YouTube: se decide ANTES del desbloqueo (la sesión nace ya en 'playback') y de initMusic (la DJ ni
     // se carga). El modo TV no aplica: el reproductor necesita su recuadro y nuestros datos completos.
-    if (ytWanted()) { ytLive = true; ytSession = true; musicOn = false; tvOn = false; root?.classList.remove('is-bcast'); }
+    if (ytWanted()) {
+      ytLive = true; ytSession = true; musicOn = false; tvOn = false; root?.classList.remove('is-bcast', 'is-box');
+      if (boxHud) { try { boxHud.destroy(); } catch { /* ya no está */ } boxHud = null; }
+    }
     else if (ytBg === 'youtube') ytBg = 'world'; // «Vídeo de YouTube» sin enlace: la clase de siempre
     unlockAudioNow();
     const packId = getState().audio?.packId;
@@ -3502,7 +3552,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     try { speedTick(s); } catch (err) { reportOnce(err); }
     updateGhost(s);
     updateProfile(s);
-    if (bcast) { try { bcSync(s); } catch (err) { reportOnce(err); } }
+    if (bcast || boxHud) { try { bcSync(s); } catch (err) { reportOnce(err); } }
+    if (boxHud) { try { boxSync(s); } catch (err) { reportOnce(err); } }
     mo('tick', s);
   }
 
@@ -4310,6 +4361,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       if (d.silent || !s.amrap) return;
       applySegment(s, { reason: 'adjust' });
       const toRest = d.phase === 'rest';
+      if (!toRest) boxRes = null;
+      sceneEvent('amrapPhase', { phase: d.phase, round: d.round, rounds: d.rounds, speed: d.speed, zone: d.zone });
       doBeep('go');
       timerHaptic(toRest ? 'medium' : 'heavy');
       const a = s.amrap;
@@ -4330,16 +4383,20 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const text = amrapResultText(d);
     let sub = '';
     let record = false;
+    let best = null;
     if (!d.skipped) {
       try {
         const [c] = amrapCompare({ id: '_ahora', templateId: workout.templateId, startedAt: new Date().toISOString(), amrap: [d] }, getState().history);
-        if (c?.best) { record = !!c.isRecord; sub = record ? `¡Récord! Antes ${amrapResultText(c.best)}` : `Récord: ${amrapResultText(c.best)}`; }
+        if (c?.best) { best = c.best; record = !!c.isRecord; sub = record ? `¡Récord! Antes ${amrapResultText(c.best)}` : `Récord: ${amrapResultText(c.best)}`; }
         else sub = 'Primera vez: esta es tu marca';
       } catch { sub = ''; }
     }
     amrapUi.result = { text, sub, hint: d.skipped ? 'Bloque saltado: cuenta lo que hiciste' : `Tope ${fmt.clock(d.cap)} · ${d.workM} m por ronda` };
     amrapUi.resultUntil = performance.now() + 12000;
-    showBug({ lbl: 'AMRAP', val: String(d.rounds), sub: text, color: record ? '#ffd60a' : '', kind: 'amrap' });
+    // el box enseña el resultado en su pizarra (palotes, récord) y el marcador del box lo lleva en su placa de abajo
+    boxRes = { data: { ...d }, isRecord: record, bestText: best ? amrapResultText(best) : '', first: !best && !d.skipped, until: amrapUi.resultUntil };
+    sceneEvent('amrapEnd', { ...d, best: best ? { rounds: best.rounds, extraM: best.extraM } : null, isRecord: record });
+    if (!boxHud) showBug({ lbl: 'AMRAP', val: String(d.rounds), sub: text, color: record ? '#ffd60a' : '', kind: 'amrap' });
     if (!d.skipped && !d.early) {
       const n = Math.round(Number(d.rounds) || 0);
       const m = Math.round(Number(d.extraM) || 0);

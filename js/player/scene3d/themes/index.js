@@ -26,6 +26,7 @@ export const THEMES = [
   { id: 'ciudad-madrid', name: 'Madrid · final del maratón', description: 'Los últimos 3,7 km del Maratón de Madrid por sus calles reales: Atocha, el Paseo del Prado, Cibeles y la meta en Recoletos.', loader: () => import('./ciudad.js').then((m) => m.madrid) },
   { id: 'blank', name: 'Grafito', description: 'Suelo de grafito y horizonte limpio. Sobrio y el más ligero.', loader: () => import('./blank.js') },
   { id: 'carrera', name: 'Carrera', description: 'Gran carrera de ciudad de noche: salida, arcos de cada kilómetro y meta con tu tiempo.', hidden: true, loader: () => import('./carrera.js') },
+  { id: 'box', name: 'Box', description: 'Una nave de CrossFit al amanecer: pista de tartán, tungsteno y neón del color de tu tramo. El mundo de las AMRAP.', hidden: true, loader: () => import('./box.js') },
   { id: 'nieve', name: 'Navidad', description: 'Un camino nevado entre abetos con guirnaldas, farolillos y nieve cayendo.', hidden: true, loader: () => import('./nieve.js') },
   { id: 'halloween', name: 'Noche de Halloween', description: 'Un camino entre calabazas encendidas bajo la luna llena.', hidden: true, loader: () => import('./halloween.js') },
   { id: 'legacy', name: 'Hypertrack v1', description: 'Autopista de neón original (oculta).', hidden: true, loader: () => import('./legacy.js') },

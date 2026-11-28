@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="es" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Marcador del box</title>
+<!--
+  RITMUP · laboratorio del marcador para el mundo «box de CrossFit» (clases AMRAP). MAQUETA: no es código de la app.
+  Pone un marcador (derivado del de retransmisión del Estadio, .bc en css/player.css) encima de las capturas del box
+  (docs/capturas/3d/box/) para comprobar que todo se lee con las tres luces del mundo y que nada compite ni queda pequeño.
+    node tools/snap-server.mjs 8097  →  http://localhost:8097/tools/hud-box-lab/mock.html?s=trabajo
+    ?s=trabajo | recupera | ultimo | final | record      &guias=1 dibuja las zonas reservadas
+  Reglas de la maqueta: ningún número por debajo de 30 px, ninguna etiqueta por debajo de 12 px, todo sobre placa oscura
+  (≥ 0,9 de opacidad) y la franja central libre para el mundo (reloj LED del pórtico, metros pintados, pizarra).
+-->
+<style>
+  :root { --zc: #FF9F0A; --nc: #30D158; --acc: #FF5A1F; --cond: "DIN Condensed", "Arial Narrow", sans-serif; --alt: "DIN Alternate", -apple-system, "Helvetica Neue", sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; }
+  .pl { position: fixed; inset: 0; overflow: hidden; color: #fff; background: #000 center/cover no-repeat; font-family: var(--alt); -webkit-font-smoothing: antialiased; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── Marcador (arriba, a todo el ancho; alto fijo ≈ 27 % de la pantalla) ── */
+  .bx { position: absolute; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 12px); filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .45)); }
+  .bx-head { display: flex; align-items: center; height: 28px; background: rgba(6, 7, 9, .96); padding-right: 12px; }
+  .bx-acc { width: 6px; align-self: stretch; background: var(--acc); margin-right: 10px; }
+  .bx-logo { height: 13px; width: auto; color: #fff; }
+  .bx-live { margin-left: 10px; display: flex; align-items: center; gap: 6px; font: 700 12px/1 var(--alt); letter-spacing: 1.4px; color: rgba(255, 255, 255, .9); }
+  .bx-live i { width: 7px; height: 7px; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 6px #ff3b30; }
+  .bx-name { margin-left: auto; font: 700 13px/1 var(--alt); letter-spacing: 1px; color: rgba(255, 255, 255, .78); }
+  .bx-main { position: relative; padding: 10px 14px 11px 18px; background: rgba(12, 13, 16, .93); }
+  .bx-main::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--zc); }
+
+  .bx-top { display: flex; align-items: flex-end; gap: 10px; }
+  .bx-spd { font: 700 84px/.8 var(--cond); letter-spacing: -1px; padding-top: 6px; }
+  .bx-unit { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; min-width: 0; }
+  .bx-zone { align-self: flex-start; font: 700 15px/1 var(--cond); letter-spacing: 1.6px; padding: 5px 8px 3px; background: var(--zc); color: #000; white-space: nowrap; }
+  .bx-unit b { font: 700 14px/1 var(--cond); letter-spacing: 1.4px; color: rgba(255, 255, 255, .72); }
+  .bx-round { margin-left: auto; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .bx-lab { font: 700 12px/1 var(--alt); letter-spacing: 1.6px; color: rgba(255, 255, 255, .68); white-space: nowrap; }
+  .bx-round b { font: 700 62px/.8 var(--cond); padding-top: 4px; }
+
+  .bx-grid { display: grid; grid-template-columns: 1.25fr 1fr 1fr; margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255, 255, 255, .16); }
+  .bx-cell { min-width: 0; }
+  .bx-cell + .bx-cell { border-left: 1px solid rgba(255, 255, 255, .14); padding-left: 11px; }
+  .bx-val { font: 700 38px/1 var(--cond); margin-top: 5px; white-space: nowrap; }
+  .bx-val small { font: 700 15px var(--cond); letter-spacing: 1px; color: rgba(255, 255, 255, .7); margin-left: 3px; }
+  .bx-val.is-zc { color: var(--zc); }
+  .bx-val.is-cap { color: #FF6A3D; }
+  .bx-hrz { display: inline-block; font: 700 13px/1 var(--cond); padding: 3px 4px 1px; margin-left: 5px; background: var(--hz, #FF9F0A); color: #000; vertical-align: 6px; }
+  .bx-bar { position: relative; height: 6px; margin-top: 10px; background: rgba(255, 255, 255, .16); }
+  .bx-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: var(--p, 40%); background: var(--zc); }
+
+  .bx-next { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 30px 0 18px; background: rgba(6, 7, 9, .95); width: fit-content; max-width: 100%;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%); font: 700 12px/1 var(--alt); letter-spacing: 1.4px; color: rgba(255, 255, 255, .78); }
+  .bx-next i { width: 9px; height: 9px; background: var(--nc); flex: none; }
+  .bx-next b { color: #fff; font: 700 17px/1 var(--cond); letter-spacing: .8px; padding-top: 2px; white-space: nowrap; }
+
+  /* último minuto: el tope manda */
+  .pl[data-s="ultimo"] .bx-head { background: #B3140C; }
+  .pl[data-s="ultimo"] .bx-head .bx-acc { background: #fff; }
+  .pl[data-s="ultimo"] .bx-next i { background: #FF3B30; }
+  .pl[data-s="ultimo"] .bx-val.is-cap { color: #fff; background: #D21B10; padding: 2px 6px 0; margin-left: -6px; width: fit-content; }
+
+  /* final: el marcador se recoge para dejar la pizarra del mundo; el resultado, en una placa abajo */
+  .pl[data-s="final"] .bx-main, .pl[data-s="record"] .bx-main, .pl[data-s="final"] .bx-next, .pl[data-s="record"] .bx-next { display: none; }
+  .bx-res { display: none; position: absolute; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); background: rgba(8, 9, 11, .95); padding: 12px 16px 13px 20px; }
+  .bx-res::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--rc, #fff); }
+  .pl[data-s="final"] .bx-res, .pl[data-s="record"] .bx-res { display: block; }
+  .bx-res__row { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+  .bx-res__n { font: 700 60px/.8 var(--cond); padding-top: 6px; }
+  .bx-res__t { font: 700 26px/1 var(--cond); letter-spacing: 1px; }
+  .bx-res__sub { margin-top: 8px; font: 700 15px/1.1 var(--alt); letter-spacing: .6px; color: var(--rc, rgba(255, 255, 255, .8)); }
+  .pl[data-s="record"] { --rc: #FFD60A; }
+  .pl[data-s="final"] .bx-prof, .pl[data-s="record"] .bx-prof { display: none; }
+
+  /* ── Perfil de la clase (abajo), como el de retransmisión pero con el texto a 12 px ── */
+  .bx-prof { position: absolute; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); }
+  .bx-prof__head { display: inline-flex; align-items: center; gap: 10px; height: 24px; padding: 0 22px 0 0; background: rgba(6, 7, 9, .95); clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%); font: 700 12px/1 var(--alt); letter-spacing: 1.4px; }
+  .bx-prof__head span { color: rgba(255, 255, 255, .7); }
+  .bx-prof__body { position: relative; background: rgba(8, 9, 11, .9); padding: 8px 10px 6px; }
+  .bx-prof__bars { display: flex; align-items: flex-end; gap: 2px; height: 34px; }
+  .bx-prof__bars i { display: block; }
+  .bx-prof__now { position: absolute; top: 4px; bottom: 22px; width: 2px; background: #fff; left: var(--now, 60%); }
+  .bx-prof__now::before { content: ""; position: absolute; left: -5px; top: -4px; border: 6px solid transparent; border-top-color: #fff; }
+  .bx-prof__time { display: flex; justify-content: space-between; margin-top: 5px; font: 700 12px/1 var(--alt); letter-spacing: .8px; color: rgba(255, 255, 255, .78); }
+
+  /* guías: lo reservado al mundo */
+  .guia { display: none; position: absolute; left: 0; right: 0; border: 1px dashed rgba(255, 255, 255, .7); font: 700 12px/1 var(--alt); letter-spacing: 1px; padding: 6px 10px; color: #fff; text-shadow: 0 1px 3px #000; }
+  .pl.guias .guia { display: block; }
+</style>
+</head>
+<body>
+<div class="pl" id="pl">
+  <div class="bx">
+    <div class="bx-head"><span class="bx-acc"></span><span id="logo"></span><span class="bx-live"><i></i><span id="live">EN DIRECTO</span></span><span class="bx-name num" id="name"></span></div>
+    <div class="bx-main">
+      <div class="bx-top">
+        <span class="bx-spd num" id="spd"></span>
+        <span class="bx-unit"><span class="bx-zone" id="zone"></span><b>KM/H</b></span>
+        <span class="bx-round"><span class="bx-lab" id="rlab">RONDA</span><b class="num" id="round"></b></span>
+      </div>
+      <div class="bx-grid">
+        <div class="bx-cell"><div class="bx-lab" id="l1">QUEDAN</div><div class="bx-val num is-zc" id="v1"></div></div>
+        <div class="bx-cell"><div class="bx-lab">TOPE</div><div class="bx-val num is-cap" id="v2"></div></div>
+        <div class="bx-cell"><div class="bx-lab">PULSO</div><div class="bx-val num" id="v3"></div></div>
+      </div>
+      <div class="bx-bar"><i></i></div>
+    </div>
+    <div class="bx-next"><span id="nlab">LUEGO</span><i></i><b class="num" id="next"></b></div>
+  </div>
+
+  <div class="guia" id="g1"></div>
+
+  <div class="bx-prof">
+    <div class="bx-prof__head"><span class="bx-acc" style="margin-right:0"></span>PERFIL DE LA CLASE<span class="num" id="pseg"></span></div>
+    <div class="bx-prof__body">
+      <div class="bx-prof__bars" id="bars"></div><div class="bx-prof__now"></div>
+      <div class="bx-prof__time num"><span>0:00</span><span id="pnow"></span><span>20:00</span></div>
+    </div>
+  </div>
+
+  <div class="bx-res">
+    <div class="bx-lab" id="reslab">AMRAP 9′ · RESULTADO</div>
+    <div class="bx-res__row"><span class="bx-res__n num" id="resn"></span><span class="bx-res__t" id="rest"></span></div>
+    <div class="bx-res__sub" id="ressub"></div>
+  </div>
+</div>
+<script type="module">
+  import { wordmarkSvg } from '/js/ui/wordmark.js';
+  const q = new URLSearchParams(location.search);
+  const s = q.get('s') || 'trabajo';
+  const IMG = '/docs/capturas/3d/box/';
+  const S = {
+    trabajo:  { bg: 'v3/02-trabajo.jpg',        zc: '#FF9F0A', nc: '#30D158', spd: '11,5', zone: 'TRABAJO · 400 M', rlab: 'RONDA', round: '3', l1: 'QUEDAN', v1: '272<small>M</small>', v2: '4:58', v3: '155<span class="bx-hrz">Z4</span>', hz: '#FF9F0A', p: '32%', nlab: 'LUEGO', next: 'TROTAR 8,1 · 1:00', now: '62%', pnow: '12:02' },
+    recupera: { bg: 'v3/04-recuperacion.jpg',   zc: '#30D158', nc: '#FF9F0A', spd: '8,1',  zone: 'RECUPERA · 1:00',  rlab: 'RONDAS HECHAS', round: '3', l1: 'QUEDAN', v1: '0:42', v2: '3:21', v3: '147<span class="bx-hrz">Z3</span>', hz: '#FFD60A', p: '30%', nlab: 'LUEGO', next: 'RÁPIDO 11,5 · 400 M', now: '68%', pnow: '13:39' },
+    ultimo:   { bg: 'final/06-ultimo-minuto.jpg', zc: '#FF9F0A', nc: '#30D158', spd: '11,7', zone: 'TRABAJO · 400 M', rlab: 'RONDA', round: '5', l1: 'QUEDAN', v1: '188<small>M</small>', v2: '0:47', v3: '171<span class="bx-hrz">Z5</span>', hz: '#FF375F', p: '53%', nlab: 'ÚLTIMO MINUTO', next: 'A TOPE', live: 'ÚLTIMO MINUTO', now: '75%', pnow: '15:13' },
+    final:    { bg: 'final/07-final.jpg',       zc: '#fff',    nc: '#30D158', resn: '4', rest: 'RONDAS + 212 M', ressub: 'Récord: 5 rondas + 120 m', live: 'TIEMPO' },
+    record:   { bg: 'v3/08-record.jpg',         zc: '#FFD60A', nc: '#30D158', resn: '4', rest: 'RONDAS + 212 M', ressub: '¡NUEVO RÉCORD! · antes 3 rondas + 310 m', live: 'TIEMPO' },
+  }[s];
+  const pl = document.getElementById('pl');
+  pl.dataset.s = s;
+  pl.style.backgroundImage = `url(${IMG}${S.bg})`;
+  pl.style.setProperty('--zc', S.zc); pl.style.setProperty('--nc', S.nc); pl.style.setProperty('--hz', S.hz || '#FF9F0A'); pl.style.setProperty('--p', S.p || '0%'); pl.style.setProperty('--now', S.now || '60%');
+  const set = (id, html) => { const e = document.getElementById(id); if (e && html != null) e.innerHTML = html; };
+  document.getElementById('logo').innerHTML = wordmarkSvg({ cls: 'bx-logo', label: '' });
+  set('name', 'AMRAP 400 · 9′'); set('live', S.live || 'EN DIRECTO');
+  for (const k of ['spd', 'zone', 'rlab', 'round', 'l1', 'v1', 'v2', 'v3', 'nlab', 'next', 'pnow', 'resn', 'rest', 'ressub']) set(k, S[k]);
+  set('pseg', 'TRAMO 4/7');
+  // perfil: calentar ×2, trote, AMRAP, trote, calma ×2 (como la clase «AMRAP 400» de 20 min)
+  const segs = [[1, 20, '#64D2FF'], [1, 26, '#64D2FF'], [5, 32, '#30D158'], [9, 34, '#FF9F0A'], [1.5, 32, '#30D158'], [1.3, 24, '#7D7AFF'], [1.2, 16, '#7D7AFF']];
+  document.getElementById('bars').innerHTML = segs.map(([w, h, c], i) => `<i style="flex:${w};height:${h}px;background:${c};opacity:${i === 3 ? 1 : .55}"></i>`).join('');
+  if (q.get('guias')) {
+    pl.classList.add('guias');
+    const bx = document.querySelector('.bx').getBoundingClientRect(), pr = document.querySelector('.bx-prof').getBoundingClientRect();
+    const g = document.getElementById('g1');
+    g.style.top = `${Math.round(bx.bottom + 8)}px`; g.style.height = `${Math.round(pr.top - bx.bottom - 16)}px`;
+    g.textContent = `LIBRE PARA EL MUNDO · ${Math.round((pr.top - bx.bottom - 16) / innerHeight * 100)} % DE LA PANTALLA`;
+  }
+  // medidas para el informe: tamaño real de cada texto y cuánta pantalla ocupa el marcador
+  window.medir = () => {
+    const out = [];
+    for (const e of document.querySelectorAll('.pl *')) {
+      if (!e.childNodes.length || ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+      const r = e.getBoundingClientRect(); if (!r.width || !r.height) continue;
+      out.push({ txt: e.textContent.trim().slice(0, 22), px: parseFloat(getComputedStyle(e).fontSize) });
+    }
+    const bx = document.querySelector('.bx').getBoundingClientRect(), pr = document.querySelector('.bx-prof').getBoundingClientRect();
+    return { minPx: Math.min(...out.map((o) => o.px)), textos: out, marcadorPct: Math.round(bx.bottom / innerHeight * 100), librePct: Math.round((pr.top - bx.bottom) / innerHeight * 100), ancho: innerWidth, alto: innerHeight };
+  };
+</script>
+</body>
+</html>

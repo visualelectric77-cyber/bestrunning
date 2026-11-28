@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es" translate="no">
+<head>
+<meta charset="utf-8">
+<title>RITMUP · marco de móvil</title>
+<!--
+  Marco de móvil para probar la app en vertical en un navegador de escritorio con WebGL (el navegador integrado no lo
+  tiene): un iframe del mismo origen a tamaño de iPhone. ?w=375&h=812&u=<ruta de la app, codificada>
+    http://localhost:8097/tools/hud-box-lab/phone.html?u=%2F%3Fnosw%3D1%26debug%3Dhr%23%2Fplay%2Famrap-400~20~1bvf~100
+  En la consola: F = document.querySelector('iframe').contentWindow  (mismo origen: se puede leer y mover el reloj)
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #1b1c20; display: grid; place-items: center; }
+  iframe { border: 0; background: #000; box-shadow: 0 0 0 1px #333, 0 20px 60px rgba(0, 0, 0, .6); }
+</style>
+</head>
+<body>
+<iframe id="f" allow="autoplay; fullscreen"></iframe>
+<script>
+  const q = new URLSearchParams(location.search);
+  const f = document.getElementById('f');
+  f.width = Number(q.get('w')) || 375;
+  f.height = Number(q.get('h')) || 812;
+  f.src = q.get('u') || '/?nosw=1';
+</script>
+</body>
+</html>

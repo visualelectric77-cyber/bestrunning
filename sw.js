@@ -2,8 +2,8 @@
 // VERSION, BUILD y ASSETS los reescribe tools/precache.mjs. El audio nunca va en el precache: música (br-music) y
 // packs de voz (br-audio) se guardan al usarlos o con «Descargar música para usar sin conexión», y se sirven con
 // soporte de rangos (206), que es lo que pide <audio> en Safari.
-const VERSION = '1.41.0';
-const BUILD = '5288aec0ab';
+const VERSION = '1.42.0';
+const BUILD = '20ab061af9';
 const SHELL_CACHE = `br-shell-${VERSION}-${BUILD}`;
 const AUDIO_CACHE = 'br-audio';
 const MUSIC_CACHE = 'br-music';
@@ -20,6 +20,7 @@ const ASSETS = /*ASSETS:START*/[
   './manifest.webmanifest',
   './css/base.css',
   './css/components.css',
+  './css/hud-box.css',
   './css/intro.css',
   './css/liquid.css',
   './css/motion.css',
@@ -58,6 +59,7 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/headpose.js',
   './js/player/headtrack.js',
   './js/player/hr-coach.js',
+  './js/player/hud-box.js',
   './js/player/media-session.js',
   './js/player/motion.js',
   './js/player/music-debug.js',
@@ -85,6 +87,8 @@ const ASSETS = /*ASSETS:START*/[
   './js/player/scene3d/themes/aurora/tags.js',
   './js/player/scene3d/themes/blank.js',
   './js/player/scene3d/themes/bosque.js',
+  './js/player/scene3d/themes/box.js',
+  './js/player/scene3d/themes/box/amrap.js',
   './js/player/scene3d/themes/carrera.js',
   './js/player/scene3d/themes/carrera/arches.js',
   './js/player/scene3d/themes/carrera/city.js',
@@ -229,6 +233,7 @@ const ASSETS = /*ASSETS:START*/[
   './assets/scenes/blank.jpg',
   './assets/scenes/bosque-poster.jpg',
   './assets/scenes/bosque.jpg',
+  './assets/scenes/box.jpg',
   './assets/scenes/carrera-poster.jpg',
   './assets/scenes/carrera.jpg',
   './assets/scenes/ciudad-berlin-10k-poster.jpg',

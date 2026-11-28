@@ -27,7 +27,7 @@ const BY_CATEGORY = {
 const isScene = (id) => typeof id === 'string' && SCENE_IDS.includes(id);
 
 /** Mundos especiales (ocultos en Ajustes): la carrera del objetivo y los eventos de temporada con escenario propio. */
-export const SPECIAL_SCENES = { carrera: 'Carrera', halloween: 'Noche de Halloween', nieve: 'Navidad' };
+export const SPECIAL_SCENES = { carrera: 'Carrera', halloween: 'Noche de Halloween', nieve: 'Navidad', box: 'Box' };
 const EVENT_SCENE = { halloween: 'halloween', navidad: 'nieve' };
 const isSpecial = (id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(SPECIAL_SCENES, id);
 
