@@ -12,8 +12,15 @@
 //   cambia a mitad (tú o la guía de pulso), la posición en la clase avanza en proporción a los metros corridos
 //   (velocidad / velocidad del plan), así que el tramo termina justo al pasar su distancia y el resto de la clase
 //   (voz, música, escena 3D, reloj) sigue la misma línea de tiempo de siempre. El tiempo real va en segRealSec.
+// - Tramo AMRAP (segment.amrap, js/training/amrap.js): su duración es el TOPE y la posición avanza con el reloj como en
+//   cualquier tramo. Dentro, una pequeña máquina de estados: fase 'work' (acaba por metros) y 'rest' (por tiempo o por
+//   metros), ronda y velocidad de la fase. Los metros son velocidad × tiempo, como en la carrera: si cambias la velocidad
+//   con + / −, la fase acaba antes o después. getState().amrap da la ronda y lo que queda; getState().segment lleva la
+//   zona y la velocidad de la fase en curso (capZone, la del bloque). Eventos 'amrapPhase' y 'amrapEnd'; los
+//   resultados, en getState().amrapDone y en buildSession → session.amrap.
 import { round1, clamp, uid, todayKey } from '../core/utils.js';
 import { ZONES, kcalPerMinute, clampSpeed } from '../training/levels.js';
+import { normAmrap, secForM } from '../training/amrap.js';
 
 const TICK_MS = 250;
 const EPS = 1e-6;
@@ -39,7 +46,9 @@ function normalizeSegments(workout) {
       incline: Number(s?.incline) || 0,
       sec: Math.max(0, Number(s?.sec) || 0),
       ...(s?.race ? { planSpeed: round1(Number(s?.speed) || 0) } : {}),
+      ...(s?.amrap ? { amrap: normAmrap(s.amrap, s) || undefined } : {}),
     }))
+    .map((s) => { if (s.amrap === undefined) delete s.amrap; return s; })
     .filter((s) => s.sec > 0);
 }
 
@@ -107,6 +116,9 @@ function makeEngine(workout, opts, snap) {
   let timer = null;
   let destroyed = false;
   let queue = [];
+  // AMRAP en curso (solo el del tramo actual) y resultados de los bloques ya cerrados
+  let amr = null;
+  let amrapDone = [];
 
   /* ───────── Restauración ───────── */
   if (snap) {
@@ -141,6 +153,21 @@ function makeEngine(workout, opts, snap) {
     skippedSec = Math.max(0, num(snap.skippedSec));
     testSkippedSec = Math.max(0, num(snap.testSkippedSec));
     finishedEarly = !!snap.finishedEarly;
+    amrapDone = Array.isArray(snap.amrapDone)
+      ? snap.amrapDone.filter((r) => r && typeof r === 'object' && Number.isFinite(Number(r.index))).map((r) => ({ ...r }))
+      : [];
+    const sa = snap.amrap;
+    if (segs[segIndex]?.amrap) {
+      if (sa && typeof sa === 'object' && Math.floor(num(sa.idx, -1)) === segIndex && (sa.phase === 'work' || sa.phase === 'rest')) {
+        amr = {
+          idx: segIndex, phase: sa.phase, phaseM: Math.max(0, num(sa.phaseM)), phaseSec: Math.max(0, num(sa.phaseSec)),
+          rounds: Math.max(0, Math.floor(num(sa.rounds))), work: round1(num(sa.work, segs[segIndex].amrap.workSpeed)),
+          rest: round1(num(sa.rest, segs[segIndex].amrap.restSpeed)), workKm: Math.max(0, num(sa.workKm)), workSec: Math.max(0, num(sa.workSec)),
+        };
+      } else {
+        amrapEnter(segIndex);
+      }
+    }
     const st = snap.status;
     // Si estaba en marcha, no sabemos qué pasó mientras la app estaba cerrada: se reanuda en pausa.
     status = st === 'finished' ? 'finished' : st === 'ready' ? 'ready' : 'paused';
@@ -169,6 +196,85 @@ function makeEngine(workout, opts, snap) {
 
   /** Segundos de clase que avanza la posición por cada segundo real: 1, salvo en un tramo de carrera retocado. */
   const rateOf = (seg) => (seg && seg.race && seg.planSpeed > 0 && seg.speed > 0 ? seg.speed / seg.planSpeed : 1);
+
+  /* ───────── AMRAP ───────── */
+  const amrOn = () => !!(amr && amr.idx === segIndex && segs[segIndex]?.amrap);
+  const amrSpeed = () => (amr.phase === 'work' ? amr.work : amr.rest);
+  const amrZone = () => (amr.phase === 'work' ? segs[amr.idx].amrap.workZone : segs[amr.idx].amrap.restZone);
+  /** Lo que mide la fase en curso: metros (trabajo, o recuperación por metros) o segundos. */
+  function amrLen() {
+    const a = segs[amr.idx].amrap;
+    if (amr.phase === 'work') return { m: a.workM };
+    if (a.restSec > 0) return { sec: a.restSec };
+    if (a.restM > 0) return { m: a.restM };
+    return { sec: 0 };
+  }
+  /** Segundos REALES que le quedan a la fase a la velocidad de ahora. */
+  function amrLeftSec() {
+    const L = amrLen();
+    if (L.m != null) return Math.max(0, secForM(L.m - amr.phaseM, amrSpeed()));
+    return Math.max(0, L.sec - amr.phaseSec);
+  }
+
+  function amrapEnter(i) {
+    const a = segs[i]?.amrap;
+    if (!a) { amr = null; return; }
+    amr = { idx: i, phase: 'work', phaseM: 0, phaseSec: 0, rounds: 0, work: clampSpeed(a.workSpeed, treadmill), rest: clampSpeed(a.restSpeed, treadmill), workKm: 0, workSec: 0 };
+    amrapDone = amrapDone.filter((r) => r.index !== i);
+  }
+
+  /** Cierra el bloque en curso y guarda su resultado (al pasar al tramo siguiente o al terminar). */
+  function amrapClose(reason) {
+    if (!amr) return;
+    const a = segs[amr.idx]?.amrap;
+    const seg = segs[amr.idx];
+    if (a && seg) {
+      const done = amr.idx === segIndex ? segElapsed : seg.sec;
+      const r = {
+        index: amr.idx, cap: Math.round(seg.sec), rounds: amr.rounds,
+        extraM: amr.phase === 'work' ? Math.floor(amr.phaseM + 1e-6) : 0,
+        workM: a.workM, ...(a.restSec > 0 ? { restSec: a.restSec } : a.restM > 0 ? { restM: a.restM } : {}),
+        // velocidad media de tus partes de trabajo (con tus + / −): lo que de verdad hizo subir o bajar las rondas
+        workAvg: amr.workSec > 0 ? round1((amr.workKm * 3600) / amr.workSec) : amr.work,
+        ...(reason === 'skip' && seg.sec - done > 5 ? { skipped: true, doneSec: Math.round(done) } : {}),
+        ...(reason === 'early' && seg.sec - done > 5 ? { early: true, doneSec: Math.round(done) } : {}),
+      };
+      amrapDone = amrapDone.filter((x) => x.index !== r.index).concat([r]).sort((x, y) => x.index - y.index);
+      emit('amrapEnd', { ...r });
+    }
+    amr = null;
+  }
+
+  /** Fin de la fase en curso: trabajo → recuperación (ronda hecha) · recuperación → trabajo de la ronda siguiente. */
+  function amrapSwitch() {
+    const a = segs[amr.idx].amrap;
+    const prev = amrSpeed();
+    if (amr.phase === 'work') {
+      amr.rounds++;
+      const hasRest = a.restSec > 0 || a.restM > 0;
+      if (hasRest) amr.phase = 'rest';
+      else amr.work = clampSpeed(amr.work + (a.step || 0), treadmill);
+    } else {
+      amr.phase = 'work';
+      amr.work = clampSpeed(amr.work + (a.step || 0), treadmill);
+    }
+    amr.phaseM = 0;
+    amr.phaseSec = 0;
+    const v = amrSpeed();
+    traceAt(position(), v);
+    emit('amrapPhase', { index: amr.idx, phase: amr.phase, round: amr.rounds + 1, rounds: amr.rounds, speed: v, prevSpeed: prev, zone: amrZone() });
+  }
+
+  /** Corre `dt` segundos dentro del bloque AMRAP (sin pasar de la fase ni del tope: lo decide advance). */
+  function amrapRun(seg, dt) {
+    if (!(dt > 0)) return;
+    const v = amrSpeed();
+    integrate({ speed: v, incline: seg.incline, zone: amrZone() }, dt);
+    segElapsed += dt;
+    amr.phaseSec += dt;
+    amr.phaseM += (v * dt) / 3.6;
+    if (amr.phase === 'work') { amr.workKm += (v * dt) / 3600; amr.workSec += dt; }
+  }
 
   function integrate(seg, dt) {
     if (!(dt > 0)) return;
@@ -211,11 +317,16 @@ function makeEngine(workout, opts, snap) {
     }
     prevSegReal = segReal;
     prevSegKm = segKm;
+    if (amr) {
+      if (i > prevIdx && amr.idx === prevIdx) amrapClose(reason === 'skip' ? 'skip' : 'auto');
+      else amr = null;
+    }
     segIndex = i;
     segElapsed = 0;
     segReal = 0;
     segKm = 0;
-    traceAt(position(), segs[i].speed);
+    if (segs[i].amrap) amrapEnter(i);
+    traceAt(position(), amrOn() ? amrSpeed() : segs[i].speed);
     emit('segment', { index: i, prevIndex: prevIdx, reason, segment: { ...segs[i] } });
     if (i === n - 1 && !lastSegDone) {
       lastSegDone = true;
@@ -225,6 +336,7 @@ function makeEngine(workout, opts, snap) {
 
   function finalize(early) {
     if (isTest && !testResult && isStage(segs[segIndex])) testResult = computeTest(segIndex, segElapsed);
+    if (amrOn()) amrapClose(early ? 'early' : 'auto');
     closeTrace();
     status = 'finished';
     finishedEarly = !!early;
@@ -237,6 +349,23 @@ function makeEngine(workout, opts, snap) {
     let guard = 0;
     while (dt > EPS && status === 'running' && guard++ < 100000) {
       const seg = segs[segIndex];
+      if (amrOn()) {
+        const segLeft = Math.max(0, seg.sec - segElapsed);
+        const phLeft = amrLeftSec();
+        if (dt < segLeft - EPS && dt < phLeft - EPS) { amrapRun(seg, dt); dt = 0; break; }
+        if (phLeft <= segLeft) {
+          amrapRun(seg, phLeft);
+          dt -= phLeft;
+          amrapSwitch();
+          continue;
+        }
+        amrapRun(seg, segLeft);
+        segElapsed = seg.sec;
+        dt -= segLeft;
+        if (segIndex >= n - 1) { finalize(false); break; }
+        moveTo(segIndex + 1, 'auto');
+        continue;
+      }
       const rate = rateOf(seg);
       const left = (seg.sec - segElapsed) / rate;   // segundos REALES que le quedan al tramo
       if (dt < left - EPS) {
@@ -274,15 +403,19 @@ function makeEngine(workout, opts, snap) {
     queue = [];
     let lastSeg = -1;
     let lastKm = -1;
+    let lastPh = -1;
     events.forEach((e, i) => {
       if (e.type === 'segment') lastSeg = i;
       if (e.type === 'km') lastKm = i;
+      if (e.type === 'amrapPhase') lastPh = i;
     });
     let finishEvt = null;
     let state = null;
     events.forEach((e, i) => {
       if (e.type === 'finish') { finishEvt = e; return; }
       if (e.type === 'segment' || e.type === 'km') e.data.silent = i !== (e.type === 'segment' ? lastSeg : lastKm);
+      // (cambios de fase de una AMRAP: solo avisa el último, y ninguno si detrás llega un cambio de tramo)
+      if (e.type === 'amrapPhase') e.data.silent = i !== lastPh || lastSeg > i;
       try { cb.onEvent?.(e.type, e.data); } catch { /* el reproductor no debe caerse por un callback */ }
       if (e.type === 'segment' && i === lastSeg) {
         state = getState();
@@ -334,7 +467,8 @@ function makeEngine(workout, opts, snap) {
     }
     status = 'running';
     lastNow = Number(now());
-    traceAt(position(), segs[segIndex].speed);
+    if (segs[segIndex].amrap && !amrOn()) amrapEnter(segIndex);
+    traceAt(position(), amrOn() ? amrSpeed() : segs[segIndex].speed);
     startTimer();
     emit('start', { index: segIndex });
     emit('segment', { index: segIndex, prevIndex: -1, reason: 'start', segment: { ...segs[segIndex] } });
@@ -360,7 +494,7 @@ function makeEngine(workout, opts, snap) {
     status = 'running';
     lastNow = Number(now());
     if (!startedAt) startedAt = new Date(lastNow || Date.now()).toISOString();
-    if (!speedTrace.length && segs[segIndex]) traceAt(position(), segs[segIndex].speed);
+    if (!speedTrace.length && segs[segIndex]) traceAt(position(), amrOn() ? amrSpeed() : segs[segIndex].speed);
     startTimer();
     emit('resume', {});
     flush();
@@ -388,11 +522,12 @@ function makeEngine(workout, opts, snap) {
       skippedSec += segs[segIndex].sec - segElapsed;
       moveTo(segIndex + 1, 'skip');
     } else if (segElapsed > 3 || segIndex === 0) {
-      // Reinicia el segmento actual
+      // Reinicia el segmento actual (una AMRAP vuelve a la ronda 1)
       segElapsed = 0;
       segReal = 0;
       segKm = 0;
-      traceAt(position(), segs[segIndex].speed);
+      if (segs[segIndex].amrap) amrapEnter(segIndex);
+      traceAt(position(), amrOn() ? amrSpeed() : segs[segIndex].speed);
       emit('segment', { index: segIndex, prevIndex: segIndex, reason: 'restart', segment: { ...segs[segIndex] } });
     } else {
       moveTo(segIndex - 1, 'skip');
@@ -412,6 +547,21 @@ function makeEngine(workout, opts, snap) {
     catchUp();
     if (status === 'finished') { flush(); return false; }
     const seg = segs[segIndex];
+    if (amrOn()) {
+      // AMRAP: cambia la velocidad de la fase en curso y la de esa fase en las rondas que vienen (no la de otros tramos)
+      const zone = amrZone();
+      const o = amrSpeed();
+      const nv = clampSpeed(o + d, treadmill);
+      const ap = round1(nv - o);
+      if (!ap) { flush(); return false; }
+      if (amr.phase === 'work') amr.work = nv; else amr.rest = nv;
+      adjustments[zone] = round1((adjustments[zone] || 0) + ap);
+      if (adjustments[zone] === 0) delete adjustments[zone];
+      traceAt(position(), nv);
+      emit('adjust', { zone, speed: nv, delta: ap, total: adjustments[zone] || 0, index: segIndex, amrap: amr.phase });
+      flush();
+      return true;
+    }
     const old = seg.speed;
     const next = clampSpeed(old + d, treadmill);
     const applied = round1(next - old);
@@ -436,6 +586,7 @@ function makeEngine(workout, opts, snap) {
     if (destroyed || (status !== 'running' && status !== 'paused')) return false;
     const i = Math.floor(Number(index));
     if (!(i > segIndex && i < n)) return false;
+    if (segs[i].amrap) return false; // una AMRAP la manda quien corre: nadie le cambia la velocidad por delante
     const v = clampSpeed(Number(speed), treadmill);
     if (!Number.isFinite(v) || Math.abs(v - segs[i].speed) < 0.05) return false;
     segs[i].speed = v;
@@ -480,16 +631,46 @@ function makeEngine(workout, opts, snap) {
     return true;
   }
 
+  /** Estado de la AMRAP en curso para el reproductor (o null fuera de un bloque AMRAP). */
+  function amrapState(segLeft) {
+    if (!amrOn() || status === 'finished') return null;
+    const a = segs[amr.idx].amrap;
+    const L = amrLen();
+    const hasRest = a.restSec > 0 || a.restM > 0;
+    const nextPhase = amr.phase === 'work' && hasRest ? 'rest' : 'work';
+    const nextSpeed = nextPhase === 'rest' ? amr.rest : clampSpeed(amr.work + (a.step || 0), treadmill);
+    return {
+      index: amr.idx,
+      round: amr.rounds + 1,
+      rounds: amr.rounds,
+      phase: amr.phase,
+      ...(L.m != null ? { phaseLeftM: Math.max(0, L.m - amr.phaseM), phaseM: L.m } : { phaseSecTotal: L.sec }),
+      phaseLeftSec: amrLeftSec(),
+      phaseDoneM: amr.phaseM,
+      extraM: amr.phase === 'work' ? Math.floor(amr.phaseM + 1e-6) : 0,
+      workM: a.workM,
+      ...(a.restSec > 0 ? { restSec: a.restSec } : a.restM > 0 ? { restM: a.restM } : {}),
+      speed: amrSpeed(),
+      zone: amrZone(),
+      nextPhase,
+      nextSpeed,
+      nextZone: nextPhase === 'rest' ? a.restZone : a.workZone,
+      cap: segs[amr.idx].sec,
+      capLeft: segLeft,
+    };
+  }
   function getState() {
     const seg = segs[segIndex] || null;
     const next = segs[segIndex + 1] || null;
     const pos = position();
     const rate = rateOf(seg);
     const segLeft = seg ? Math.max(0, seg.sec - segElapsed) : 0;
+    const am = seg ? amrapState(segLeft) : null;
     return {
       status,
       segIndex,
-      segment: seg ? { ...seg } : null,
+      // en una AMRAP, la zona y la velocidad de la fase en curso (capZone: la del bloque entero)
+      segment: seg ? (am ? { ...seg, zone: am.zone, speed: am.speed, capZone: seg.zone } : { ...seg }) : null,
       nextSegment: next ? { ...next } : null,
       segElapsed,
       segRemaining: segLeft,
@@ -505,7 +686,7 @@ function makeEngine(workout, opts, snap) {
       prevSegKm,
       distanceKm,
       kcal,
-      currentSpeed: status === 'finished' || !seg ? 0 : seg.speed,
+      currentSpeed: status === 'finished' || !seg ? 0 : am ? am.speed : seg.speed,
       avgSpeed: activeSec > 0 ? distanceKm / (activeSec / 3600) : 0,
       progress: totalSec > 0 ? clamp(pos / totalSec, 0, 1) : status === 'finished' ? 1 : 0,
       // Extras
@@ -525,6 +706,8 @@ function makeEngine(workout, opts, snap) {
       skippedSec,
       testSkippedSec,
       finishedEarly,
+      amrap: am,
+      amrapDone: amrapDone.map((r) => ({ ...r })),
     };
   }
 
@@ -560,6 +743,8 @@ function makeEngine(workout, opts, snap) {
       skippedSec,
       testSkippedSec,
       finishedEarly,
+      amrap: amr ? { ...amr } : null,
+      amrapDone: amrapDone.map((r) => ({ ...r })),
       savedAt: Number(now()) || Date.now(),
     };
   }
@@ -612,6 +797,10 @@ export function buildSession(workout, engineState, { levels = null, planDate = n
     : null;
 
   const distanceKm = round2(Number(es.distanceKm) || 0);
+  // AMRAP: resultado de cada bloque ({ index, cap, rounds, extraM, workM, restSec|restM, workAvg, skipped? })
+  const amrap = (Array.isArray(es.amrapDone) ? es.amrapDone : [])
+    .filter((r) => r && Number.isFinite(Number(r.rounds)))
+    .map((r) => ({ ...r, rounds: Math.max(0, Math.round(Number(r.rounds))), extraM: Math.max(0, Math.round(Number(r.extraM) || 0)) }));
   return {
     id: uid('ses'),
     workoutId: workout?.id ?? null,
@@ -642,5 +831,6 @@ export function buildSession(workout, engineState, { levels = null, planDate = n
     isTest,
     test,
     levelChanges: [],
+    ...(amrap.length ? { amrap } : {}),
   };
 }

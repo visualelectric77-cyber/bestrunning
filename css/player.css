@@ -1019,7 +1019,67 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
   transition: transform 160ms var(--ease-out), opacity 160ms ease;
 }
 .hud-test[hidden] { display: none; }
+/* «¿Cómo vas?» (js/training/checkin.js): tres botones grandes, fáciles de acertar corriendo; usa el hueco del botón del test */
+.hud-check {
+  grid-area: test;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: auto 52px;
+  gap: 8px;
+}
+.hud-check[hidden] { display: none; }
+.hud-check.is-in { animation: sm-fade-up 260ms var(--ease-out) both; }
+.hud-check__q { grid-column: 1 / -1; font: 600 var(--fs-footnote)/1.1 var(--font); letter-spacing: 0.04em; text-transform: uppercase; color: var(--lbl); text-align: center; }
+.hud-check__b {
+  appearance: none; border: 0; border-radius: 12px; cursor: pointer;
+  font: 600 var(--fs-body)/1 var(--font); color: #fff; background: rgba(255, 255, 255, 0.14);
+  transition: transform 140ms var(--ease-out), opacity 140ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.hud-check__b.is-up { background: color-mix(in srgb, #34c759 70%, #000); }
+.hud-check__b.is-down { background: color-mix(in srgb, var(--danger) 85%, #000); }
+.hud-check__b:active { transform: scale(0.96); opacity: 0.85; }
 .hud-test:active { transform: scale(0.98); opacity: 0.85; }
+/* AMRAP (js/training/amrap.js): ronda, lo que queda de la fase y el tope; usa el hueco del botón del test */
+.hud-amrap {
+  grid-area: test;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 14px 9px;
+  display: grid;
+  gap: 6px;
+  border-left: 4px solid var(--zc);
+}
+.hud-amrap[hidden] { display: none; }
+.hud-amrap__row { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+/* abajo, grandes: la ronda y lo que queda de la fase (nunca se corta: si no cabe, baja de línea) */
+.hud-amrap__row--main { flex-wrap: wrap; row-gap: 4px; }
+.hud-amrap__k { min-width: 0; font: 600 var(--fs-footnote)/1 var(--font); letter-spacing: 0.04em; text-transform: uppercase; color: var(--lbl); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-amrap__done { margin-left: auto; flex: none; font: 600 var(--fs-footnote)/1 var(--font); color: var(--ink2); white-space: nowrap; }
+.hud-amrap__r { font: 700 24px/1 var(--font); letter-spacing: -0.02em; color: #fff; white-space: nowrap; }
+.hud-amrap__left { margin-left: auto; font: 700 24px/1 var(--font); letter-spacing: -0.02em; color: var(--zc); white-space: nowrap; }
+.hud-amrap__hint:empty { display: none; }
+.hud-amrap.is-result .hud-amrap__left { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.hud-amrap__bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.hud-amrap__bar i { display: block; height: 100%; background: var(--zc); transform-origin: left center; transform: scaleX(0); transition: transform 240ms linear; }
+.hud-amrap__hint { font: 500 var(--fs-footnote)/1.25 var(--font); color: var(--lbl); }
+.hud-amrap.is-result { border-left-color: #ffd60a; }
+.hud-amrap.is-result .hud-amrap__left { color: #ffd60a; }
+.pl.is-amrap .hud-adj { box-shadow: 0 0 0 2px var(--zc); }
+/* con la placa de la AMRAP, la cifra y el pulso un poco más pequeños para que el rótulo de zona no se meta bajo la
+   barra superior en un iPhone normal (375×812) */
+.pl.is-amrap { --speed-fs: clamp(80px, min(29vw, 13.5dvh), 140px); }
+.pl.is-amrap .hud-speed { padding-bottom: 4%; }
+/* el subtítulo del coach, encima de la placa (o de «¿Cómo vas?»), no sobre ella */
+.pl.is-amrap .mo-cap,
+.pl:has(.hud-check:not([hidden])) .mo-cap { grid-area: test; }
+/* Modo retransmisión: la AMRAP va en el marcador de televisión; la placa de abajo se recoge */
+.pl.is-bcast .hud-amrap { display: none; }
+.pl.is-bcast.is-amrap .mo-cap { translate: 0 -8px; }
+
 .pl.is-test-stage .hud-adj { display: none; }
 .pl.is-test-stage [data-act="prev"],
 .pl.is-test-stage [data-act="next"] { opacity: 0.35; }
@@ -1648,6 +1708,17 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-test__check p { margin: 0; font: 500 var(--fs-footnote, 13px)/1.35 var(--font); color: var(--text-2); }
 .sm-test__btn { align-self: flex-start; margin-top: 4px; min-height: 44px; }
 .sm-test__btn[aria-pressed="true"] { color: var(--ok); }
+/* Resumen · AMRAP: rondas de cada bloque y comparación con tu récord */
+.sm-amrap__row { display: grid; gap: 4px; padding: 10px 0; }
+.sm-amrap__row + .sm-amrap__row { border-top: var(--hairline) solid var(--sep); }
+.sm-amrap__n { font: 600 12px/1 var(--font); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-2); }
+.sm-amrap__big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.sm-amrap__big span { font-weight: 700; font-size: 44px; line-height: 1; letter-spacing: -0.03em; }
+.sm-amrap__big small { font: 600 15px/1 var(--font); color: var(--text-2); }
+.sm-amrap__big em { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font: 700 12px/1 var(--font); font-style: normal; color: #ffd60a; text-transform: uppercase; letter-spacing: 0.04em; }
+.sm-amrap__fmt { margin: 0; font: 500 13px/1.3 var(--font); color: var(--text-2); }
+.sm-amrap__cmp { margin: 0; font: 600 14px/1.3 var(--font); }
+.sm-amrap__row.is-record .sm-amrap__cmp { color: #ffd60a; }
 .sm-test__row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sm-test__row > .sm-test__big + .sm-test__big { padding-left: var(--s-4); border-left: var(--hairline) solid var(--sep); }
 .sm-test__big { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
@@ -1707,6 +1778,29 @@ body:has(.pl--live) #toast-root .toast--action { display: none; }
 .sm-face__lbl { font: 500 11.5px/1.15 var(--font); text-align: center; }
 .sm-face.is-picked { color: #000; background: #fff !important; }
 .sm-face.is-pop { animation: sm-face-pop 260ms var(--ease-out) both; }
+/* Escala de esfuerzo del 1 al 10 (js/training/rpe.js): diez botones que se van calentando de color */
+.sm-rpe { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin: 4px 0 6px; }
+.sm-rpe__n {
+  appearance: none; border: 0; padding: 0; height: 44px; border-radius: 10px; cursor: pointer;
+  color: var(--text-2); background: var(--surface-2);
+  font: 600 15px/1 var(--font); font-variant-numeric: tabular-nums;
+  transition: transform 160ms var(--ease-out), background-color 180ms ease, color 180ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.sm-rpe__n:active { transform: scale(0.94); }
+.sm-rpe__n.is-picked {
+  color: #000;
+  background: color-mix(in srgb, #ff3b30 calc((var(--k) - 1) * 11%), #34c759);
+}
+.sm-rpe__n.is-pop { animation: sm-face-pop 260ms var(--ease-out) both; }
+.sm-rpe.is-shake { animation: pl-shake 380ms ease both; }
+.sm-rpe__ends { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; font-size: var(--fs-caption, 12px); color: var(--text-3); }
+.sm-rpe__word { font: 600 var(--fs-footnote)/1.2 var(--font); color: var(--text); text-align: center; flex: 1; }
+.sm-rpe__fail {
+  appearance: none; border: 0; background: none; padding: 6px 0; margin: 0 0 6px; cursor: pointer;
+  font: 500 var(--fs-footnote)/1.2 var(--font); color: var(--text-3); text-decoration: underline; text-underline-offset: 3px;
+}
+.sm-rpe__fail.is-picked { color: var(--accent); text-decoration: none; font-weight: 600; }
 .sm-feel__hint { margin: 0; min-height: 2.8em; font-size: var(--fs-footnote); line-height: var(--lh-footnote); color: var(--text-2); text-wrap: pretty; }
 .sm-feel__hint.is-in { animation: sm-fade-up 240ms var(--ease-out) both; }
 /* Sin sensación elegida: es el paso que falta para guardar. Contorno en el acento y la etiqueta «Falta para guardar». */

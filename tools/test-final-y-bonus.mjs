@@ -147,14 +147,18 @@ section('Bonus: semana completa y día de descanso');
   const list = bonusTemplates();
   ok(list.length >= 5, `hay ${list.length} formatos de bonus`);
   for (const t of list) {
-    ok(t.planOnly === true && t.bonus === true && t.category === 'challenge', `${t.id}: es de bonus y el plan no la sortea`);
+    // (desde el 28 nov 2026 el bonus también ofrece las AMRAP, `amrap-*`: planOnly como los retos; la de cuesta es de Cuestas)
+    const amrap = t.family === 'amrap';
+    ok(t.planOnly === true && (amrap || t.bonus === true) && (t.category === 'challenge' || (amrap && t.category === 'hills')), `${t.id}: es de bonus y el plan no la sortea`);
     ok(t.title && t.subtitle && t.description && Array.isArray(t.coachNotes) && t.coachNotes.length >= 2 && Array.isArray(t.themes) && t.themes.length, `${t.id}: tiene sus textos`);
     for (const min of BONUS_MINUTES) for (const seed of [1, 5, 99]) {
       const w = buildWorkout(t.id, { minutes: min, levels: L, seed });
       ok(w && w.totalSec === min * 60, `${t.id} ${min}′: dura ${w?.totalSec}`);
       ok(w.segments[0].zone === 'warmup' && w.segments.at(-1).zone === 'cooldown', `${t.id} ${min}′: calienta y enfría`);
       ok(w.segments.every((s) => s.sec >= 20 && s.speed >= 5 && s.speed <= L.sprint + 0.01), `${t.id} ${min}′: tramos de ≥ 20 s y velocidades dentro de tus niveles`);
-      const hard = w.segments.filter((s) => s.zone === 'fast' || s.zone === 'sprint').reduce((a, s) => a + s.sec, 0);
+      // trabajo duro previsto por zonas (en una AMRAP, el tiempo de sus partes de trabajo; en el resto es lo mismo que sumar tramos)
+      // (la AMRAP de umbral, amrap-km, trabaja a ritmo de correr: ahí cuenta «correr»)
+      const hard = (w.timeInZone.fast || 0) + (w.timeInZone.sprint || 0) + (t.id === 'amrap-km' ? w.timeInZone.run || 0 : 0);
       ok(hard >= 0.1 * w.totalSec && hard <= 0.45 * w.totalSec, `${t.id} ${min}′: ${Math.round((100 * hard) / w.totalSec)} % de trabajo duro`);
       const sprint = w.segments.filter((s) => s.zone === 'sprint').reduce((a, s) => a + s.sec, 0);
       ok(sprint <= 0.25 * w.totalSec, `${t.id} ${min}′: sprint con tope`);
@@ -186,7 +190,7 @@ section('Bonus: semana completa y día de descanso');
   ok(!bonusOffer(st, '2026-11-14', now), 'un día de entreno no ofrece bonus');
   // elegir el tiempo
   const picks = BONUS_MINUTES.map((m) => bonusPick(st, SUN, m));
-  ok(picks.every((w, i) => w && w.minutes === BONUS_MINUTES[i] && getTemplate(w.templateId).bonus), 'una clase de bonus para cada duración');
+  ok(picks.every((w, i) => w && w.minutes === BONUS_MINUTES[i] && (getTemplate(w.templateId).bonus || getTemplate(w.templateId).family === 'amrap')), 'una clase de bonus para cada duración');
   eq(new Set(picks.map((w) => w.templateId)).size, 1, 'el formato del día es el mismo elijas el tiempo que elijas');
   eq(bonusPick(st, SUN, 30).id, picks[1].id, 'y siempre sale el mismo ese día');
   eq(bonusPick(st, SUN, 37).minutes, 30, 'duración rara: 30');

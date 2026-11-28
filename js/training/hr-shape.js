@@ -75,7 +75,8 @@ export function zoneCompliance(segments, hrSeries, profile) {
   for (const s of segs) {
     const a = t;
     t += Number(s.sec) || 0;
-    if (!WORK_ZONES.includes(s.zone) || t - a <= LAG_SEC) continue;
+    // (una AMRAP es a tope y cambia de fase sin parar: no tiene una zona que cumplir)
+    if (s.amrap || !WORK_ZONES.includes(s.zone) || t - a <= LAG_SEC) continue;
     let target;
     try { target = hrTargetForZone(s.zone, profile || {}); } catch { continue; }
     spans.push({ a: a + LAG_SEC, b: t, zone: s.zone, min: target.min, max: target.max });

@@ -23,6 +23,7 @@ import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } f
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
 import { effortTolerance, withEffortMargin } from '../training/effort-learn.js';
+import { shouldAsk, checkEffect, CHECK_ANSWERS, CHECK_TIMEOUT_SEC } from '../training/checkin.js';
 import {
   calibrateClass, nextSpeed, seriesSpeed, liveSpeed, pulseTrend, dynModelFrom, effectiveSpeed, REAL_HOLD_DEV,
   CALM_ZONES, jogFloor, calmCaps, REC_MAX_SEC,
@@ -39,6 +40,7 @@ import { createHrCoach, HR_COACH_ZONES } from '../player/hr-coach.js';
 import { buildHrModel } from '../training/hr-model.js';
 import { createRaceGuide } from '../training/race-guide.js';
 import { createSpeedTracker, createSpeedSim } from '../training/watch-speed.js';
+import { amrapResultText, amrapCompare } from '../training/amrap.js';
 
 /** Hápticas que marca el reloj de la clase (cuenta atrás, cambio de tramo, final): en la app nativa las da el
  *  Apple Watch en la muñeca, así que el iPhone no vibra; en Safari se mantienen. */
@@ -80,7 +82,7 @@ const CTL_MS = 4000;          // un toque muestra los controles 4 s mientras cor
 const BUG_MS = 3000;          // «bugs» de retransmisión (KM, MITAD, SERIE, RÉCORD): 3 s y salen
 const GOLD = '#FFD60A';
 // Bloques del HUD cuyo rectángulo recibe la escena: solo información de composición (§15.3: nunca máscaras)
-const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on, .bc, .bc-prof';
+const HUD_SEL = '.hud-top, .hud-speed__core, .hud-lt, .hud-info, .hud-test, .hud-check, .hud-bug.is-on, .hud-note.is-on, .hud-lockbar, .mo-deck.is-on, .mo-cap.is-on, .bc, .bc-prof';
 // Subtítulos del coach: solo frases (motivación, mitad, km, final); nunca avisos de tramo ni cifras deletreadas
 const CAP_SKIP = new Set(['pre', 'change', 'tick', 'countdown', 'intro', 'adjust', 'resume', 'testStage', 'finishStats']);
 // Laboratorio YouTube: en iPhone/iPad el volumen del vídeo no se puede bajar desde la página (iOS lo ignora), así que los
@@ -319,6 +321,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
   let vamView = null;         // test VAM: { st, pct } para el bloque de pulso
   let raceView = null;         // guía de carrera: { pred, hrMax } mientras corres el tramo de carrera (pulso previsto en meta)
   let vamDayHigh = false;
+  // «¿Cómo vas?» (js/training/checkin.js): preguntas hechas en esta clase ({ t, seg, zone, a?, bpm? }) y la abierta
+  const checkLog = [];
+  let checkOpen = null;
+  // AMRAP (js/training/amrap.js): avisos ya dados en esta clase y el resultado del último bloque en pantalla
+  const amrapUi = { go: new Set(), pre: '', beep: '', appSaid: false, adjN: 0, result: null, resultUntil: 0 };
   const cache = {};
   let muted = false;
   let locked = false;
@@ -1233,6 +1240,24 @@ export function mount(el, { params = {}, query = {} } = {}) {
             <div class="hud-lockbar__hint hud-plate" data-ref="lockHint"><b>${icon('lock', 13)}Pantalla bloqueada</b><span>Mantén pulsado el candado</span></div>
           </div>
           <button class="hud-test" data-act="endtest" hidden>${icon('flame', 20)}<span>No puedo más</span></button>
+          <div class="hud-check hud-plate" data-ref="check" role="group" aria-label="¿Cómo vas?" hidden>
+            <span class="hud-check__q">¿Cómo vas?</span>
+            <button class="hud-check__b is-up" data-act="check" data-a="up">Sobrado</button>
+            <button class="hud-check__b" data-act="check" data-a="ok">Bien</button>
+            <button class="hud-check__b is-down" data-act="check" data-a="down">Voy mal</button>
+          </div>
+          <div class="hud-amrap hud-plate" data-ref="amrap" role="status" aria-live="polite" hidden>
+            <div class="hud-amrap__row">
+              <span class="hud-amrap__k" data-ref="amKicker">AMRAP</span>
+              <span class="hud-amrap__done num" data-ref="amDone"></span>
+            </div>
+            <div class="hud-amrap__row hud-amrap__row--main">
+              <b class="hud-amrap__r num" data-ref="amRound">Ronda 1</b>
+              <span class="hud-amrap__left num" data-ref="amLeft"></span>
+            </div>
+            <div class="hud-amrap__bar" aria-hidden="true"><i data-ref="amFill"></i></div>
+            <div class="hud-amrap__hint" data-ref="amHint"></div>
+          </div>
           <section class="hud-lt hud-plate" data-ref="lt">
             <i class="hud-lt__sweep" data-ref="sweep" aria-hidden="true"></i>
             <div class="hud-lt__head">
@@ -1487,6 +1512,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       }
       mcall('setVolume', vol);
       mcall('setEffects', m.effects !== false);
+      // AMRAP en directo: versión sencilla con movimiento reducido o la escena en Ahorro; el riser no pisa el pre-aviso
+      mcall('setAmrapOptions', { lite: reducedMotion() || sceneLite, lead: Number(getState().treadmill?.announceLead) || 10 });
       mcall('setEnabled', true);
     }
     // 'playback' antes de desbloquear: los <audio> toman ya la sesión de la app
@@ -1955,8 +1982,18 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const segTxt = `${workout.isTest && seg.stage > 0 ? 'TEST VAM' : `TRAMO ${s.segIndex + 1}/${n}`} · ${String(name).toUpperCase()}`;
     setText('bcSeg', segTxt);
     setText('bcProfSeg', `TRAMO ${s.segIndex + 1}/${n}`);
-    setText('bcLeft', refs.segLeft?.textContent || '');
-    setScale('bcFill', seg.sec ? s.segElapsed / seg.sec : 0);
+    const am = s.status !== 'finished' ? s.amrap : null;
+    if (am) {
+      // AMRAP: el marcador lleva la ronda, la fase, lo que queda de ella y el tope (la placa de abajo se recoge)
+      const work = am.phase === 'work';
+      setText('bcZone', work ? `RONDA ${am.round}` : 'RECUPERA');
+      setText('bcSeg', `AMRAP · ${am.rounds} ${am.rounds === 1 ? 'HECHA' : 'HECHAS'} · TOPE ${fmt.clock(Math.max(0, Math.ceil(am.capLeft - 1e-6)))}`);
+      setText('bcLeft', amrapLeftText(am).replace(/^quedan /, '').toUpperCase());
+      setScale('bcFill', am.phaseLeftM != null ? 1 - am.phaseLeftM / Math.max(1, am.phaseM) : 1 - am.phaseLeftSec / Math.max(1, am.phaseSecTotal));
+    } else {
+      setText('bcLeft', refs.segLeft?.textContent || '');
+      setScale('bcFill', seg.sec ? s.segElapsed / seg.sec : 0);
+    }
     setText('bcNext', (refs.nextTxt?.textContent || '').toUpperCase() || '—');
     const d = new Date();
     setText('bcClock', `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
@@ -2177,6 +2214,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (lite === sceneLite) return;
     sceneLite = lite;
     root?.classList.toggle('is-lite', lite);
+    mcall('setAmrapOptions', { lite: lite || reducedMotion() });
   }
 
   /* ───────── Fantasma de tu mejor marca (§14.1-1) ───────── */
@@ -2733,7 +2771,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (!coachMod?.createCoach || !engine) return null;
     try {
       const st = getState();
-      const w = { ...workout, segments: engine.getSegments() };
+      // (una AMRAP se anuncia con la zona de su trabajo: «¡Ahora! Correr rápido…»; sus fases las avisa amrapTick)
+      const w = { ...workout, segments: engine.getSegments().map((g) => (g.amrap ? { ...g, zone: g.amrap.workZone } : g)) };
       const c = coachMod.createCoach(w, {
         ...(st.audio || {}),
         name: st.profile?.name || '',
@@ -2838,9 +2877,11 @@ export function mount(el, { params = {}, query = {} } = {}) {
       try { coachTick(s); } catch (err) { reportOnce(err); }
       try { calmCap(s); } catch (err) { reportOnce(err); }
       try { hrCoachTick(s); } catch (err) { reportOnce(err); }
+      try { checkTick(s); } catch (err) { reportOnce(err); }
       // Durante un salto (skip / «No puedo más») la música se reubica después con musicSeek
       try { musicTick(s); } catch (err) { reportOnce(err); }
       try { raceTick(s); } catch (err) { reportOnce(err); }
+      try { amrapTick(s); } catch (err) { reportOnce(err); }
       guardSession();
     }
     try { nb.tick(s); } catch (err) { reportOnce(err); }
@@ -2944,6 +2985,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
       startMusic();
       if (yt) ytCall('play');
       later(maybeSoundHint, 2600);
+    } else if (type === 'amrapPhase' || type === 'amrapEnd') {
+      try { amrapEvent(type, data || {}); } catch (err) { reportOnce(err); }
     } else if (type === 'finish') {
       onFinished(data && data.status ? data : engine.getState());
     }
@@ -3372,7 +3415,16 @@ export function mount(el, { params = {}, query = {} } = {}) {
     let lbl;
     let txt;
     let diff = 0;
-    if (next) {
+    const am = s.amrap;
+    // AMRAP: «Luego · 1:00 · Trotar 8,3» es la fase siguiente (salvo que el tope llegue antes)
+    if (am && !(am.capLeft <= am.phaseLeftSec + 1)) {
+      diff = am.nextSpeed - am.speed;
+      const arrow = diff > 0.05 ? 'arrow-up' : diff < -0.05 ? 'arrow-down' : null;
+      arrowHtml = arrow ? icon(arrow, 14, { stroke: 2.8 }) : '<span class="hud-lt__eq">=</span>';
+      const len = am.nextPhase === 'rest' ? (am.restSec ? fmt.clock(am.restSec) : `${am.restM} m`) : `${am.workM} m`;
+      lbl = `Luego · ${len}`;
+      txt = `<span class="hud-lt__nn">${esc(ZONES[am.nextZone]?.short || zoneName(am.nextZone))}</span> <b class="hud-lt__ns">${esc(fmt.speed(am.nextSpeed))}</b>`;
+    } else if (next) {
       diff = next.speed - seg.speed;
       const arrow = diff > 0.05 ? 'arrow-up' : diff < -0.05 ? 'arrow-down' : null;
       arrowHtml = arrow ? icon(arrow, 14, { stroke: 2.8 }) : '<span class="hud-lt__eq">=</span>';
@@ -3446,6 +3498,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     setText('km', fmt.km(s.distanceKm));
     setText('kcal', fmt.int(s.kcal));
     if (seg) renderHr(seg);
+    try { amrapHud(s); } catch (err) { reportOnce(err); }
     try { speedTick(s); } catch (err) { reportOnce(err); }
     updateGhost(s);
     updateProfile(s);
@@ -3494,6 +3547,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     else if (act === 'music') toggleMusic();
     else if (act === 'list') openStructure();
     else if (act === 'endtest') doEndTest();
+    else if (act === 'check') answerCheck(b.dataset.a);
     else if (yt && (act === 'yt-next' || act === 'yt-shuffle')) ytBarAct(act, b);
   }
 
@@ -3879,7 +3933,7 @@ export function mount(el, { params = {}, query = {} } = {}) {
     const nx = s.nextSegment;
     // (el tramo de carrera sale a tu ritmo objetivo: no se ajusta a una zona de pulso)
     // (ni calentar, vuelta a la calma o caminar: siguen el plan; la vuelta a la calma lleva su propio tope, calmCap)
-    if (nx && !nx.race && !CALM_ZONES.has(nx.zone) && !hands && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
+    if (nx && !nx.race && !nx.amrap && !CALM_ZONES.has(nx.zone) && !hands && st.recSeg !== s.segIndex && s.segRemaining <= lead + 5 && s.segRemaining >= 1.5) {
       st.recSeg = s.segIndex;
       let target = null;
       try { target = segHrTarget(nx); } catch { target = null; }
@@ -4019,6 +4073,70 @@ export function mount(el, { params = {}, query = {} } = {}) {
     }
   }
 
+  /** «¿Cómo vas?»: abre la pregunta cuando toca (checkin.js) y la cierra al cambiar de tramo o a los 15 s sin respuesta. */
+  function checkTick(s) {
+    if (checkOpen) {
+      if (s.segIndex !== checkOpen.seg || (Number(s.totalElapsed) || 0) - checkOpen.t > CHECK_TIMEOUT_SEC) closeCheck();
+      return;
+    }
+    if (countingDown || finale) return;
+    const ask = shouldAsk(s, engine?.getSegments?.() || workout.segments, checkLog, { isTest: !!workout.isTest, race: !!race, locked });
+    if (!ask) return;
+    checkOpen = { t: Number(s.totalElapsed) || 0, seg: s.segIndex, zone: ask.zone };
+    checkLog.push(checkOpen);
+    const p = refs.check;
+    if (p) {
+      p.hidden = false;
+      if (!reducedMotion()) { p.classList.remove('is-in'); void p.offsetWidth; p.classList.add('is-in'); }
+      scheduleHudRects();
+    }
+    haptic('light');
+    coachCall('say', 'checkin', {});
+    diagMark('sensacion.pregunta', { z: checkOpen.zone });
+  }
+
+  function closeCheck() {
+    checkOpen = null;
+    if (refs.check && !refs.check.hidden) { refs.check.hidden = true; scheduleHudRects(); }
+  }
+
+  /** Respuesta a «¿Cómo vas?»: Sobrado → +0,3 en los siguientes tramos de esa zona y más margen; Bien → nada;
+   *  Voy mal → −0,3 en esos tramos y sin margen. Ni el trote de ahora ni la vuelta a la calma cambian. */
+  function answerCheck(a) {
+    if (!checkOpen || !CHECK_ANSWERS.includes(a)) return;
+    const q = checkOpen;
+    q.a = a;
+    try { const live = liveHr(); if (live && Number(live.bpm) >= 40) q.bpm = Math.round(Number(live.bpm)); } catch { /* sin pulso */ }
+    closeCheck();
+    const eff = checkEffect(a, cache.effortTol?.ppm || 0);
+    if (eff.tolPpm != null) cache.effortTol = { ...(cache.effortTol || { n: 0, score: 0 }), ppm: eff.tolPpm };
+    let n = 0;
+    if (eff.dir && engine) {
+      const s0 = engine.getState();
+      const segsNow = engine.getSegments?.() || [];
+      for (let i = s0.segIndex + 1; i < segsNow.length; i++) {
+        const g = segsNow[i];
+        if (!g || g.zone !== q.zone || g.race || g.amrap) continue;
+        if (engine.setSegmentSpeed?.(i, Math.round((g.speed + eff.dir * eff.steps / 10) * 10) / 10)) n++;
+      }
+      if (n) {
+        renderNext(engine.getState());
+        renderProfile();
+        if (coach) {
+          const s2 = engine.getState();
+          coachCall('destroy');
+          coach = makeCoach();
+          coachCall('seek', s2.totalElapsed);
+          lastCoachPos = s2.totalElapsed;
+        }
+      }
+    }
+    diagMark('sensacion.respuesta', { a, ppm: eff.tolPpm ?? '', tramos: n });
+    haptic(a === 'down' ? 'warning' : 'success');
+    if (a === 'ok' || !n) coachCall('say', 'checkok', {});
+    else notify(a === 'up' ? `A por más: los siguientes tramos, +${fmt.speed(eff.steps / 10)} km/h` : `Aflojamos: los siguientes tramos, −${fmt.speed(eff.steps / 10)} km/h`, { icon: 'heart', duration: 4500 });
+  }
+
   /** Test VAM: la proyección en directo para el rótulo del escalón («VAM ≈ 13,0–14,0») o '' si aún no la hay. Nunca lanza. */
   function vamProjLabel() {
     try {
@@ -4057,6 +4175,13 @@ export function mount(el, { params = {}, query = {} } = {}) {
     // ninguna velocidad. En su 5K subió el trote de calentamiento de 8,9 a 9,9 porque «iba sobrado».
     if (race && s.segIndex < raceIdx) {
       if (dynModel) { try { dynTrack(st, s, now); } catch (err) { reportOnce(err); } }
+      return;
+    }
+    // AMRAP: un esfuerzo a tope que manda quien corre. El modo pulso sigue tu pulso, pero no toca la velocidad (ni la
+    // sube ni la baja ni cambia lo que viene); solo la alarma de pulso muy alto puede bajarla.
+    if (s.amrap) {
+      if (dynModel) { try { dynTrack(st, s, now); } catch (err) { reportOnce(err); } }
+      try { amrapHrAlarm(st, s, now); } catch (err) { reportOnce(err); }
       return;
     }
     if (dynModel) { try { dynTick(st, s, now); } catch (err) { reportOnce(err); } } else {
@@ -4098,6 +4223,152 @@ export function mount(el, { params = {}, query = {} } = {}) {
     notify(r.dir < 0
       ? `Pulso ${r.reason === 'alarm' ? 'muy alto' : 'alto'} (${r.avg}): bajamos ${delta} km/h`
       : `Vas sobrado (${r.avg} ppm): subimos ${delta} km/h`, { icon: 'heart', duration: 4200 });
+  }
+
+  /* ═════════════════ AMRAP (js/training/amrap.js) ═════════════════
+     La app no sabe a qué velocidad va tu cinta: los metros de cada parte son la velocidad de la app × tiempo. Por eso el
+     HUD y la voz insisten en que marques con − / + la velocidad que lleves; con eso cuentan las rondas. */
+
+  /** Placa de la AMRAP: «Ronda 3 · quedan 240 m», barra de la fase y el tope; al acabar, el resultado unos segundos. */
+  function amrapHud(s) {
+    const box = refs.amrap;
+    if (!box || !root) return;
+    const a = s.status !== 'finished' ? s.amrap : null;
+    const res = !a && amrapUi.result && performance.now() < amrapUi.resultUntil ? amrapUi.result : null;
+    const show = !!a || !!res;
+    if (box.hidden === show) { box.hidden = !show; scheduleHudRects(); }
+    if (cache.amrapOn !== !!a) { cache.amrapOn = !!a; root.classList.toggle('is-amrap', !!a); }
+    const ltLbl = refs.lt?.querySelector('.hud-lt__head .hud-lbl');
+    const want = a ? 'Tope' : 'Queda';
+    if (ltLbl && ltLbl.textContent !== want) ltLbl.textContent = want;
+    if (a) {
+      const work = a.phase === 'work';
+      box.classList.toggle('is-rest', !work);
+      box.classList.remove('is-result');
+      // dos líneas: arriba el rótulo y las rondas hechas; abajo, grandes, la ronda (o «Recupera») y lo que queda de la
+      // fase, que es el dato que más importa y nunca se corta. El tope ya sale grande en el lower third.
+      setText('amKicker', work ? `AMRAP · ${a.workM} m por ronda` : 'AMRAP · recupera');
+      setText('amDone', a.rounds > 0 ? `${a.rounds} ${a.rounds === 1 ? 'hecha' : 'hechas'}` : '');
+      setText('amRound', work ? `Ronda ${a.round}` : 'Recupera');
+      setText('amLeft', amrapLeftText(a));
+      setScale('amFill', a.phaseLeftM != null ? 1 - a.phaseLeftM / Math.max(1, a.phaseM) : 1 - a.phaseLeftSec / Math.max(1, a.phaseSecTotal));
+      // el recordatorio de marcar la velocidad, solo hasta que la toque en esta AMRAP
+      setText('amHint', manualAdj.n === amrapUi.adjN ? 'Marca con − / + la velocidad de tu cinta' : '');
+      setText('zoneName', work ? `TRABAJO · ${a.workM} M` : 'RECUPERA');
+    } else if (res) {
+      box.classList.remove('is-rest');
+      box.classList.add('is-result');
+      setText('amKicker', 'AMRAP · resultado');
+      setText('amDone', '');
+      setText('amRound', res.text);
+      setText('amLeft', res.sub);
+      setScale('amFill', 1);
+      setText('amHint', res.hint);
+    }
+  }
+
+  /** Lo que queda de la fase de la AMRAP: «quedan 272 m» (por metros) o «quedan 0:40» (recuperación por tiempo). */
+  function amrapLeftText(a) {
+    return a.phaseLeftM != null ? `quedan ${Math.max(0, Math.ceil(a.phaseLeftM - 1e-6))} m` : `quedan ${fmt.clock(Math.max(0, Math.ceil(a.phaseLeftSec - 1e-6)))}`;
+  }
+
+  /** Avisos de la AMRAP en marcha: al empezar el bloque, el pre-aviso de cada cambio de fase y los pitidos 3-2-1. */
+  function amrapTick(s) {
+    const a = s.amrap;
+    if (!a || countingDown || s.status !== 'running') return;
+    if (!amrapUi.go.has(a.index)) {
+      amrapUi.go.add(a.index);
+      amrapUi.adjN = manualAdj.n;
+      coachCall('say', 'amrapGo', {});
+      notify('AMRAP: pon la velocidad que aguantes y márcala aquí con − / +', { icon: 'bolt', duration: 6500 });
+      diagMark('amrap.inicio', { i: a.index, tope: a.cap, m: a.workM });
+    }
+    // si el tope llega antes que el cambio de fase, ya avisa el cambio de tramo de siempre
+    if (a.capLeft <= a.phaseLeftSec + 1) return;
+    const key = `${a.index}:${a.rounds}:${a.phase}`;
+    const lead = clamp(Number(getState().treadmill?.announceLead) || 10, 3, 30);
+    const total = a.phaseLeftM != null ? (a.phaseM * 3.6) / Math.max(0.1, a.speed) : a.phaseSecTotal;
+    if (amrapUi.pre !== key && total >= lead + 4 && a.phaseLeftSec <= lead && a.phaseLeftSec >= 2.5) {
+      amrapUi.pre = key;
+      if (Math.abs(a.nextSpeed - a.speed) >= 0.05) {
+        const dir = a.nextSpeed < a.speed ? 'down' : 'up';
+        coachCall('say', 'amrapPre', { dir, speed: a.nextSpeed, zone: a.nextZone, fromHard: a.zone === 'fast' || a.zone === 'sprint', lead: Math.round(a.phaseLeftSec) });
+        notify(`En ${Math.round(a.phaseLeftSec)} s: ${zoneName(a.nextZone)} a ${fmt.speed(a.nextSpeed)} km/h`, { icon: dir === 'down' ? 'arrow-down' : 'arrow-up', duration: 4000 });
+      }
+    }
+    const k = Math.ceil(a.phaseLeftSec - 1e-6);
+    if (k >= 1 && k <= 3 && amrapUi.beep !== `${key}:${k}`) { amrapUi.beep = `${key}:${k}`; doBeep('tick'); }
+  }
+
+  /** Eventos del motor de la AMRAP: cambio de fase (voz, colores, «Ronda hecha») y final del bloque con su resultado. */
+  function amrapEvent(type, d) {
+    if (!engine) return;
+    const s = engine.getState();
+    // la música reacciona al momento: se retira en la recuperación, se abre en el trabajo, golpea al acabar el tope
+    mcall('amrapEvent', type, d, s.amrap);
+    if (type === 'amrapPhase') {
+      if (d.silent || !s.amrap) return;
+      applySegment(s, { reason: 'adjust' });
+      const toRest = d.phase === 'rest';
+      doBeep('go');
+      timerHaptic(toRest ? 'medium' : 'heavy');
+      const a = s.amrap;
+      coachCall('say', 'amrapNow', {
+        zone: d.zone, speed: d.speed, dir: d.speed < d.prevSpeed ? 'down' : 'up', fromHard: toRest,
+        dur: toRest ? (a.restSec || `${a.restM} metros`) : `${a.workM} metros`,
+      });
+      // «Ronda hecha» ya lo dicen Lucía y la placa (2 hechas): sin rótulo flotante, que caía encima de la velocidad
+      if (!toRest && d.rounds === 1 && !amrapUi.appSaid && manualAdj.n === amrapUi.adjN) {
+        // primera ronda sin tocar la velocidad: una vez por clase, el recordatorio de marcarla en la app
+        amrapUi.appSaid = true;
+        coachCall('say', 'amrapApp', {});
+      }
+      persist();
+      return;
+    }
+    // amrapEnd
+    const text = amrapResultText(d);
+    let sub = '';
+    let record = false;
+    if (!d.skipped) {
+      try {
+        const [c] = amrapCompare({ id: '_ahora', templateId: workout.templateId, startedAt: new Date().toISOString(), amrap: [d] }, getState().history);
+        if (c?.best) { record = !!c.isRecord; sub = record ? `¡Récord! Antes ${amrapResultText(c.best)}` : `Récord: ${amrapResultText(c.best)}`; }
+        else sub = 'Primera vez: esta es tu marca';
+      } catch { sub = ''; }
+    }
+    amrapUi.result = { text, sub, hint: d.skipped ? 'Bloque saltado: cuenta lo que hiciste' : `Tope ${fmt.clock(d.cap)} · ${d.workM} m por ronda` };
+    amrapUi.resultUntil = performance.now() + 12000;
+    showBug({ lbl: 'AMRAP', val: String(d.rounds), sub: text, color: record ? '#ffd60a' : '', kind: 'amrap' });
+    if (!d.skipped && !d.early) {
+      const n = Math.round(Number(d.rounds) || 0);
+      const m = Math.round(Number(d.extraM) || 0);
+      coachCall('say', 'amrapEnd', { result: `${n} ${n === 1 ? 'ronda' : 'rondas'}${m > 0 ? ` y ${m} metros` : ''}` });
+      if (record) coachCall('say', 'amrapRecord', {});
+    }
+    diagMark('amrap.fin', { rondas: d.rounds, m: d.extraM, tope: d.cap, rec: record ? 1 : 0, ...(d.skipped ? { saltado: 1 } : {}) });
+    amrapHud(s);
+  }
+
+  /** Dentro de una AMRAP, del modo pulso solo actúa la alarma de pulso muy alto (baja la velocidad y lo dice). */
+  function amrapHrAlarm(st, s, now) {
+    const seg = s.segment;
+    if (!seg || !st.coach) return;
+    const live = liveHr();
+    let target = null;
+    try { target = segHrTarget(seg); } catch { target = null; }
+    const r = st.coach.step({
+      nowMs: now, running: true, segIndex: s.segIndex, zone: seg.zone, segSec: seg.sec,
+      segElapsed: s.segElapsed, segRemaining: s.segRemaining, classElapsed: s.totalElapsed,
+      hr: live ? { bpm: Number(live.bpm), atMs: Number(live.at) || now } : null, target,
+    });
+    if (!r || r.reason !== 'alarm' || !(r.dir < 0)) return;
+    let applied = 0;
+    for (let i = 0; i < r.tenths; i++) if (doAdjust(r.dir, 'hrAdjust', { dir: r.dir, alarm: true })) applied++;
+    if (!applied) return;
+    hrCoachAdj[seg.zone] = Math.round(((hrCoachAdj[seg.zone] || 0) + r.dir * applied / 10) * 10) / 10;
+    diagMark('pulso.ajuste', { dir: r.dir, kmh: applied / 10, ppm: r.avg, amrap: 1 });
+    notify(`Pulso muy alto (${r.avg}): bajamos ${fmt.speed(applied / 10)} km/h`, { icon: 'heart', duration: 4200 });
   }
 
   /** ¿La clase tiene algún tramo que el modo pulso pueda ajustar (trote, carrera o rápido de ≥ 3 min)? */
@@ -4626,6 +4897,9 @@ export function mount(el, { params = {}, query = {} } = {}) {
     if (Object.keys(coachAdj).length) session.hrCoachAdj = coachAdj;
     // El margen de pulso que te dio tu sensación en esta clase (para ver luego si acertó)
     if (cache.effortTol?.ppm > 0) session.hrTol = cache.effortTol.ppm;
+    // «¿Cómo vas?»: lo que contestaste en clase ([segundo, zona, respuesta, pulso]); las preguntas sin respuesta no
+    const answered = checkLog.filter((q) => q.a);
+    if (answered.length) session.checkins = answered.map((q) => [Math.round(q.t), q.zone, q.a, q.bpm ?? null]);
     if (workout.isTest) {
       let stageStart = 0;
       for (const g of workout.segments) { if (Number(g.stage) > 0) break; stageStart += Number(g.sec) || 0; }

@@ -310,10 +310,37 @@ export function expectedAt(plan, T) {
 
 /* ───────────── Plan ───────────── */
 
+/**
+ * Zona MUSICAL de un bloque AMRAP (segment.amrap, js/training/amrap.js): el tramo va como «correr» en la clase, pero
+ * es un esfuerzo a tope de principio a fin. Con trabajo rápido (o sprint) suena como un tramo rápido (136–140 BPM,
+ * entra por su drop); un AMRAP de umbral (trabajo a ritmo de correr) se queda en correr. La recuperación de dentro no
+ * cambia la pista: la música se retira en directo (music.js, amrap()).
+ */
+export function amrapMusicZone(seg) {
+  const wz = seg?.amrap?.workZone;
+  return wz === 'run' || wz === 'jog' ? 'run' : 'fast';
+}
+
 function normSegments(workout) {
   return (Array.isArray(workout?.segments) ? workout.segments : [])
     .filter((s) => s && Number(s.sec) > 0)
-    .map((s) => ({ zone: ZONE_RANK[s.zone] != null ? s.zone : 'jog', sec: Number(s.sec), speed: num(s.speed) }));
+    .map((s) => {
+      const amrap = !!(s.amrap && typeof s.amrap === 'object');
+      const zone = amrap ? amrapMusicZone(s) : ZONE_RANK[s.zone] != null ? s.zone : 'jog';
+      return { zone, sec: Number(s.sec), speed: num(amrap ? s.amrap.workSpeed ?? s.speed : s.speed), ...(amrap ? { amrap: true } : {}) };
+    });
+}
+
+/**
+ * Estilo que más le gusta para las AMRAP: dark techno melódico y trance oscuro (lo mismo que reconoce el sesgo de
+ * Halloween, más el trance y lo melódico). Solo ordena: nunca añade ni quita pistas.
+ */
+export const isDarkStyle = (t) => /dark|techno|mystic|midnight|minimal|psytrance|trance|veiled|night|melodic/i.test(`${t?.id || ''} ${t?.title || ''} ${t?.genre || ''}`);
+/** Puntos extra de una pista para un bloque AMRAP: estilo, energía del cuerpo y drops (el bloque entra por el drop). */
+export function amrapTrackBonus(t, energy = 'normal') {
+  const g = trackGrid(t);
+  if (!g) return 0;
+  return (isDarkStyle(t) ? 1.6 : 0) + g.meanEnergy * 2.2 + (g.hasDrops ? (energy === 'max' ? 1.2 : 0.8) : 0);
 }
 
 /** Duración de la rampa de tempo: 8 compases, o lo que quepa terminando ≥ 10 s antes del final del tramo (mín. 2). */
@@ -412,6 +439,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
 
   const cues = plan.cues;
   const lastUse = new Map();          // trackId → orden de último uso
+  const amrapUsed = new Set();        // pistas que ya sonaron en un bloque AMRAP (no se repiten en el siguiente)
   let useCounter = 0;
   const memory = {};                  // zona → { trackId, pos }
   let active = null;                  // { track, zone, cue }
@@ -430,7 +458,9 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
    * Elige una pista nueva para la zona: sin repetir dentro de la sesión mientras haya alternativas y, dentro del
    * tramo preferido, sin repetir las de las últimas sesiones (si todas son recientes, la que sonó hace más tiempo).
    */
-  function chooseTrack(zone, target, needSec, exclude) {
+  function chooseTrack(zone, target, needSec, exclude, amrap = false) {
+    // AMRAP: fuera también lo que ya sonó en otro bloque AMRAP de esta clase (si queda otra cosa)
+    if (amrap && amrapUsed.size) exclude = new Set([...exclude, ...amrapUsed]);
     const cand = lib.filter((t) => !exclude.has(t.id));
     const pool = cand.length ? cand : lib.filter((t) => t.id !== active?.track?.id);
     const fits = pool.filter((t) => isCandidate(t, target, zone));
@@ -455,6 +485,8 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       let s = -Math.abs(eff / target - 1) * 40 - Math.abs(rate - 1) * 8;
       if (preferred(t, zone)) s += 1;
       if (darkBias && isDark(t)) s += darkBias;
+      // AMRAP: dentro del grupo que toca (la rotación de siempre manda), lo oscuro, con energía y con drops primero
+      if (amrap) s += amrapTrackBonus(t, energy);
       if (INTENSE.has(zone)) {
         s += g.hasDrops ? (energy === 'max' ? 1.4 : 0.5) : 0;
         s += g.meanEnergy * 0.6;
@@ -476,9 +508,9 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
   }
 
   /** Punto de entrada de una pista nueva: drop/hotBar en tramos intensos; mixIn (frase) en el resto. */
-  function freshEntry(track, zone, needSec, rate) {
+  function freshEntry(track, zone, needSec, rate, amrap = false) {
     const g = trackGrid(track);
-    if (INTENSE.has(zone) && g.alignPoints.length) {
+    if ((INTENSE.has(zone) || amrap) && g.alignPoints.length) {
       const need = Math.max(RESUME_MIN_SEC, Math.min(needSec, 90)) * rate;
       const roomy = g.alignPoints.filter((p) => g.outro - p.t >= need);
       const drops = roomy.filter((p) => p.kind === 'drop');
@@ -520,7 +552,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       offset = Math.max(g.firstBar, snapToBar(track, resumePos, 'nearest'));
       entry = 'resume';
     } else {
-      const fe = freshEntry(track, zone, kind === 'intra' ? segs[i].sec - (atSec - starts[i]) : runLength(i), rate);
+      const fe = freshEntry(track, zone, kind === 'intra' ? segs[i].sec - (atSec - starts[i]) : runLength(i), rate, !!segs[i].amrap);
       offset = fe.offset;
       entry = fe.entry;
     }
@@ -545,6 +577,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       segIndex: i, atSec, zone, targetBpm: target, trackId: track.id, offsetSec: offset, rate, transition,
       leadSec: 0, kind, change: 'track', entry, entryAt: atSec, entryPos: offset, mixRate: rate,
       tailSec: 0, rampSec: 0, mixBars: 0, bpm: g.bpm * rate, fromTrackId: out ? out.track.id : null,
+      ...(segs[i].amrap ? { amrap: true } : {}),
     };
 
     if (transition === 'beatmix') {
@@ -623,6 +656,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
 
   function enter(cue, track, zone) {
     markUsed(track.id);
+    if (segs[cue.segIndex]?.amrap) amrapUsed.add(track.id);
     active = { track, zone, cue };
   }
 
@@ -634,9 +668,9 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
     const next = segs[i + 1] || null;
 
     if (!active) {
-      const t = chooseTrack(seg.zone, target, runLength(i), new Set());
+      const t = chooseTrack(seg.zone, target, runLength(i), new Set(), !!seg.amrap);
       const cue = trackChange({ i, atSec: T0, zone: seg.zone, target, track: t, resumePos: null, kind: 'segment', maxTail: seg.sec * 0.4 });
-      if (!INTENSE.has(seg.zone)) { cue.offsetSec = 0; cue.entryPos = 0; cue.entry = 'start'; }
+      if (!INTENSE.has(seg.zone) && !seg.amrap) { cue.offsetSec = 0; cue.entryPos = 0; cue.entry = 'start'; }
       pushCue(cue);
       enter(cue, t, seg.zone);
     } else if (active.zone === seg.zone) {
@@ -646,7 +680,8 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       const pos = posAt(T0);
       const end = seg.zone === 'cooldown' ? g.duration - 2 * g.barSec : g.outro;
       const left = (end - pos) / Math.max(RATE_MIN, rateAt(T0));
-      const keep = (isCandidate(t, target, seg.zone) || Math.abs(target - active.cue.targetBpm) < 0.25) && left >= Math.min(seg.sec, 30);
+      // (un bloque AMRAP empieza siempre con pista nueva y por su drop: no hereda la del tramo de antes)
+      const keep = !seg.amrap && (isCandidate(t, target, seg.zone) || Math.abs(target - active.cue.targetBpm) < 0.25) && left >= Math.min(seg.sec, 30);
       if (keep) {
         const rate = rateForZone(t, target, seg.zone);
         const from = rateAt(T0);
@@ -656,12 +691,13 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
           transition: 'beatmix', leadSec: 0, kind: 'segment', change: changes ? 'tempo' : 'none', entry: 'continue',
           entryAt: T0, entryPos: pos, mixRate: from, tailSec: 0,
           rampSec: changes ? rampLength(g, rate, from, T1 - T0) : 0, mixBars: 0, bpm: g.bpm * rate, fromTrackId: t.id,
+          ...(seg.amrap ? { amrap: true } : {}),
         };
         pushCue(cue);
         active = { ...active, cue };
       } else {
         const exclude = new Set([t.id, ...Object.values(memory).map((m) => m.trackId)]);
-        const nt = chooseTrack(seg.zone, target, runLength(i), exclude);
+        const nt = chooseTrack(seg.zone, target, runLength(i), exclude, !!seg.amrap);
         const cue = trackChange({ i, atSec: T0, zone: seg.zone, target, track: nt, resumePos: null, kind: 'segment', maxTail: seg.sec * 0.4, wanted: 'beatmix' });
         pushCue(cue);
         enter(cue, nt, seg.zone);
@@ -672,7 +708,8 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       const mem = memory[seg.zone];
       let track = null;
       let resumePos = null;
-      if (mem && mem.trackId !== out.track.id) {
+      // (un bloque AMRAP no retoma: pista nueva, sin repetir las de otro bloque AMRAP de la clase)
+      if (mem && mem.trackId !== out.track.id && !seg.amrap) {
         const mt = byId.get(mem.trackId);
         if (mt && isCandidate(mt, target, seg.zone)) {
           const mg = trackGrid(mt);
@@ -683,7 +720,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       }
       if (!track) {
         const exclude = new Set([out.track.id, ...Object.entries(memory).filter(([z]) => z !== seg.zone).map(([, m]) => m.trackId)]);
-        track = chooseTrack(seg.zone, target, runLength(i), exclude);
+        track = chooseTrack(seg.zone, target, runLength(i), exclude, !!seg.amrap);
       }
       delete memory[seg.zone];
       const cue = trackChange({ i, atSec: T0, zone: seg.zone, target, track, resumePos, kind: 'segment', maxTail: seg.sec * 0.4 });
@@ -732,7 +769,7 @@ export function buildMusicPlan(workout, tracks, { seed, announceLead = 10, prefs
       const rest = T1 - m.at;
       if (rest < 6 && (endPos <= hardEnd || rest < 2)) break;
       const exclude = new Set([t.id, ...Object.values(memory).map((x) => x.trackId)]);
-      const nt = chooseTrack(seg.zone, target, rest, exclude);
+      const nt = chooseTrack(seg.zone, target, rest, exclude, !!seg.amrap);
       const maxTail = Math.max(0, Math.min(limit, T1 - 1) - m.at);
       const cue = trackChange({ i, atSec: m.at, zone: seg.zone, target, track: nt, resumePos: null, kind: 'intra', maxTail, wanted: 'beatmix', mixBars: m.bars });
       pushCue(cue);

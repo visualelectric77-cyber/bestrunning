@@ -12,7 +12,7 @@ export const TEST_EVERY_WEEKS = 6;
 export const isTestWeekIndex = (W) => W >= 0 && W % TEST_EVERY_WEEKS === TEST_EVERY_WEEKS - 1;
 
 export const FAMILIES = ['piramide', 'escalera', 'series-cortas', 'series-largas', 'tempo', 'progresivo', 'fartlek', 'cuestas',
-  'umbral', 'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica'];
+  'umbral', 'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica', 'amrap'];
 export const INTENSITIES = ['easy', 'moderate', 'hard'];
 
 /* ───────────── Fases ───────────── */

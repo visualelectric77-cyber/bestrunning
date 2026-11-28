@@ -44,7 +44,7 @@ const TH = {
 };
 /** Familias estructurales. */
 export const FAMILIES = ['piramide', 'escalera', 'series-cortas', 'series-largas', 'tempo', 'progresivo', 'fartlek', 'cuestas', 'umbral',
-  'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica'];
+  'resistencia', 'recuperacion', 'reto', 'test', 'musica', 'tecnica', 'amrap'];
 export const INTENSITIES = ['easy', 'moderate', 'hard'];
 export const EVENT_KEYS = ['navidad', 'verano', 'aniversario', 'halloween'];
 
@@ -1460,6 +1460,148 @@ T({
     out.push(k.flex({ label: 'Trote de soltura' }));
     return numberReps(out);
   }),
+});
+
+/* ───────────── AMRAP: tantas rondas como puedas (js/training/amrap.js) ─────────────
+   Un bloque con TOPE de tiempo; dentro, rondas de trabajo que acaban por METROS y una recuperación por tiempo o por
+   metros. La velocidad la marcas tú con + / − en la app (la misma que pongas en la cinta): cuanto más rápido, antes
+   acaba cada parte y más rondas caben. El tramo del bloque va como «correr» (la media de la ronda); el motor lleva la
+   zona y la velocidad de cada fase. `planOnly`: fuera del sorteo del plan; las coloca el plan solo con el interruptor
+   de Perfil (planner.js, como mucho una por semana en el día duro), y salen en Clases y en el bonus. */
+const AMRAP_T = { category: 'challenge', planOnly: true, family: 'amrap', intensity: 'hard', durations: ALL };
+
+/** Tramo AMRAP de `cap` segundos. o: { workM, work, workZone?, restSec | restM, rest, restZone?, step?, incline?, label?, block?, cue? } */
+function amrapSeg(k, cap, o) {
+  const work = k.spd(o.work);
+  const s = k.seg('run', cap, { speed: work, incline: o.incline || 0, label: o.label || `AMRAP ${Math.round(cap / 60)}′`, block: o.block || 'AMRAP', cue: o.cue || k.cue('mind') });
+  s.amrap = {
+    workM: o.workM, workSpeed: work, workZone: o.workZone || k.near(work),
+    ...(o.restSec ? { restSec: o.restSec } : { restM: o.restM }),
+    restSpeed: k.spd(Math.min(o.rest, work - 0.5)), restZone: o.restZone || 'jog', step: o.step || 0,
+  };
+  return s;
+}
+/** Tope (min) según el bloque principal: 20′ · 30′ · 45′ · 60′, con un poco de azar dentro de cada franja. */
+const capBy = (k, B, opts) => k.rng.pick(B < 1000 ? opts[0] : B < 1500 ? opts[1] : B < 2300 ? opts[2] : opts[3]) * 60;
+const amrapRest = (k, sec, block) => k.rec(sec, { label: 'Trote entre AMRAP', block: block || 'Transición', cue: k.cue('recovery') });
+
+T({
+  ...AMRAP_T, id: 'amrap-400', title: 'AMRAP 400', subtitle: '400 m rápido + 1′ de trote, tantas rondas como puedas', focus: 'Tolerancia al esfuerzo', themes: [TH.records, TH.velocidad],
+  description: 'El clásico de los cuatrocientos: cuatrocientos metros a tu ritmo rápido y un minuto de trote, una y otra vez hasta que se acabe el tiempo. Si subes la cinta, súbela también en la app: cada cuatrocientos acaba antes y caben más rondas.',
+  coachNotes: ['Lo que pongas en la cinta, ponlo en la app con más y menos: así cuentan tus metros.', 'Las dos primeras rondas, contenido: la AMRAP se gana al final.', 'El minuto de trote es corto: respira desde el primer segundo.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[9, 10, 11], [14, 15, 16], [20, 22], [26, 28, 30]]);
+    return [k.flex(), amrapSeg(k, cap, { workM: 400, work: k.F, restSec: k.rng.pick([60, 60, 75]), rest: round1(k.J - 0.2) }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-200-100', title: 'AMRAP 200 / 100', subtitle: '200 m muy rápido + 100 m de trote', focus: 'Velocidad y potencia', themes: [TH.explosividad, TH.velocidad],
+  description: 'Rondas cortas y muy rápidas: doscientos metros por encima de tu ritmo rápido y cien de trote para coger aire. No hay descanso por tiempo: cuanto antes trotes los cien, antes vuelves a sufrir.',
+  coachNotes: ['Doscientos metros pasan rápido: sal fuerte, pero que la técnica aguante.', 'Los cien de trote son para respirar, no para pararte a pensar.', 'Si un día vas sobrado, sube una décima en la cinta y en la app.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[8, 10], [12, 14], [18, 20], [24, 26]]);
+    const v = round1(k.F + (k.S - k.F) * k.rng.pick([0.3, 0.4]));
+    return [k.flex(), amrapSeg(k, cap, { workM: 200, work: v, workZone: 'fast', restM: 100, rest: round1(k.J - 0.3) }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-hill', title: 'AMRAP en cuesta', subtitle: '200 m de subida fuerte + 1′ suave, en la misma cuesta', category: 'hills', requiresIncline: true, focus: 'Fuerza y potencia', themes: [TH.cuestas, TH.explosividad],
+  description: 'La cinta se queda inclinada todo el bloque: doscientos metros de subida a tope de esfuerzo y un minuto suave sin bajar la cuesta. Sin tocar la inclinación, solo la velocidad: tantas subidas como te dejen las piernas.',
+  coachNotes: ['Pasos cortos y rápidos en la subida, el cuerpo un poco adelantado desde los tobillos.', 'En el minuto suave no bajes la cuesta: solo la velocidad.', 'Marca en la app la velocidad que lleves en la cinta para que cuenten tus subidas.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[8, 10], [12, 14], [18, 20], [24, 26]]);
+    const p = k.inc(k.rng.pick([4, 5, 6]));
+    const f = (v) => (p ? round1(v / (1 + (4.5 * p) / 100)) : v);
+    return [k.flex(), amrapSeg(k, cap, { workM: 200, work: f(k.F), workZone: 'fast', restSec: 60, rest: f(k.J - 0.6), incline: p, label: p ? `AMRAP en cuesta ${p} %` : 'AMRAP en subida simulada' }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-double', title: 'Doble AMRAP', subtitle: 'Dos bloques con trote en medio: ¿haces más rondas en el segundo?', focus: 'Tolerancia al esfuerzo', themes: [TH.records, TH.mixto],
+  description: 'Dos AMRAP iguales de trescientos metros rápidos y cuarenta y cinco segundos de trote, con unos minutos de trote entre ellas. El reto es que el segundo bloque no te salga peor que el primero.',
+  coachNotes: ['El primer bloque marca la referencia: no lo regales, pero tampoco lo quemes.', 'En el trote de en medio, baja pulsaciones de verdad.', 'Segundo bloque: igualar las rondas ya es ganar.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const each = capBy(k, B, [[5], [7, 8], [10, 11], [13, 14]]);
+    const gap = k.rng.pick([150, 180]);
+    const o = { workM: 300, work: k.F, restSec: 45, rest: round1(k.J - 0.2) };
+    return [k.flex(), amrapSeg(k, each, { ...o, block: 'AMRAP 1' }), amrapRest(k, gap), amrapSeg(k, each, { ...o, block: 'AMRAP 2', cue: k.cue('last') }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-descending', title: 'AMRAP descendente', subtitle: 'Tres bloques cada vez más cortos y más rápidos', focus: 'Ritmo bajo fatiga', themes: [TH.escaleras, TH.records],
+  description: 'Tres AMRAP seguidas con dos minutos de trote entre ellas: la primera es la más larga y la última la más corta, pero cada una un poco más rápida. Trescientos metros y cuarenta y cinco segundos de trote por ronda.',
+  coachNotes: ['El primer bloque es largo: encuentra un ritmo que puedas repetir.', 'Cada bloque, una décima o dos más: el tiempo se acorta, la velocidad sube.', 'El último es corto: vacía el depósito.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const caps = k.rng.pick(B < 1000 ? [[5, 3, 2]] : B < 1500 ? [[7, 5, 3], [8, 5, 3]] : B < 2300 ? [[8, 6, 4], [9, 6, 4]] : [[12, 10, 8], [12, 9, 6]]);
+    const gap = B < 1000 ? 60 : 120;
+    const out = [k.flex()];
+    caps.forEach((m, i) => {
+      if (i) out.push(amrapRest(k, gap));
+      out.push(amrapSeg(k, m * 60, { workM: 300, work: round1(k.F + 0.2 * i), restSec: 45, rest: round1(k.J - 0.2), block: `AMRAP ${m}′`, cue: i === caps.length - 1 ? k.cue('last') : k.cue('mind') }));
+    });
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return out;
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-climb', title: 'AMRAP que se endurece', subtitle: '400 m + 1′ de trote; cada ronda, dos décimas más', focus: 'Ritmo bajo fatiga', themes: [TH.ritmo, TH.records],
+  description: 'Empieza entre tu ritmo de correr y el rápido, y cada ronda nueva el trabajo sube dos décimas. Al principio parece fácil; al final, cada cuatrocientos cuesta más que el anterior. Tú decides cuándo dejas de subir.',
+  coachNotes: ['Cada ronda, sube dos décimas en la cinta y en la app: la voz te avisa.', 'Si llega un momento en que no puedes subir, mantén: las rondas siguen contando.', 'Las primeras rondas son de regalo: guárdate.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[10, 11], [14, 15], [20, 22], [26, 28]]);
+    return [k.flex(), amrapSeg(k, cap, { workM: 400, work: k.between(k.rng.pick([0.3, 0.4])), workZone: 'fast', restSec: 60, rest: round1(k.J - 0.2), step: 0.2 }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-km', title: 'AMRAP de umbral', subtitle: '1 km a ritmo de correr + 90″ de trote', focus: 'Umbral', themes: [TH.ritmo, TH.resistencia],
+  description: 'Un formato largo para quien aguanta: kilómetros enteros a tu ritmo de correr con noventa segundos de trote entre uno y otro. Menos rondas, pero cada una vale mucho. En las clases cortas, ochocientos metros.',
+  coachNotes: ['Ritmo de correr, no de sprint: tiene que salir igual el último kilómetro que el primero.', 'Noventa segundos de trote: suelta los brazos y baja el pulso.', 'Si vas sobrado, una décima más en la cinta y en la app.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[9, 10], [15, 16], [22, 23], [30, 32]]);
+    return [k.flex(), amrapSeg(k, cap, { workM: B < 1000 ? 800 : 1000, work: round1(k.R + 0.1), workZone: 'run', restSec: k.rng.pick([75, 90, 90]), rest: round1(k.J - 0.3) }), k.flex({ label: 'Trote de soltura' })];
+  }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-emom', title: 'EMOM + AMRAP', subtitle: 'Primero cada minuto en punto; después, tantas rondas como puedas', focus: 'Velocidad y potencia', themes: [TH.velocidad, TH.mixto],
+  description: 'Dos partes: un EMOM, en el que cada minuto en punto empieza un esfuerzo rápido y el resto es trote, y después una AMRAP de doscientos metros rápidos y cien de trote. La primera parte te cansa; la segunda te pone a prueba.',
+  coachNotes: ['En el EMOM manda el reloj: cada minuto en punto, a correr rápido.', 'La AMRAP llega con las piernas ya cargadas: es justo la idea.', 'Marca tu velocidad en la app en la AMRAP: ahí cuentan los metros.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const [em, cap] = B < 1000 ? [4, 6] : B < 1500 ? [6, 10] : B < 2300 ? [8, 16] : [10, 22];
+    const two = k.rng.chance(0.5);
+    const out = [k.flex()];
+    if (two) {
+      for (let i = 0; i < em / 2; i++) {
+        out.push(W(k.fast(50, { off: 0.2, label: '50 segundos', block: 'EMOM', cue: i === 0 ? k.cue('fast') : '' })));
+        out.push(k.jog(70, { off: -0.2, label: 'Hasta el siguiente', block: 'EMOM' }));
+      }
+    } else {
+      for (let i = 0; i < em; i++) {
+        out.push(W(k.fast(30, { off: 0.3, label: '30 segundos', block: 'EMOM', cue: i === 0 ? k.cue('fast') : '' })));
+        out.push(k.jog(30, { off: -0.2, label: 'Hasta el siguiente', block: 'EMOM' }));
+      }
+    }
+    numberReps(out);
+    out.push(amrapRest(k, B < 1000 ? 60 : 120));
+    out.push(amrapSeg(k, cap * 60, { workM: 200, work: k.F, restM: 100, rest: round1(k.J - 0.3), cue: k.cue('last') }));
+    out.push(k.flex({ label: 'Trote de soltura' }));
+    return out;
+  }, { quality: true }),
+});
+
+T({
+  ...AMRAP_T, id: 'amrap-float', title: 'AMRAP flotante', subtitle: '300 m rápido + 200 m a ritmo de correr, sin trotar', focus: 'Umbral', themes: [TH.fartlek, TH.ritmo],
+  description: 'Aquí la recuperación no es trote: trescientos metros rápidos y doscientos a ritmo de correr, sin bajar más. Es la AMRAP más continua de todas: el cuerpo nunca llega a descansar del todo y aprende a recuperar corriendo.',
+  coachNotes: ['Los doscientos de correr son tu descanso: aprende a recuperar sin trotar.', 'Lo que cambies en la cinta, cámbialo en la app: así cuentan los metros.', 'Si se te hace largo, mantén la técnica antes que la velocidad.'],
+  build: (ctx) => frame(ctx, (k, B) => {
+    const cap = capBy(k, B, [[8, 10], [12, 14], [18, 20], [24, 26]]);
+    return [k.flex(), amrapSeg(k, cap, { workM: 300, work: k.F, restM: 200, rest: round1(k.R - k.rng.pick([0.2, 0.4])), restZone: 'run' }), k.flex({ label: 'Trote de soltura' })];
+  }, { quality: true }),
 });
 
 /* ───────────── Contrato de las 39 plantillas originales ───────────── */

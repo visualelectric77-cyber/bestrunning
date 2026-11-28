@@ -236,7 +236,9 @@ function checkPlan(w, plan, label) {
           const cand = isCandidate(mt, c.targetBpm, c.zone);
           const fitsA = cand && fitsAt(mem.pos - 0.01);
           const fitsB = cand && fitsAt(mem.pos + 0.01);
-          if (fitsA && fitsB) must(c.entry === 'resume' && c.trackId === mem.trackId, 'mustResume', `no retoma ${mem.trackId} en ${c.zone} (${label} #${k})`);
+          // (un bloque AMRAP nunca retoma: pista nueva y sin repetir la de otro bloque AMRAP; ver test-music-amrap.mjs)
+          if (fitsA && fitsB && !c.amrap) must(c.entry === 'resume' && c.trackId === mem.trackId, 'mustResume', `no retoma ${mem.trackId} en ${c.zone} (${label} #${k})`);
+          else if (c.amrap) must(c.entry !== 'resume', 'amrapResume', `un bloque AMRAP retoma ${c.trackId} (${label} #${k})`);
           else if (!fitsA && !fitsB) must(c.entry !== 'resume', 'noResume', 'retoma una pista agotada');
         }
         memory[active.zone] = { trackId: active.trackId, pos: cuePosition(active, endT) };

@@ -82,6 +82,35 @@ const nowKey = () => CLOCK || todayKey();
 
 const sched = (state) => weekShape(state?.schedule);
 
+/* ── AMRAP en el plan (Perfil › «AMRAP en el plan», un solo interruptor; apagado por defecto) ──
+   state.plan.amrap = { from: 'AAAA-MM-DD' } (el lunes de la semana en que lo encendiste) o nada. Va en state.plan porque
+   es una regla del plan (como overrides y goal), no un dato tuyo; guardar desde cuándo evita rehacer las semanas de antes
+   (la cadena del plan empieza en la semana 0 y las ventanas dependen de lo planificado). Encendido: en las semanas de
+   carga, una AMRAP (plantillas `amrap-*`, que son `planOnly`) sustituye al día duro entre semana, como mucho una por
+   semana, con la duración de ese día; nunca en descargas, semana de test ni en el bloque de una carrera. Apagado, el plan
+   es exactamente el de siempre. */
+export function amrapPlanFrom(state) {
+  const a = state?.plan?.amrap;
+  if (!a) return null;
+  if (a === true) return startMonday(state);
+  return isKey(a?.from) ? mondayOf(a.from) : startMonday(state);
+}
+/** Valor que guarda el interruptor de Perfil: encendido desde el lunes de esta semana · apagado → null. */
+export function amrapPlanValue(on, todayKeyArg = todayKey()) {
+  return on ? { from: mondayOf(isKey(todayKeyArg) ? todayKeyArg : todayKey()) } : null;
+}
+const AMRAP_POOL = new Map();
+function amrapPool(minutes, incline) {
+  const k = `${minutes}|${incline ? 1 : 0}|${TEMPLATES.length}`;
+  let list = AMRAP_POOL.get(k);
+  if (!list) {
+    list = TEMPLATES.filter((t) => templateMeta(t).family === 'amrap' && !t.event && allows(t, minutes) && (!t.requiresIncline || incline));
+    AMRAP_POOL.set(k, list);
+  }
+  return list;
+}
+const AMRAP_BONUS = 40;   // en su día gana a cualquier otra clase (salvo que rompa la carga de la semana)
+
 const hasIncline = (state) => !!state?.treadmill?.hasIncline;
 const startMonday = (state) => mondayOf(isKey(state?.plan?.startDate) ? state.plan.startDate : todayKey());
 
@@ -463,6 +492,14 @@ function computeWeek(state, W, cache, adapt) {
   const focusDay = foc ? keyDays.filter((d) => slotOrder(d, foc) >= 0).sort((a, b) => slotOrder(a, foc) - slotOrder(b, foc) || (b.w === sch.keyDay) - (a.w === sch.keyDay))[0] || null : null;
   const keepDay = keepCap ? keyDays.find((d) => d !== focusDay && slotOrder(d, keepCap) >= 0) || train.find((d) => d.long && d !== focusDay && d.role !== 'T') || null : null;
 
+  // AMRAP (interruptor de Perfil): el día duro entre semana que no es el del enfoque; el clave solo si no hay otro
+  const amrapFrom = amrapPlanFrom(state);
+  let amrapDay = null;
+  if (amrapFrom && monday >= amrapFrom && !gw && !info.isDeload && !info.isTestWeek) {
+    const c = train.filter((d) => d.role === 'H' && d.w >= 1 && d.w <= 5 && !d.long && !d.event && !d.surprise && d !== focusDay && d !== keepDay);
+    amrapDay = c.find((d) => d.w !== sch.keyDay) || c[0] || null;
+  }
+
   // Objetivo de carga
   const totalMin = train.reduce((a, d) => a + d.minutes, 0);
   const prevLoad = prev ? prev.load : null;
@@ -542,7 +579,8 @@ function computeWeek(state, W, cache, adapt) {
       const want = ROLE_INT[d.role];
       const win = d.long ? WINDOW_LONG : WINDOW_SHORT;
       const scored = [];
-      for (const t of eligible(d.minutes, incline)) {
+      const pool = d === amrapDay ? [...eligible(d.minutes, incline), ...amrapPool(d.minutes, incline)] : eligible(d.minutes, incline);
+      for (const t of pool) {
         // Clases de evento (campo opcional `event`): solo en su evento, y allí con prioridad
         if (t.event && t.event !== d.event?.key) continue;
         const m = templateMeta(t);
@@ -578,6 +616,7 @@ function computeWeek(state, W, cache, adapt) {
           if (specific && d.role === 'H' && d.w !== sch.keyDay && !d.long && gd.thu.includes(m.family)) s += 4;
           if (d.w === simDay && gd.sim.includes(t.id)) s += 9;
         }
+        if (d === amrapDay && m.family === 'amrap') s += AMRAP_BONUS;
         if (recovering && m.intensity === 'easy') s += 2;
         if (d === focusDay && foc.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 14;
         if (d === keepDay && keepCap.families.includes(m.family) && RANK[m.intensity] <= RANK[want]) s += 3;
@@ -731,7 +770,7 @@ function settingsKey(state) {
   const s = sched(state);
   const g = goalSig(state?.plan?.goal);
   return [startMonday(state), Object.values(s.days).join(','), hasIncline(state) ? 1 : 0, TEMPLATES.length].join('|') + (g ? `|${g}` : '')
-    + (isHardEffort(state?.profile) ? '|exigente' : '');
+    + (isHardEffort(state?.profile) ? '|exigente' : '') + (amrapPlanFrom(state) ? `|amrap:${amrapPlanFrom(state)}` : '');
 }
 
 function weekPicks(state, W) {

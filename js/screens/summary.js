@@ -34,6 +34,8 @@ import { diagMark } from '../core/diag.js';
 import { showWatchSync } from '../ui/watch-sync.js';
 import { watchSpeedCardHtml } from '../ui/watch-speed-card.js';
 import { aiAvailable, aiRequest, numbersAreGrounded } from '../integrations/ai.js';
+import { RPE_SCALE, rpeToFeeling, rpeLabel, FEELING_RPE } from '../training/rpe.js';
+import { amrapCompare, amrapResultText } from '../training/amrap.js';
 
 const CAT_NAMES = {
   intervals: 'Intervalos', tempo: 'Tempo', endurance: 'Resistencia', fartlek: 'Fartlek',
@@ -240,7 +242,7 @@ export function mount(el, { params = {} } = {}) {
     }
     const form = isFormMode();
     if (form && !draft) {
-      draft = { feeling: session.feeling ?? null, hrAvg: session.hrAvg ?? null, hrMax: session.hrMax ?? null, notes: session.notes || '' };
+      draft = { feeling: session.feeling ?? null, rpe: session.rpe ?? null, hrAvg: session.hrAvg ?? null, hrMax: session.hrMax ?? null, notes: session.notes || '' };
     }
     const st = getState();
     const s = session;
@@ -318,6 +320,8 @@ export function mount(el, { params = {} } = {}) {
             ${form ? feelCard(s) : ''}
 
             ${s.isTest ? testCard(s, st) : ''}
+
+            ${amrapCard(s, st)}
 
             ${analysisCards(s, st)}
 
@@ -423,6 +427,36 @@ export function mount(el, { params = {} } = {}) {
       </section>`;
   }
 
+  /**
+   * AMRAP (js/training/amrap.js): el resultado de cada bloque, tal como se guardó en la sesión (nunca deducido), y la
+   * comparación con la última vez que hiciste esa misma AMRAP: «Récord: 8 rondas · hoy 7 + 120 m».
+   */
+  function amrapCard(s, st) {
+    if (!Array.isArray(s?.amrap) || !s.amrap.length) return '';
+    let rows = [];
+    try { rows = amrapCompare(s, st?.history || []); } catch { rows = s.amrap.map((r) => ({ ...r, best: null, last: null, isRecord: false })); }
+    const many = rows.length > 1;
+    const item = (r, i) => {
+      const today = amrapResultText(r);
+      const rest = r.restSec ? `${r.restSec} s` : r.restM ? `${r.restM} m` : '';
+      const fmtLine = `${r.workM} m${rest ? ` + ${rest}` : ''} · tope ${fmt.clock(r.cap)}${Number(r.workAvg) > 0 ? ` · ${fmt.speed(r.workAvg)} km/h de media` : ''}`;
+      const cmp = r.skipped ? 'Bloque saltado: cuenta lo que hiciste'
+        : r.isRecord ? `¡Récord! Antes: ${amrapResultText(r.best)}`
+          : r.best ? `Récord: ${amrapResultText(r.best)} · hoy ${today}${r.last && r.last !== r.best ? ` · la última vez ${amrapResultText(r.last)}` : ''}`
+            : 'Primera vez: esta es tu marca';
+      return `<div class="sm-amrap__row${r.isRecord ? ' is-record' : ''}">
+          ${many ? `<span class="sm-amrap__n">Bloque ${i + 1}</span>` : ''}
+          <div class="sm-amrap__big"><span class="num">${esc(String(r.rounds))}</span><small>${r.rounds === 1 ? 'ronda' : 'rondas'}${Number(r.extraM) > 0 ? ` + ${esc(String(r.extraM))} m` : ''}</small>${r.isRecord ? `<em>${icon('trophy', 13)}Récord</em>` : ''}</div>
+          <p class="sm-amrap__fmt">${esc(fmtLine)}</p>
+          <p class="sm-amrap__cmp">${esc(cmp)}</p>
+        </div>`;
+    };
+    return `<section class="card sm-card sm-amrap" style="--i:2">
+        <div class="sm-card__head"><span class="sm-card__title">${many ? 'Tus AMRAP' : 'Tu AMRAP'}</span><span class="sm-opt">Tantas rondas como puedas</span></div>
+        ${rows.map(item).join('')}
+      </section>`;
+  }
+
   function adjustChips(s) {
     const adj = Object.entries(s.adjustments || {}).filter(([, v]) => Number(v));
     if (!adj.length) return '';
@@ -436,17 +470,19 @@ export function mount(el, { params = {} } = {}) {
   function feelCard(s) {
     const f = draft || {};
     const pending = !f.feeling;
+    // Escala del 1 al 10 (js/training/rpe.js): un número, no una cara. La sensación de siempre sale del número;
+    // «No pude terminarla» va aparte. Sesiones de antes de la escala: se marca el número de su sensación.
+    const cur = f.feeling === 'fail' ? null : Number(f.rpe) || FEELING_RPE[f.feeling] || null;
     return `
       <section class="card sm-card sm-feel${pending ? ' is-pending' : ''}" style="--i:2">
-        <div class="sm-card__head"><span class="sm-card__title">¿Cómo te has sentido?</span>${pending ? '<span class="sm-feel__need">Falta para guardar</span>' : ''}</div>
-        <div class="sm-faces" role="radiogroup" aria-label="Sensación">
-          ${feelings().map((x, i) => `
-            <button class="sm-face ${f.feeling === x.key ? 'is-picked' : ''}" role="radio" aria-checked="${f.feeling === x.key}" aria-label="${esc(x.label)}"
-                    data-feel="${esc(x.key)}" style="--i:${i}">
-              ${effortBars(i + 1)}
-              <span class="sm-face__lbl">${esc(x.label)}</span>
-            </button>`).join('')}
+        <div class="sm-card__head"><span class="sm-card__title">¿Cuánto te ha costado?</span>${pending ? '<span class="sm-feel__need">Falta para guardar</span>' : ''}</div>
+        <div class="sm-rpe" role="radiogroup" aria-label="Esfuerzo del 1 al 10">
+          ${RPE_SCALE.map((x) => `
+            <button class="sm-rpe__n${cur === x.n ? ' is-picked' : ''}" role="radio" aria-checked="${cur === x.n}"
+                    aria-label="${x.n}: ${esc(x.label)}" data-rpe="${x.n}" style="--k:${x.n}"><b class="num">${x.n}</b></button>`).join('')}
         </div>
+        <div class="sm-rpe__ends"><span>Nada</span><span class="sm-rpe__word" data-rpe-word>${esc(cur ? rpeLabel(cur) : f.feeling === 'fail' ? 'No pude terminarla' : '')}</span><span>Al máximo</span></div>
+        <button class="sm-rpe__fail${f.feeling === 'fail' ? ' is-picked' : ''}" data-feel="fail" aria-pressed="${f.feeling === 'fail'}">No pude terminarla</button>
         <p class="sm-feel__hint" data-feel-hint>${esc(feelHint(f.feeling, s))}</p>
       </section>`;
   }
@@ -599,7 +635,7 @@ export function mount(el, { params = {} } = {}) {
           <button class="btn btn--ghost sm-edit" data-act="edit"><span>Editar</span></button></div>
         <div class="sm-ro__feel">
           ${effortBars(fi >= 0 ? fi + 1 : 0)}
-          <div><b>${esc(fx?.label || '—')}</b>${s.rpe ? `<span class="muted"> · Esfuerzo ${s.rpe}/10</span>` : ''}</div>
+          <div><b>${esc(s.feeling === 'fail' ? 'No pude terminarla' : s.rpe ? `${s.rpe}/10 · ${rpeLabel(s.rpe)}` : fx?.label || '—')}</b>${s.rpe && s.feeling !== 'fail' && fx ? `<span class="muted"> · ${esc(fx.label)}</span>` : ''}</div>
         </div>
         ${!hasHrSeries(s) && (s.hrAvg || s.hrMax) ? `
           <div class="sm-ro__hr">
@@ -886,6 +922,8 @@ export function mount(el, { params = {} } = {}) {
     const root = el.querySelector('.sm');
     if (!root) return;
     root.addEventListener('click', (e) => {
+      const num = e.target.closest('[data-rpe]');
+      if (num) { pickRpe(Number(num.dataset.rpe), root); return; }
       const face = e.target.closest('[data-feel]');
       if (face) { pickFeeling(face.dataset.feel, root); return; }
       const b = e.target.closest('[data-act]');
@@ -923,16 +961,30 @@ export function mount(el, { params = {} } = {}) {
     root.querySelector('[data-notes]')?.addEventListener('input', (e) => { draft.notes = e.target.value; });
   }
 
-  function pickFeeling(key, root) {
+  /** Un número de la escala: guarda el número y la sensación que le corresponde. */
+  function pickRpe(n, root) {
+    const key = rpeToFeeling(n);
+    if (!draft || !key) return;
+    draft.rpe = n;
+    pickFeeling(key, root, n);
+  }
+
+  function pickFeeling(key, root, n = null) {
     if (!draft) return;
     draft.feeling = key;
+    if (key === 'fail') draft.rpe = 10;
+    else if (n == null) draft.rpe = FEELING_RPE[key] ?? null;
     haptic('selection');
-    root.querySelectorAll('.sm-face').forEach((b) => {
-      const on = b.dataset.feel === key;
+    root.querySelectorAll('.sm-rpe__n').forEach((b) => {
+      const on = key !== 'fail' && Number(b.dataset.rpe) === Number(draft.rpe);
       b.setAttribute('aria-checked', String(on));
       b.classList.toggle('is-picked', on);
       if (on && !reducedMotion()) { b.classList.remove('is-pop'); void b.offsetWidth; b.classList.add('is-pop'); }
     });
+    const fb = root.querySelector('.sm-rpe__fail');
+    if (fb) { fb.classList.toggle('is-picked', key === 'fail'); fb.setAttribute('aria-pressed', String(key === 'fail')); }
+    const word = root.querySelector('[data-rpe-word]');
+    if (word) word.textContent = key === 'fail' ? 'No pude terminarla' : rpeLabel(draft.rpe);
     const hint = root.querySelector('[data-feel-hint]');
     if (hint) { hint.textContent = feelHint(key, session); hint.classList.remove('is-in'); void hint.offsetWidth; hint.classList.add('is-in'); }
     const save = root.querySelector('.sm-save');
@@ -976,8 +1028,8 @@ export function mount(el, { params = {} } = {}) {
     if (saving || !session) return;
     if (!draft?.feeling) {
       haptic('warning');
-      toast('Elige primero cómo te has sentido', { icon: 'info' });
-      const grid = el.querySelector('.sm-faces');
+      toast('Elige primero cuánto te ha costado, del 1 al 10', { icon: 'info' });
+      const grid = el.querySelector('.sm-rpe');
       if (grid && !reducedMotion()) { grid.classList.remove('is-shake'); void grid.offsetWidth; grid.classList.add('is-shake'); }
       grid?.scrollIntoView?.({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center' });
       return;
@@ -1005,7 +1057,7 @@ export function mount(el, { params = {} } = {}) {
     const { hrAvg, hrMax } = readHr();
     setState((d) => {
       const h = (d.history || []).find((x) => x.id === id);
-      if (h) Object.assign(h, { feeling: draft.feeling, rpe: fx?.rpe ?? h.rpe ?? null, hrAvg, hrMax, notes: (draft.notes || '').trim() });
+      if (h) Object.assign(h, { feeling: draft.feeling, rpe: Number(draft.rpe) || fx?.rpe || h.rpe || null, ...(Number(draft.rpe) ? { rpeScale: 10 } : {}), hrAvg, hrMax, notes: (draft.notes || '').trim() });
     });
     editing = false;
     draft = null;
@@ -1024,10 +1076,11 @@ export function mount(el, { params = {} } = {}) {
     const ses = findSession();
     if (!ses) return;
     const fx = feelings().find((x) => x.key === draft.feeling);
-    const rpe = fx?.rpe ?? null;
+    const rpe = Number(draft.rpe) || fx?.rpe || null;
     const { hrAvg, hrMax } = readHr();
     const notes = (draft.notes || '').trim();
-    const updated = { ...ses, feeling: draft.feeling, rpe, hrAvg, hrMax, notes };
+    // rpeScale: 10 = el número lo eligió en la escala del 1 al 10 (las sesiones de antes llevan el de su cara)
+    const updated = { ...ses, feeling: draft.feeling, rpe, ...(Number(draft.rpe) ? { rpeScale: 10 } : {}), hrAvg, hrMax, notes };
     if (ses.isTest && ses.vamAssist && draft.vamApply) updated.vamAssist = { ...ses.vamAssist, applyAnyway: true };
 
     let fb = null;
@@ -1091,7 +1144,7 @@ export function mount(el, { params = {} } = {}) {
       }
       const h = (d.history || []).find((x) => x.id === id);
       if (h) {
-        Object.assign(h, { feeling: draft.feeling, rpe, hrAvg, hrMax, notes, levelChanges: changes });
+        Object.assign(h, { feeling: draft.feeling, rpe, ...(Number(draft.rpe) ? { rpeScale: 10 } : {}), hrAvg, hrMax, notes, levelChanges: changes });
         if (ses.isTest && testRes?.vam) h.test = { ...(h.test || {}), vam: testRes.vam, deltaVam: testRes.deltaVam, deltaFrom: testRes.deltaFrom };
       }
     });

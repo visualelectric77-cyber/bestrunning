@@ -10,9 +10,10 @@ import { mondayOf, hashStr } from '../core/utils.js';
 export const BONUS_MINUTES = [20, 30, 45, 60];
 const allows = (t, minutes) => minutes >= Math.min(...t.durations) && minutes <= Math.max(...t.durations);
 
-/** Formatos de bonus disponibles para esa duración. */
+/** Formatos de bonus disponibles para esa duración: los retos `bonus-*` y las AMRAP (`amrap-*`, desde el 28 nov 2026). */
+const isBonus = (t) => t.bonus || t.family === 'amrap';
 export function bonusTemplates(minutes = null, { hasIncline = false } = {}) {
-  return TEMPLATES.filter((t) => t.bonus && (minutes == null || allows(t, minutes)) && (!t.requiresIncline || hasIncline));
+  return TEMPLATES.filter((t) => isBonus(t) && (minutes == null || allows(t, minutes)) && (!t.requiresIncline || hasIncline));
 }
 
 /** ¿Están hechas todas las sesiones previstas de esa semana (lunes a domingo)? Sin sesiones previstas, no. */
@@ -42,7 +43,7 @@ export function bonusPick(state, dateKey, minutes) {
   const all = bonusTemplates(min, { hasIncline });
   if (!all.length) return null;
   const recent = (Array.isArray(state?.history) ? state.history : [])
-    .filter((s) => s && typeof s.templateId === 'string' && s.templateId.startsWith('bonus-'))
+    .filter((s) => s && typeof s.templateId === 'string' && (s.templateId.startsWith('bonus-') || s.templateId.startsWith('amrap-')))
     .sort((a, b) => (String(a.startedAt) < String(b.startedAt) ? 1 : -1))
     .slice(0, 2).map((s) => s.templateId);
   const fresh = all.filter((t) => !recent.includes(t.id));

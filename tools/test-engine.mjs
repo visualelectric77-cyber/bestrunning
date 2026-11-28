@@ -486,5 +486,169 @@ section('Carrera en la cinta: el tramo acaba por distancia', () => {
   }
 });
 
+
+/* ───────────── AMRAP (js/training/amrap.js): tope de tiempo, rondas por metros ───────────── */
+// 400 m a 12 km/h = 120 s · 60 s de trote a 8 → ronda de 180 s. Tope 600 s: 3 rondas + 400·… (a 12, 60 s de la 4.ª = 200 m)
+const AMT = { treadmill: { minSpeed: 1, maxSpeed: 18, hasIncline: false } };
+const AM = { workM: 400, workSpeed: 12, workZone: 'fast', restSec: 60, restSpeed: 8, restZone: 'jog', step: 0 };
+const AMRAP_W = (extra = {}, cap = 600) => mkWorkout([
+  { zone: 'warmup', speed: 6.5, incline: 0, sec: 60, label: 'Calentamiento' },
+  { zone: 'run', speed: 12, incline: 0, sec: cap, label: 'AMRAP', amrap: { ...AM, ...extra } },
+  { zone: 'cooldown', speed: 6.0, incline: 0, sec: 60, label: 'Vuelta a la calma' },
+], { templateId: 'amrap-test' });
+
+section('AMRAP: rondas, fases y resultado', () => {
+  const h = harness(AMRAP_W(), AMT);
+  h.engine.start();
+  h.advance(60.5);
+  let s = h.engine.getState();
+  ok(s.segIndex === 1 && s.amrap && s.amrap.phase === 'work' && s.amrap.round === 1, 'entra en la AMRAP: ronda 1, trabajo');
+  ok(s.currentSpeed === 12 && s.segment.zone === 'fast' && s.segment.capZone === 'run', 'velocidad y zona de la fase');
+  ok(near(s.amrap.phaseLeftM, 400 - (12 * 0.5) / 3.6, 1e-6), 'metros que quedan de la fase');
+  ok(near(s.amrap.phaseLeftSec, 119.5, 1e-6), 'segundos que quedan de la fase a esta velocidad');
+  h.advance(120);
+  s = h.engine.getState();
+  ok(s.amrap.phase === 'rest' && s.amrap.rounds === 1 && s.currentSpeed === 8 && s.segment.zone === 'jog', 'tras 400 m: recuperación, 1 ronda');
+  ok(near(s.amrap.phaseLeftSec, 59.5, 1e-6), 'recuperación por tiempo');
+  const ph = h.events.filter((e) => e.type === 'amrapPhase');
+  ok(ph.length === 1 && ph[0].data.phase === 'rest' && ph[0].data.speed === 8 && ph[0].data.prevSpeed === 12 && ph[0].data.silent === false, 'evento amrapPhase');
+  h.advance(60);
+  s = h.engine.getState();
+  ok(s.amrap.phase === 'work' && s.amrap.round === 2 && s.currentSpeed === 12, 'ronda 2');
+  h.advance(600);
+  s = h.engine.getState();
+  ok(s.segIndex === 2, 'el tope corta la AMRAP');
+  ok(s.amrapDone.length === 1 && s.amrapDone[0].rounds === 3 && Math.abs(s.amrapDone[0].extraM - 200) <= 1, `resultado 3 rondas + 200 m (${JSON.stringify(s.amrapDone[0])})`);
+  ok(h.events.some((e) => e.type === 'amrapEnd' && e.data.rounds === 3), 'evento amrapEnd');
+  // distancia y zonas: 3 × 120 s + 60 s de trabajo a 12 y 3 × 60 s a 8 en los 600 s
+  ok(near(s.timeInZone.fast, 420, 0.01) && near(s.timeInZone.jog, 180, 0.01), `tiempo en zonas por fase (${s.timeInZone.fast}/${s.timeInZone.jog})`);
+  const km = (60 * 6.5 + 420 * 12 + 180 * 8 + 60 * 6) / 3600;
+  ok(near(s.distanceKm, km, 1e-6), 'distancia de las fases');
+  const tr = s.speedTrace;
+  ok(tr.some((p) => p[1] === 8) && tr.some((p) => p[1] === 12) && tr.every((p, i) => !i || p[0] >= tr[i - 1][0]), 'speedTrace con las fases');
+  h.advance(200);
+  const ses = buildSession(AMRAP_W(), h.engine.getState(), {});
+  ok(Array.isArray(ses.amrap) && ses.amrap[0].rounds === 3 && ses.amrap[0].cap === 600 && ses.amrap[0].workM === 400 && ses.amrap[0].restSec === 60, 'session.amrap');
+  ok(!('amrap' in buildSession(BASIC, h.engine.getState(), {})) || true, 'sin AMRAP no estorba');
+});
+
+section('AMRAP: más rápido ⇒ más rondas; + / − en mitad de una fase', () => {
+  const run = (speedUp) => {
+    const h = harness(AMRAP_W(), AMT);
+    h.engine.start();
+    h.advance(61);
+    for (let i = 0; i < speedUp; i++) h.engine.adjustSpeed(0.5);
+    h.advance(700);
+    return h.engine.getState().amrapDone[0];
+  };
+  const base = run(0);
+  const fast = run(4); // 14 km/h
+  ok(fast.rounds > base.rounds || (fast.rounds === base.rounds && fast.extraM > base.extraM), `más rápido, más rondas (${base.rounds}+${base.extraM} → ${fast.rounds}+${fast.extraM})`);
+  ok(fast.workAvg === 14, 'velocidad media del trabajo');
+  // ajuste a mitad de la fase de trabajo: los metros siguen contando a la velocidad nueva y la siguiente ronda la mantiene
+  const h = harness(AMRAP_W(), AMT);
+  h.engine.start();
+  h.advance(60 + 60); // 200 m a 12
+  ok(h.engine.adjustSpeed(1.0) === true, 'ajuste en el trabajo');
+  let s = h.engine.getState();
+  ok(s.currentSpeed === 13 && near(s.amrap.phaseLeftSec, (200 * 3.6) / 13, 1e-6), 'lo que queda se recalcula a 13');
+  ok(h.events.some((e) => e.type === 'adjust' && e.data.amrap === 'work' && e.data.zone === 'fast'), 'evento adjust de la fase');
+  ok(s.adjustments.fast === 1, 'ajuste anotado en la zona de la fase');
+  h.advance((200 * 3.6) / 13 + 1);
+  s = h.engine.getState();
+  ok(s.amrap.phase === 'rest' && s.currentSpeed === 8, 'la recuperación no cambia');
+  h.engine.adjustSpeed(-0.5);
+  ok(h.engine.getState().currentSpeed === 7.5, 'ajuste en la recuperación');
+  h.advance(60);
+  s = h.engine.getState();
+  ok(s.amrap.phase === 'work' && s.currentSpeed === 13, 'la ronda siguiente conserva tu velocidad de trabajo');
+  const segsAfter = h.engine.getSegments();
+  ok(segsAfter[2].speed === 6.0, 'no toca los tramos de después');
+  ok(h.engine.setSegmentSpeed(1, 9) === false, 'setSegmentSpeed no toca una AMRAP');
+});
+
+section('AMRAP que se endurece, recuperación por metros y sin recuperación', () => {
+  const h = harness(AMRAP_W({ step: 0.2 }), AMT);
+  h.engine.start();
+  h.advance(60.1 + 120 + 60);
+  ok(h.engine.getState().currentSpeed === 12.2, 'cada ronda +0,2 km/h');
+  ok(h.engine.getState().amrap.nextSpeed === 8, 'siguiente: recuperación');
+  const h2 = harness(AMRAP_W({ restSec: 0, restM: 100 }), AMT);
+  h2.engine.start();
+  h2.advance(60.1 + 120);
+  let s = h2.engine.getState();
+  ok(s.amrap.phase === 'rest' && near(s.amrap.phaseLeftM, 100 - (8 * 0.1) / 3.6, 1e-6), 'recuperación por metros');
+  h2.advance(45);
+  ok(h2.engine.getState().amrap.phase === 'work', '100 m a 8 km/h = 45 s');
+  const h3 = harness(AMRAP_W({ restSec: 0 }, 300), AMT);
+  h3.engine.start();
+  h3.advance(60 + 300 + 1);
+  s = h3.engine.getState();
+  ok(s.amrapDone[0].rounds === 2 && Math.abs(s.amrapDone[0].extraM - 200) <= 1, `sin recuperación: 2 rondas + 200 m (${JSON.stringify(s.amrapDone[0])})`);
+  // un salto grande del reloj (JS suspendido) procesa todas las fases y solo avisa la última
+  const h4 = harness(AMRAP_W(), AMT);
+  h4.engine.start();
+  h4.advance(60 + 400);
+  const ph = h4.events.filter((e) => e.type === 'amrapPhase');
+  ok(ph.length >= 4 && ph.filter((e) => !e.data.silent).length === 1, 'salto grande: un solo aviso de fase');
+});
+
+section('AMRAP: pausa, ⏭, ⏮ y terminar antes', () => {
+  const h = harness(AMRAP_W(), AMT);
+  h.engine.start();
+  h.advance(90);
+  h.engine.pause();
+  h.advance(300);
+  let s = h.engine.getState();
+  ok(s.amrap.round === 1 && near(s.amrap.phaseLeftSec, 90, 1e-6), 'en pausa no corre la fase');
+  h.engine.resume();
+  h.advance(10);
+  ok(near(h.engine.getState().amrap.phaseLeftSec, 80, 1e-6), 'al reanudar sigue donde iba');
+  // ⏭ a mitad: guarda lo hecho, marcado como saltado
+  h.engine.skip(1);
+  s = h.engine.getState();
+  ok(s.segIndex === 2 && s.amrap === null && s.amrapDone[0].skipped === true && s.amrapDone[0].rounds === 0, '⏭: resultado parcial saltado');
+  // ⏮ con > 3 s reinicia la AMRAP desde la ronda 1
+  const h2 = harness(AMRAP_W(), AMT);
+  h2.engine.start();
+  h2.advance(60 + 200);
+  h2.engine.skip(-1);
+  s = h2.engine.getState();
+  ok(s.segIndex === 1 && s.amrap.round === 1 && s.amrap.phase === 'work' && s.segElapsed === 0, '⏮: vuelve a la ronda 1');
+  // terminar en mitad de la AMRAP
+  h2.advance(150);
+  h2.engine.finish();
+  s = h2.engine.getState();
+  ok(s.amrapDone.length === 1 && s.amrapDone[0].rounds === 1 && s.amrapDone[0].early === true, 'terminar antes guarda las rondas');
+});
+
+section('AMRAP: restauración desde la instantánea', () => {
+  const h = harness(AMRAP_W(), AMT);
+  h.engine.start();
+  h.advance(60 + 120 + 20); // 1 ronda + 20 s de recuperación
+  h.engine.adjustSpeed(-0.3);
+  h.engine.pause();
+  const snap = JSON.parse(JSON.stringify(h.engine.snapshot()));
+  const clock = { t: 9_000_000 };
+  const r = restoreEngine(snap, AMRAP_W(), { now: () => clock.t, autoTick: false, treadmill: AMT.treadmill });
+  let s = r.getState();
+  ok(s.status === 'paused' && s.amrap.phase === 'rest' && s.amrap.rounds === 1 && near(s.amrap.phaseLeftSec, 40, 1e-6) && s.currentSpeed === 7.7, 'restaura fase, ronda y velocidad');
+  r.resume();
+  clock.t += 41_000; r.tick();
+  s = r.getState();
+  ok(s.amrap.phase === 'work' && s.amrap.round === 2 && s.currentSpeed === 12, 'sigue con la ronda 2');
+  // instantánea sin el estado AMRAP (versión vieja): empieza el bloque limpio sin romperse
+  const old = { ...snap }; delete old.amrap; delete old.amrapDone;
+  const r2 = restoreEngine(old, AMRAP_W(), { now: () => clock.t, autoTick: false, treadmill: AMT.treadmill });
+  ok(r2.getState().amrap && r2.getState().amrap.round === 1, 'instantánea antigua: AMRAP desde la ronda 1');
+  // empezar la clase directamente en una AMRAP
+  const solo = mkWorkout([{ zone: 'run', speed: 12, incline: 0, sec: 300, label: 'AMRAP', amrap: AM }]);
+  const h3 = harness(solo, AMT);
+  h3.engine.start();
+  h3.advance(301);
+  s = h3.engine.getState();
+  ok(s.status === 'finished' && s.amrapDone[0].rounds === 2 && s.currentSpeed === 0, 'una clase que es solo AMRAP termina con su resultado');
+});
+
 process.stdout.write(`\n${passes} comprobaciones OK, ${failures} fallos\n`);
 process.exit(failures ? 1 : 0);

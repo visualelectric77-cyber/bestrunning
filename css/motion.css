@@ -147,7 +147,10 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  padding: 6px 11px;
+  /* el aire de arriba y abajo va en un borde transparente (el fondo pasa por debajo): con padding, la 3.ª línea
+     recortada asomaba por abajo */
+  padding: 0 11px;
+  border-block: 6px solid transparent;
   border-radius: 8px;
   background: rgba(11, 13, 18, 0.8);
   font: 600 13.5px/1.32 var(--font);

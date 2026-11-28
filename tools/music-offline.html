@@ -20,7 +20,7 @@
 <p>Clase real + plan real + motor real sobre un contexto offline; analiza huecos, clics, baches relativos y sonoridad, y sube informe y WAV al servidor del laboratorio.
   Parámetros: <code>?only=piramide|bloques|lenta|retardo3|retardo12|congelado</code> (varias con comas) · <code>?step=0.25</code> · <code>?upload=0</code> ·
   <code>?vols=0.8,1</code> (cada sesión a esos volúmenes) · <code>?ch=2</code> (todas en estéreo) · <code>?lite=1</code> (solo niveles: sin clics/huecos/baches) ·
-  <code>?tag=nombre</code> (informe <code>nombre.json</code>) · <code>?ab=1</code> (sube el pasaje de 15 s con aviso del coach de la Pirámide) · <code>?master={…}</code> (ajustes del maestro, pruebas)</p>
+  <code>?tag=nombre</code> (informe <code>nombre.json</code>) · <code>?only=amrap&amp;noam=1</code> (la AMRAP sin reacción en directo, para comparar) · <code>?nosfx=1</code> (sin efectos grabados) · <code>?ab=1</code> (sube el pasaje de 15 s con aviso del coach de la Pirámide) · <code>?master={…}</code> (ajustes del maestro, pruebas)</p>
 <div id="status">Preparando…</div>
 <pre id="log"></pre>
 <script type="module">
@@ -28,6 +28,7 @@ import { buildWorkout } from '../js/training/generator.js';
 import { buildMusicPlan, trackGrid } from '../js/audio/music-plan.js';
 import { loadLibrary, libraryById, fetchTrackData } from '../js/audio/music-library.js';
 import { createMusicEngine } from '../js/audio/music.js';
+import { createEngine } from '../js/player/engine.js';
 import { clipGapAfter } from '../js/audio/audio-engine.js';
 import { speedClip, PACK_SCRIPT } from '../js/audio/voice-pack.js';
 
@@ -111,6 +112,12 @@ const SESSIONS = [
     key: 'congelado', name: 'piramide-20-js-dormido-y-reloj-parado', label: 'Pirámide 20′ · JS dormido y reloj parado', template: 'pyramid',
     minutes: 20, seed: 7, channels: 1, sr: 44100, excerpts: false,
     events: [{ at: 400, kind: 'sleep', sec: 20 }, { at: 820, kind: 'freeze', sec: 8 }],
+  },
+  {
+    // AMRAP con la música en directo (music.js, amrap()): el motor de la clase de verdad da la fase de cada paso; en
+    // la recuperación la música se retira, cada ronda entra tras su subida y golpe, los últimos 30 s van a tope
+    key: 'amrap', name: 'amrap-400-30', label: 'AMRAP 400 30′ · música en directo', template: 'amrap-400', minutes: 30, seed: 1,
+    channels: 1, sr: 44100, excerpts: false, amrap: true, events: [],
   },
 ];
 
@@ -222,7 +229,9 @@ async function render(S, tracks) {
       p.go = () => { p.state = 'go'; fetchTrackData(t).then(resolve, reject).finally(() => { p.state = 'done'; }); };
       pendingLoads.push(p);
     }) : null;
-  const eng = createMusicEngine({ context: ctx, now: () => ctx.currentTime, decodeTimeoutMs: 120000, loadData, ...(MASTER ? { master: MASTER } : {}) });
+  // ?nosfx=1: sin los efectos grabados (los sintetizados de siempre), para comparar
+  const noSfx = qs.get('nosfx') === '1' ? { loadSfx: () => Promise.reject(new Error('sin efectos grabados')) } : {};
+  const eng = createMusicEngine({ context: ctx, now: () => ctx.currentTime, decodeTimeoutMs: 120000, loadData, ...noSfx, ...(MASTER ? { master: MASTER } : {}) });
   if (S.volume != null) eng.setVolume(S.volume);
   log(`${S.label}${S.volume != null ? ` · volumen ${Math.round(S.volume * 100)} %` : ''}: ${w.segments.length} tramos · ${plan.cues.length} cues · ${Math.round(w.totalSec)} s de clase · render ${Math.round(renderSec)} s · ${ctx.destination.channelCount} canal(es)`);
   setStatus(`${S.label}: decodificando la primera pista…`);
@@ -259,6 +268,23 @@ async function render(S, tracks) {
   let asleepUntil = -1;
   const sleeps = [];
   const freezes = [];
+  // AMRAP: motor de la clase con el reloj del render (sus eventos de fase van a la música como en el reproductor)
+  const amrapLog = [];
+  // ?noam=1: la misma clase sin la reacción AMRAP (referencia para comparar huecos, clics y baches)
+  const cls = S.amrap && qs.get('noam') !== '1' ? createEngine(w, {
+    now: () => 1e6 + classT * 1000, autoTick: false, treadmill: { maxSpeed: 18, minSpeed: 1, announceLead: 10 },
+    onEvent: (type, d) => {
+      if (type !== 'amrapPhase' && type !== 'amrapEnd') return;
+      amrapLog.push({ type, classT, ctxT: ctx.currentTime, phase: d?.phase || null });
+      eng.amrapEvent(type, d, cls.getState().amrap);
+    },
+  }) : null;
+  const clsState = () => {
+    if (!cls) return {};
+    if (cls.getState().status === 'ready') cls.start();
+    cls.tick();
+    return { amrap: cls.getState().amrap };
+  };
 
   const onStep = async (t) => {
     if (!started) { eng.start(0); started = true; rendering = true; marks.push([ctx.currentTime, 0, 'run']); return; }
@@ -313,7 +339,7 @@ async function render(S, tracks) {
     if (classT >= w.totalSec) {
       if (!finished) { finished = true; eng.update(w.totalSec, { status: 'finished' }); }
       else eng.update(w.totalSec, { status: 'finished' });
-    } else eng.update(classT, { status: 'running' });
+    } else eng.update(classT, { status: 'running', ...clsState() });
     marks.push([ctx.currentTime, classT, 'run']);
     const st = eng.status();
     if (st.dyn) grLog.push([ctx.currentTime, st.dyn.glue ?? null, st.dyn.limiter ?? null]);
@@ -361,7 +387,8 @@ async function render(S, tracks) {
   const finalStatus = eng.status();
   eng.destroy();
   for (const v of voiceLog) if (!(v.stopC < Infinity)) v.stopC = Infinity;
-  return { S, w, plan, starts, buf, marks, decodes, kinds, jobs, pauses, seeks, sleeps, freezes, renderMs, waitMs, finalStatus, voice, byId, voiceLog, grLog };
+  cls?.destroy();
+  return { S, w, plan, starts, buf, marks, decodes, kinds, jobs, pauses, seeks, sleeps, freezes, renderMs, waitMs, finalStatus, voice, byId, voiceLog, grLog, amrapLog };
 }
 
 /* ───────────── Análisis ───────────── */
@@ -1026,6 +1053,12 @@ async function analyse(R, cal) {
   const chs = [];
   for (let c = 0; c < buf.numberOfChannels; c++) chs.push(buf.getChannelData(c));
   const fxTimes = [...R.jobs.values()].filter((j) => j.kind === 'riser-drop').map((j) => j.swap);
+  // efectos de la AMRAP y efectos grabados (campana, golpe, final del riser): sus ataques son a propósito, no clics
+  {
+    const cmap = makeMap(R.marks);
+    for (const x of R.finalStatus.sfx?.log || []) { fxTimes.push(cmap(x.at)); if (x.name === 'riser') fxTimes.push(cmap(x.end)); }
+    for (const e of R.amrapLog || []) fxTimes.push(e.ctxT);
+  }
   const refs = makeRefs(R.byId, buf.numberOfChannels);
   setStatus(`${R.S.label}: verificando ${cand.length} candidatos a clic contra la música sola…`);
   const ver = LITE ? { clicks: [], explained: 0, inaudible: 0, fx: 0, candidates: 0 } : await verifyClicks(chs, sr, cand, R.voiceLog, fxTimes, R.byId, refs);
@@ -1310,8 +1343,34 @@ async function main() {
       buffersPeak: R.finalStatus.buffers.peak, buffersPeakMB: Math.round(R.finalStatus.buffers.peakBytes / 2 ** 20),
       decodeRates: Object.values(R.finalStatus.buffers.info).reduce((a, x) => { a[x.rate] = (a[x.rate] || 0) + 1; return a; }, {}),
       subst: R.finalStatus.subst, rides: R.voiceLog.filter((v) => v.ride).length, stalls: R.finalStatus.stalls, seeks: R.finalStatus.seeks,
-      volume: S.volume ?? 0.8, levels: A.levels, coach: A.coach,
+      volume: S.volume ?? 0.8, levels: A.levels, coach: A.coach, sfx: R.finalStatus.sfx || null,
     };
+    if (R.amrapLog?.length) {
+      // AMRAP: nivel (RMS, dBFS) de cada fase en el render, sin los 3 s de cada borde: la recuperación más baja, nunca muda
+      const map = makeMap(R.marks);
+      const ch = R.buf.getChannelData(0);
+      const sr = R.buf.sampleRate;
+      const rmsDb = (t0, t1) => {
+        const a = Math.max(0, Math.floor(map(t0) * sr));
+        const b = Math.min(ch.length, Math.floor(map(t1) * sr));
+        let acc = 0;
+        for (let i = a; i < b; i++) acc += ch[i] * ch[i];
+        return b > a ? r1(10 * Math.log10(acc / (b - a) + 1e-12)) : null;
+      };
+      const ai = R.w.segments.findIndex((g) => g.amrap);
+      const capEnd = R.starts[ai] + R.w.segments[ai].sec;
+      const rows = [];
+      let prev = { classT: R.starts[ai], phase: 'work' };
+      for (const e of R.amrapLog) {
+        const to = Math.min(e.classT, capEnd - 30);
+        if (to - prev.classT > 8) rows.push({ phase: prev.phase, from: r1(prev.classT), to: r1(to), db: rmsDb(prev.classT + 3, to - 3.5) });
+        prev = e;
+      }
+      rows.push({ phase: 'a tope', from: r1(capEnd - 29), to: r1(capEnd - 1), db: rmsDb(capEnd - 29, capEnd - 1) });
+      const med = (k) => { const xs = rows.filter((x) => x.phase === k && x.db != null).map((x) => x.db).sort((x, y) => x - y); return xs.length ? xs[xs.length >> 1] : null; };
+      sess.amrap = { events: R.amrapLog.map((e) => ({ ...e, classT: r1(e.classT), ctxT: r1(e.ctxT) })), phases: rows, workDb: med('work'), restDb: med('rest'), topDb: med('a tope'), plans: R.finalStatus.amrap?.plans ?? null, log: R.finalStatus.amrap?.log || [] };
+      log(`  AMRAP: ${R.amrapLog.length} eventos · trabajo ${sess.amrap.workDb} dBFS · recuperación ${sess.amrap.restDb} dBFS (${sess.amrap.workDb != null && sess.amrap.restDb != null ? r1(sess.amrap.restDb - sess.amrap.workDb) : '—'} dB) · últimos 30 s ${sess.amrap.topDb} dBFS · fases: ${rows.map((x) => `${x.phase} ${x.db}`).join(' · ')}`);
+    }
     if (A.ab) {
       const up = await upload('audio', `${TAG || 'music-offline'}-pasaje-${S.name}.wav`, wav(A.ab.chans, R.buf.sampleRate));
       sess.abPassage = { from: A.ab.from, cueAt: A.ab.cueAt, classT: A.ab.classT, zone: A.ab.zone, ids: A.ab.ids, file: up?.file || null };

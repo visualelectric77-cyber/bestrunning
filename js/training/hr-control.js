@@ -59,7 +59,8 @@ export function calibrateClass(model, a, segments, targetOf, { hr0 = null, minSp
   const changes = [];
   segs.forEach((s, i) => {
     let tgt = null;
-    if (WORK.has(s.zone) && s.sec >= LONG_SEC) { try { tgt = targetOf(s); } catch { tgt = null; } }
+    // (una AMRAP no se calibra: su velocidad la marcas tú con + / −)
+    if (WORK.has(s.zone) && s.sec >= LONG_SEC && !s.amrap) { try { tgt = targetOf(s); } catch { tgt = null; } }
     if (tgt && tgt.max > tgt.min) {
       const mid = (tgt.min + tgt.max) / 2;
       const planned = s.speed;

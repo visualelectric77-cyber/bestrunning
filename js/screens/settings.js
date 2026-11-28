@@ -9,7 +9,7 @@ import {
 } from '../training/levels.js';
 import { sessionTally, sessionsText } from '../training/stats.js';
 import { CATEGORIES } from '../training/templates.js';
-import { planWeek, cycleInfo, CYCLE_WEEKS } from '../training/planner.js';
+import { planWeek, cycleInfo, CYCLE_WEEKS, amrapPlanValue } from '../training/planner.js';
 import { scheduleDays, weekShape } from '../training/week-shape.js';
 import { weekEditorHtml, weekEditorInner, weekEditorTap, weekEditorDayOf } from '../ui/week-editor.js';
 import { APP_VERSION } from '../version.js';
@@ -385,6 +385,9 @@ function profileHtml(s) {
     ${group('Exigencia', `
       ${toggleRow('st-effort', 'Entreno exigente', 'Para mejorar marcas: lo duro, más duro; lo suave, igual de suave', p.effort === 'hard')}
     `, 'En los tramos rápidos y de ritmo la app deja subir más tu pulso antes de bajarte la velocidad (los rápidos, hasta 5 ppm de tu FC máxima), no convierte una sesión dura en suave por un día de pulso alto y sube tus velocidades también cuando valoras «Exigente» y los datos lo respaldan. El pulso sigue mandando: si te pasas de ese techo, te baja. No es un consejo médico: si tienes dudas, consulta antes con tu médico.')}
+    ${group('AMRAP', `
+      ${toggleRow('st-amrap', 'AMRAP en el plan', 'Una vez por semana, el día duro entre semana es una AMRAP', !!s.plan?.amrap)}
+    `, 'AMRAP: tantas rondas como puedas en un tiempo fijo. Desde esta semana, como mucho una por semana, en el día duro y con su duración; nunca en las semanas de descarga, de test ni en el bloque de una carrera. En cada ronda marca con − / + la velocidad que lleves en la cinta: así cuentan tus metros. Apagado, tu plan es el de siempre; las AMRAP siguen en Clases y en el bonus.')}
     <div class="st-group">
       <div class="st-group__title">Tus zonas de pulso</div>
       <div class="list st-hrzones" data-hrzones>${hrZonesHtml(s)}</div>
@@ -2614,6 +2617,9 @@ const PAGES = {
       } else if (id === 'st-sex') {
         haptic('selection');
         ctx.save((d) => { d.profile.sex = v === 'f' ? 'f' : 'm'; });
+      } else if (id === 'st-amrap') {
+        haptic('selection');
+        ctx.save((d) => { const a = amrapPlanValue(!!v, todayKey()); if (a) d.plan.amrap = a; else delete d.plan.amrap; });
       } else if (id === 'st-effort') {
         haptic('selection');
         ctx.save((d) => { d.profile.effort = v ? 'hard' : null; });

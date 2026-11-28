@@ -1048,6 +1048,16 @@ function driftVoiceAllowed(now) {
   return true;
 }
 
+/* AMRAP (js/training/amrap.js): frases fijas grabadas (sin la grabación, la voz calla; en pantalla sale igual) y su
+   texto para la voz del sistema. Los cambios de fase usan los avisos de siempre: «Atento, bajamos a…» + la cifra. */
+const AMRAP_CLIPS = { amrapGo: 'amrapgo_1', amrapApp: 'amrapapp_1', amrapEnd: 'amrapend_1', amrapRecord: 'amraprecord_1' };
+const AMRAP_TTS = {
+  amrapGo: '¡Empieza la AMRAP! Tantas rondas como puedas. Pon la velocidad que aguantes y márcala en la pantalla.',
+  amrapApp: 'Si cambias la cinta, cámbiala también en la app: así cuentan tus metros.',
+  amrapEnd: '¡Tiempo! Se acabó la AMRAP. Mira tus rondas en la pantalla.',
+  amrapRecord: '¡Récord! Más rondas que nunca en esta AMRAP.',
+};
+
 /** Consejos con cifra de `say('advise', { cue, speed })`: grupo de la portadora, seguido de la velocidad. */
 const ADVISE_GROUPS = {
   hrdown: 'hrsugdown', hrup: 'hrsugup', racedown: 'racesugdown', raceup: 'racesugup', wslow: 'wslow', wfast: 'wfast',
@@ -1463,6 +1473,13 @@ export function createCoach(workout, settings = {}) {
         if (kind === 'watchDrift' && !driftVoiceAllowed(Date.now())) return Promise.resolve();
         return go(packItem('advise', [c, s], 2, { replace: true }));
       }
+      case 'checkin':
+      case 'checkok': {
+        // «¿Cómo vas?» (js/training/checkin.js): solo con la frase grabada; sin ella, la pregunta sale solo en pantalla
+        const id = `${kind}_1`;
+        if (!avail.has(id)) return Promise.resolve();
+        return go(packItem(kind, [id], kind === 'checkin' ? 2 : 1));
+      }
       case 'hrOk':
       case 'hrOn': {
         // Modo pulso: «Vas en tu zona. Muy bien.» (ánimo, nunca cambia nada) / «Hoy te guío por tu pulso.» (una vez,
@@ -1477,6 +1494,24 @@ export function createCoach(workout, settings = {}) {
         const id = `vam${String(v.cue || '')}_1`;
         if (!avail.has(id)) return Promise.resolve();
         return go(packItem(kind, [id], v.cue === 'over' || v.cue === 'odd' || v.cue === 'safe' ? 3 : 2));
+      }
+      case 'amrapPre': {
+        // AMRAP: unos segundos antes del cambio de fase, «Atento, bajamos a… ocho coma tres.» (lo cambias tú en la cinta)
+        const ids = pc('pre', { speed: toNumber(v.speed), dir: v.dir === 'down' ? 'down' : 'up', zone: v.zone, fromHard: !!v.fromHard, variant: Math.random() < 0.5 ? 0 : 1 });
+        return go(packItem('amrapPre', ids, 3, { replace: true }));
+      }
+      case 'amrapNow': {
+        // en el cambio: «Trote. Recupera. Ocho coma tres.» / «¡Ahora! Correr rápido. Once coma cinco.»
+        const ids = pc('now', { zone: v.zone, speed: toNumber(v.speed), sec: 0, fromHard: !!v.fromHard });
+        return go(packItem('amrapNow', ids, 3, { replace: true }));
+      }
+      case 'amrapGo':
+      case 'amrapApp':
+      case 'amrapEnd':
+      case 'amrapRecord': {
+        const id = AMRAP_CLIPS[kind];
+        if (!avail.has(id)) return Promise.resolve();
+        return go(packItem(kind, [id], kind === 'amrapApp' ? 2 : 3, { replace: kind === 'amrapApp' }));
       }
       case 'adjust': {
         // "Once coma seis." confirma el ajuste
@@ -1534,6 +1569,23 @@ export function createCoach(workout, settings = {}) {
         return go(line('pause', {}, 3, { preempt: true }));
       case 'resume':
         return go(line('resume', { speed: v.speed ?? seg?.speed ?? '' }, 3, { preempt: true }));
+      case 'amrapPre': {
+        if (!Number.isFinite(toNumber(v.speed))) return Promise.resolve();
+        const cat = v.dir === 'down' ? (v.fromHard ? 'toRecover' : 'slowDown') : v.zone === 'sprint' ? 'toSprint' : v.zone === 'fast' ? 'toFast' : 'speedUp';
+        return go(line(cat, { lead: v.lead ?? 10, speed: v.speed }, 3, { kind: 'amrapPre', require: ['lead', 'speed'], replace: true }));
+      }
+      case 'amrapNow': {
+        if (!Number.isFinite(toNumber(v.speed))) return Promise.resolve();
+        const cat = v.dir === 'down' && v.fromHard ? 'nowRecover' : v.zone === 'sprint' ? 'nowSprint' : 'now';
+        return go(line(cat, { zone: v.zone, speed: v.speed, dur: v.dur ?? '' }, 3, { kind: 'amrapNow', require: ['speed'], replace: true }));
+      }
+      case 'amrapGo':
+      case 'amrapApp':
+      case 'amrapEnd':
+      case 'amrapRecord': {
+        const text = kind === 'amrapEnd' && v.result ? `¡Tiempo! ${v.result}.` : AMRAP_TTS[kind];
+        return go({ kind, priority: kind === 'amrapApp' ? 2 : 3, text, clips: null, voice: 'tts', segIndex: segIdxAt(lastT ?? 0), replace: kind === 'amrapApp' });
+      }
       case 'hrAdjust': // voz del sistema: solo la velocidad, como «adjust»
       case 'adjust':
         if (!Number.isFinite(toNumber(v.speed))) return Promise.resolve();

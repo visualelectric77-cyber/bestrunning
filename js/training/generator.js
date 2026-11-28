@@ -6,6 +6,7 @@ import { isRaceTemplate, buildRaceWorkout, RACE_PREFIX } from './race.js';
 import { round1, roundTo, clamp, hashStr, makeRng, fmt } from '../core/utils.js';
 import { ZONES, LEVEL_KEYS, DEFAULT_LEVELS, enforceLevelOrder, kcalPerMinute, clampSpeed, vamFromLevels } from './levels.js';
 import { getTemplate } from './templates.js';
+import { normAmrap, amrapExpected } from './amrap.js';
 
 const DEFAULT_TREADMILL = { hasIncline: false, maxIncline: 12, minSpeed: 1.0, maxSpeed: 18.0, announceLead: 10 };
 const ZONE_KEYS = Object.keys(ZONES);
@@ -46,6 +47,16 @@ function normalizeSegments(segs, tm, hasIncline) {
       if (s.block) out.block = String(s.block);
       if (s.rep && s.rep.n > 0 && s.rep.i >= 1) out.rep = { i: Math.round(s.rep.i), n: Math.round(s.rep.n) };
       if (Number.isFinite(s.stage)) out.stage = s.stage;
+      // AMRAP (js/training/amrap.js): velocidades de sus fases dentro de la cinta; el tramo lleva la de trabajo
+      if (s.amrap) {
+        const a = normAmrap(s.amrap, s);
+        if (a) {
+          a.workSpeed = clampSpeed(a.workSpeed, tm);
+          a.restSpeed = clampSpeed(a.restSpeed, tm);
+          out.amrap = a;
+          out.speed = a.workSpeed;
+        }
+      }
       return out;
     });
 }
@@ -64,7 +75,8 @@ function fitToDuration(segs, target) {
     return segs;
   }
   let need = -diff;
-  const order = [...segs.filter((s) => EASY.has(s.zone)), ...segs.filter((s) => !EASY.has(s.zone))];
+  // (el tope de una AMRAP no se recorta: es parte del formato)
+  const order = [...segs.filter((s) => EASY.has(s.zone)), ...segs.filter((s) => !EASY.has(s.zone) && !s.amrap)];
   for (const s of order.sort((a, b) => b.sec - a.sec)) {
     if (need <= 0) break;
     const take = Math.min(need, Math.max(0, s.sec - 30));
@@ -86,7 +98,7 @@ function mergeAdjacent(segs) {
   const out = [];
   for (const s of segs) {
     const p = out[out.length - 1];
-    if (p && p.zone === s.zone && p.speed === s.speed && p.incline === s.incline && p.label === s.label && !p.rep && !s.rep && p.stage === s.stage) {
+    if (p && p.zone === s.zone && p.speed === s.speed && p.incline === s.incline && p.label === s.label && !p.rep && !s.rep && p.stage === s.stage && !p.amrap && !s.amrap) {
       p.sec += s.sec;
       if (!p.cue && s.cue) p.cue = s.cue;
       continue;
@@ -107,6 +119,22 @@ export function summarizeSegments(segments, weightKg = 78) {
   for (const s of segments || []) {
     const sec = Number(s.sec) || 0;
     const zone = ZONES[s.zone] ? s.zone : 'jog';
+    if (s.amrap && sec > 0) {
+      // AMRAP: lo previsto si se corre tal como viene (tiempo de trabajo y de recuperación, en segundos enteros)
+      const e = amrapExpected(s);
+      const work = Math.min(sec, Math.round(e.workSec));
+      const parts = [[s.amrap.workZone, s.amrap.workSpeed, work], [s.amrap.restZone, s.amrap.restSpeed, sec - work]];
+      totalSec += sec;
+      for (const [z0, v, t] of parts) {
+        const z = ZONES[z0] ? z0 : 'jog';
+        km += (v * t) / 3600;
+        kcal += (kcalPerMinute(v, Number(s.incline) || 0, weightKg || 78) * t) / 60;
+        timeInZone[z] += t;
+        weighted += t * ZONES[z].weight;
+      }
+      if (s.speed > maxSpeed) maxSpeed = s.speed;
+      continue;
+    }
     totalSec += sec;
     km += ((Number(s.speed) || 0) * sec) / 3600;
     kcal += (kcalPerMinute(Number(s.speed) || 0, Number(s.incline) || 0, weightKg || 78) * sec) / 60;

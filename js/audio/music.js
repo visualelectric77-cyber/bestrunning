@@ -6,8 +6,9 @@
 //
 // Voz:     fuente → trim (gainDb) → hp → lp → lowShelf 200 Hz (graves) → gain (mezcla) → kill (cortes/pausa)
 //          → dry → bus;   kill → send → eco.
-// Maestro: bus → hp → lp → drive → glue (compresor suave) → limitador → trim → duck (voz) → fade (pausa/fin)
-//          → music (volumen) → destino (+ analizador). Dinámica a nivel fijo; voz, pausas y volumen, después.
+// Maestro: bus → amLp → amGain (AMRAP) → hp → lp → drive → glue (compresor suave) → limitador → trim → duck (voz)
+//          → fade (pausa/fin) → music (volumen) → destino (+ analizador). Dinámica a nivel fijo; voz, pausas y volumen,
+//          después. amLp/amGain solo los mueve amrap() (bloques AMRAP en directo); fuera de un AMRAP, abiertos (20 kHz, 1).
 // Eco:     DelayNode (3/4 de tiempo) ⟲ lowpass/highpass · feedback 0,45 → drive.  FX (riser, impact) → fx → drive.
 // Tiempo:  c (reloj del contexto) = base + T (s de clase); update(T) re-ancla base poco a poco.
 // Tempo:   cada voz suena a un rate fijo (±3 % como mucho; en beatmix el que iguala a la saliente). Sin rampas.
@@ -76,6 +77,62 @@ const SEEK_FADE = 1;
 const LATE_FADE = 1.5;
 const START_FADE = 2.5;
 const RESYNC = 1.5;
+// AMRAP en directo (amrap()): la recuperación «retira» la música (paso bajo y algo de volumen, como el break de un DJ;
+// nunca muda: el glue de después la sostiene), cada ronda de trabajo entra «de golpe» tras una subida corta (filtro que
+// se abre + riser, en el pulso) y los últimos 30 s del tope van a tope (abierto y +1,5 dB ANTES de la dinámica: el
+// limitador no sube su techo). Todo va programado por delante en el reloj del contexto (con la pantalla bloqueada los
+// temporizadores de JS se frenan) y cada nuevo dato reprograma desde el valor de ese instante (amFreeze).
+// Va antes del duck: la voz agacha igual que siempre por encima.
+export const AMRAP_MIX = Object.freeze({
+  q: 0.9,                 // paso bajo sin resonancia que pite
+  restLp: 2200,           // recuperación (trote): como un break (más abajo, en los parones de una pista los huecos
+  restDb: -7,             // entre bombos se oían «vacíos»: render offline del 28 nov) · −7 dB antes del glue ≈ −3 dB a la salida
+  restLpRun: 3200,        // recuperación «a ritmo de correr» (AMRAP flotante): se retira menos
+  restDbRun: -3.5,
+  restLpMax: 2800,        // energía máx. en Ajustes: se retira menos
+  restDbMax: -5,
+  liteLp: 3000,           // versión sencilla (movimiento reducido, dispositivo justo): menos profundo y más lento
+  liteDb: -4.5,
+  retireSec: 1.6,         // trabajo → recuperación: se retira en 1,6 s (lite: 2,6 s)
+  liteRetireSec: 2.6,
+  riseBars: 2,            // subida antes de cada ronda: 2 compases, entre 1,2 y 3 s (cabe en los pitidos 3-2-1)
+  riseMinSec: 1.2,
+  riseMaxSec: 3,
+  riseLp: 5200,           // … el filtro sube hasta aquí y en el golpe se abre del todo
+  riseDb: -1.5,
+  openSec: 0.05,          // «de golpe»: lo que tarda en abrirse en el pulso (sin clic)
+  liteOpenSec: 0.9,
+  lastSec: 30,            // últimos 30 s del tope: a tope
+  maxDb: 1.5,
+  maxRampSec: 1.5,
+  endRelease: 0.3,        // tras el tope: vuelta a 0 dB en 0,3 s
+  leaveSec: 0.35,         // salida a destiempo (saltar el bloque, acabar antes): a neutro en 0,35 s
+  horizon: 150,           // s por delante que se programan (como mucho 8 cambios de fase)
+  maxBounds: 8,
+  softLp: 4500,           // recuperación sobre un parón de la propia pista (energía < 0,45): paso bajo más arriba
+  softDb: -3,             // … y menos volumen quitado (el render offline marcaba huecos entre bombos con el filtro bajo)
+  preVoiceSec: 3.4,       // lo que dura (como mucho) el pre-aviso «En 10 s…»: no se pisa con el riser
+});
+const AM = AMRAP_MIX;
+
+// Efectos grabados (audio/sfx/, Pixabay Content License; fuentes y criterio en docs/musica-nueva/descargas-2026-11-28.md):
+// pocos y nunca encima de la voz. Van por el bus de efectos (fx → drive → dinámica → duck), como el riser y el golpe
+// sintetizados, que siguen de reserva si un archivo no carga. Se descargan y decodifican al preparar la clase (en el
+// contexto de siempre; nada de <audio>) y no van en la precarga: el service worker los guarda al usarlos.
+//   campana: termina justo al empezar cada bloque AMRAP (suena entre el último pitido y el «¡Ya!»)
+//   golpe:   al abrirse cada ronda y en el «¡Tiempo!» del final del tope (solo en las AMRAP)
+//   riser:   platillo invertido que culmina en la apertura de cada ronda, si cabe entero (solo en las AMRAP)
+export const SFX = Object.freeze({
+  base: 'audio/sfx/',
+  files: Object.freeze({ campana: 'campana.m4a', golpe: 'golpe.m4a', riser: 'riser.m4a' }),
+  gainDb: Object.freeze({ campana: -9, golpe: -4, riser: -8 }),
+  bellLead: 1.3,          // la campana (1,3 s con su cola) acaba justo cuando empieza el bloque
+  // En los riser-drop de las clases normales, NO: medido en el render offline (Pirámide 20′, 28 nov), el platillo es casi
+  // mudo hasta su último segundo y no rellena el tiempo de corte como el ruido sintetizado: bajaba el mínimo de −26 a
+  // −35/−48 dB antes del drop. Las clases normales siguen con su riser y golpe sintetizados de siempre.
+  riserDrop: false,
+});
+
 // La rejilla de library.json (y del análisis en el iPhone) marca el tiempo ~80 ms antes del golpe audible
 // (BEAT_LEAD_SEC de music-analysis.js): las animaciones a ritmo lo compensan para latir con el bombo.
 const AUDIBLE_LEAD = 0.08;
@@ -167,6 +224,16 @@ export function createMusicEngine(opts = {}) {
   let latVal = 0;
   let latSrc = 'none';
   let seeks = 0;
+  let am = null;              // AMRAP en curso (amSchedule) o null
+  let amOpts = { lite: false, lead: 10 };
+  let amPlans = 0;            // veces que se ha programado la AMRAP (depuración)
+  let amGuards = 0;           // veces que el vigilante devolvió la AMRAP a neutro
+  const sfx = new Map();      // nombre → { buf, onset, peak } (efectos grabados ya decodificados)
+  let sfxLoading = null;
+  const sfxUsed = {};         // nombre → veces programado (depuración)
+  const sfxLog = [];          // últimos efectos programados: { name, at (s de clase del ataque), end }
+  const bellDone = new Set(); // inicios de bloque AMRAP (s de clase) con su campana ya decidida
+  const amLog = [];
 
   const live = (v) => (v && !v.dead ? v : null);
   const ctxRunning = () => !!ctx && (offline || (ctx.state === 'running' && !stalled));
@@ -247,6 +314,8 @@ export function createMusicEngine(opts = {}) {
       g.hp = biquad('highpass', HP_OPEN);
       g.lp = biquad('lowpass', LP_OPEN);
       g.bus = gainNode(1);
+      g.amLp = biquad('lowpass', LP_OPEN, AM.q);
+      g.amGain = gainNode(1);
       g.fx = gainNode(FX_LEVEL);
       g.echoIn = gainNode(1);
       g.delay = ctx.createDelay(2);
@@ -255,7 +324,9 @@ export function createMusicEngine(opts = {}) {
       g.fbHp = biquad('highpass', 120);
       g.fb = gainNode(ECHO_FEEDBACK);
       g.ret = gainNode(0.8);
-      g.bus.connect(g.hp);
+      g.bus.connect(g.amLp);
+      g.amLp.connect(g.amGain);
+      g.amGain.connect(g.hp);
       g.hp.connect(g.lp);
       g.lp.connect(g.drive);
       g.drive.connect(g.glue);
@@ -610,6 +681,7 @@ export function createMusicEngine(opts = {}) {
   function stopFx(c) {
     for (const e of liveFx) {
       if (e.end < c) continue;
+      if (e.am && am) am.dirty = true; // un riser/golpe de la AMRAP cortado: se reprograma en el próximo dato
       holdAt(e.out.gain, c);
       rampAt(e.out.gain, 0, c + 0.04);
       for (const s of e.srcs) { try { s.stop(c + 0.05); } catch { /* ya parada */ } }
@@ -647,7 +719,8 @@ export function createMusicEngine(opts = {}) {
       osc.stop(t1 + 0.12);
       e.srcs.push(src, osc);
       e.nodes.push(src, osc, og, bp, g);
-    } catch { /* sin efectos */ }
+      return e;
+    } catch { return null; }
   }
 
   /** Impact: bombo sub con caída de tono + golpe de ruido filtrado. */
@@ -683,7 +756,112 @@ export function createMusicEngine(opts = {}) {
       n.stop(t + 0.5);
       e.srcs.push(osc, n);
       e.nodes.push(osc, g, n, lp, ng);
-    } catch { /* sin efectos */ }
+      return e;
+    } catch { return null; }
+  }
+
+  /* ───────────── Efectos grabados (campana, golpe, riser) ───────────── */
+
+  /** Descarga y decodifica los efectos una vez (en el contexto de siempre). Nunca lanza; lo que falle, sintetizado. */
+  function loadSfx() {
+    if (sfxLoading || destroyed) return sfxLoading;
+    const loader = typeof opts.loadSfx === 'function' ? opts.loadSfx
+      : (globalThis.location && typeof globalThis.fetch === 'function'
+        ? async (name, file) => {
+          // relativo al propio módulo (js/audio/ → raíz de la app): vale igual en la app, en GitHub Pages y en tools/
+          const r = await globalThis.fetch(new URL(`../../${SFX.base}${file}`, import.meta.url).href);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        } : null);
+    if (!loader || !ensureCtx()) { sfxLoading = Promise.resolve(false); return sfxLoading; }
+    sfxLoading = Promise.all(Object.entries(SFX.files).map(async ([name, file]) => {
+      try {
+        const data = await loader(name, file);
+        const buf = await new Promise((resolve, reject) => {
+          try {
+            const p = ctx.decodeAudioData(data, resolve, reject);
+            if (p && typeof p.then === 'function') p.then(resolve, reject);
+          } catch (err) { reject(err); }
+        });
+        if (!buf || !(buf.duration > 0.1) || destroyed) return;
+        // inicio real (primer valor > −40 dB) y punto más fuerte: los decodificadores AAC añaden relleno delante
+        const ch = buf.getChannelData(0);
+        let on = 0;
+        while (on < ch.length && Math.abs(ch[on]) < 0.01) on++;
+        let pk = on;
+        for (let i = on; i < ch.length; i++) if (Math.abs(ch[i]) > Math.abs(ch[pk])) pk = i;
+        if (on >= ch.length) return;
+        sfx.set(name, { buf, onset: on / buf.sampleRate, peak: pk / buf.sampleRate });
+      } catch { /* este efecto no está: se usa el sintetizado */ }
+    })).then(() => sfx.size > 0, () => false);
+    return sfxLoading;
+  }
+
+  /**
+   * Programa un efecto grabado. Por defecto su inicio suena en `t`; con `peakAt`, su punto más fuerte cae en ese
+   * instante (el riser culmina en el cambio). null si no está cargado, no cabe o los efectos están apagados.
+   */
+  function playSfx(name, t, { peakAt = null, notBefore = -Infinity } = {}) {
+    const s = sfx.get(name);
+    if (!s || !graph || !effects) return null;
+    try {
+      const off = Math.max(0, s.onset - 0.003);
+      const startC = peakAt != null ? peakAt - (s.peak - off) : t;
+      if (startC < Math.max(notBefore, ctx.currentTime + SOON_MIN)) return null;
+      const end = startC + (s.buf.duration - off);
+      const e = fxEntry(end + 0.06);
+      const src = ctx.createBufferSource();
+      src.buffer = s.buf;
+      const g = gainNode(0);
+      const level = dbToGain(SFX.gainDb[name] ?? -6);
+      setAt(g.gain, 0, startC);
+      rampAt(g.gain, level, startC + 0.004);
+      setAt(g.gain, level, Math.max(startC + 0.005, end - 0.012));
+      rampAt(g.gain, 0, end);
+      src.connect(g);
+      g.connect(e.out);
+      src.start(startC, off);
+      src.stop(end + 0.02);
+      e.srcs.push(src);
+      e.nodes.push(src, g);
+      e.sfx = name;
+      e.t0 = startC;
+      sfxUsed[name] = (sfxUsed[name] || 0) + 1;
+      sfxLog.push({ name, at: Math.round((startC - base) * 1000) / 1000, end: Math.round((end - base) * 1000) / 1000 });
+      if (sfxLog.length > 256) sfxLog.shift();
+      return e;
+    } catch { return null; }
+  }
+
+  /** Golpe: el grabado si está; si no, el sintetizado de siempre. */
+  function hit(t) {
+    return playSfx('golpe', t) || impact(t);
+  }
+
+  /** Riser que culmina en `t1`: el grabado si cabe entero desde `notBefore`; si no, el sintetizado en [t0, t1]. */
+  function rise(t0, t1, notBefore = t0) {
+    return playSfx('riser', t1, { peakAt: t1, notBefore }) || riser(t0, t1);
+  }
+
+  /** Duración (s) del riser grabado hasta su punto más fuerte, o 0 si no está. */
+  const riserLen = () => { const s = sfx.get('riser'); return s ? s.peak - Math.max(0, s.onset - 0.003) : 0; };
+
+  /**
+   * Campana antes de cada bloque AMRAP: acaba justo al empezar el bloque (entre el último pitido y el «¡Ya!»). No
+   * suena si Lucía está hablando, con los efectos apagados o en la versión sencilla. Se programa ~3 s antes.
+   */
+  function bellCheck(c, T) {
+    const starts = plan?.amrapStarts;
+    if (!starts || !starts.length) return;
+    for (const Ts of starts) {
+      if (bellDone.has(Ts)) continue;
+      const lead = Ts - T;
+      if (lead > SCHEDULE_AHEAD + SFX.bellLead || lead < -1) continue;
+      bellDone.add(Ts);
+      if (lead < SFX.bellLead + MIN_LEAD || !effects || amLite() || speaking) continue;
+      const e = playSfx('campana', base + Ts - SFX.bellLead);
+      if (e) { e.voiceCut = true; amNote('campana', { at: Math.round(Ts * 10) / 10 }); }
+    }
   }
 
   /* ───────────── Plan: cues efectivos, sustitutas y posiciones ───────────── */
@@ -1099,7 +1277,9 @@ export function createMusicEngine(opts = {}) {
       setAt(inV.gain.gain, 0, drop - 0.006);
       rampAt(inV.gain.gain, 1, drop + 0.006);
     } else xfade(inV.gain.gain, startC, drop + 0.006, true);
-    if (fx) { riser(tf, drop); impact(drop); }
+    if (fx) {
+      if (SFX.riserDrop) { const e = rise(tf, drop, c + MIN_LEAD); if (e?.sfx) e.voiceCut = true; hit(drop); } else { riser(tf, drop); impact(drop); }
+    }
     mix = newMix('riser-drop', i, inV, O, Math.min(tf, startC), drop, drop + 0.3, drop + 0.01);
     return 'done';
   }
@@ -1348,6 +1528,7 @@ export function createMusicEngine(opts = {}) {
     }
     if (!mix) advance(c, T);
     if (!mix) guardEnd(c);
+    bellCheck(c, T);
     endFade(c, T);
     prefetch(T);
   }
@@ -1368,6 +1549,21 @@ export function createMusicEngine(opts = {}) {
 
   function onVoice(e) {
     speaking = !!e?.detail?.speaking;
+    // la voz manda: un riser de la AMRAP que suena o va a sonar ya se retira para que la frase se oiga entera
+    if (speaking && graph && ctx) {
+      try {
+        const a = soon();
+        const list = [...(am ? am.fx : []), ...liveFx.filter((x) => x.voiceCut)];
+        for (const x of list) {
+          if ((x.am !== 'riser' && !x.voiceCut) || x.cut || x.end <= a || (x.t0 ?? 0) > a + 4) continue;
+          amFreeze(x.out.gain, 0, 1);
+          rampAt(x.out.gain, 0, a + 0.06);
+          for (const src of x.srcs) { try { src.stop(a + 0.08); } catch { /* el fundido ya la calla */ } }
+          x.cut = true;
+          amNote(x.sfx === 'campana' ? 'campana fuera (voz)' : 'riser fuera (voz)');
+        }
+      } catch { /* nada */ }
+    }
     const tok = ++voiceTok;
     if (speaking) defer(VOICE_STUCK, () => { if (tok === voiceTok && speaking) { speaking = false; applyDuck(); } });
     applyDuck();
@@ -1391,6 +1587,357 @@ export function createMusicEngine(opts = {}) {
       if (m && !inMix) p.setTargetAtTime(duckGain(true), m.first, DUCK_ATTACK / 3);
       if (m) p.setTargetAtTime(duckGain(false), m.end, DUCK_RELEASE / 3);
     } catch { /* nada */ }
+  }
+
+
+  /* ───────────── AMRAP en directo (bloques «tantas rondas como puedas») ───────────── */
+  // Las fases duran lo que tarde quien corre: el plan no puede programarlas. Con cada dato del motor de la clase
+  // (getState().amrap, en update() o en amrapEvent()) se prevén los próximos cambios de fase con la velocidad de ahora y
+  // se programan en el reloj del contexto; si la previsión cambia (otra velocidad, el cambio llega antes o después), se
+  // reprograma desde el valor de ese instante. Nunca a silencio: lo peor que puede pasar es volver a la mezcla neutra.
+
+  const amLite = () => !!amOpts.lite || stalled;
+  /**
+   * Congela un parámetro de la AMRAP en su valor de AHORA (nunca en un instante futuro: quitar el final de la rampa en
+   * curso lo devolvería un momento a su valor de partida). Sin cancelAndHoldAtTime: en Chrome, dos seguidos en el mismo
+   * instante a mitad de una rampa dejaron el paso bajo en 0 Hz y la ganancia en −41 dB (música muda; visto en la vista
+   * previa el 28 nov con el reloj acelerado). Valor de ahora, recortado a lo que la AMRAP usa, fijado en este instante.
+   */
+  function amFreeze(p, lo, hi) {
+    const c = ctx.currentTime;
+    try {
+      let v = Number(p.value);
+      if (!Number.isFinite(v)) v = hi;
+      v = clamp(v, lo, hi);
+      p.cancelScheduledValues(c);
+      p.setValueAtTime(v, c);
+    } catch { /* nada */ }
+  }
+  const AM_LP = [800, LP_OPEN];
+  const AM_G = [dbToGain(-12), dbToGain(3)];
+  function amFreezeAll() {
+    amFreeze(graph.amLp.frequency, AM_LP[0], AM_LP[1]);
+    amFreeze(graph.amGain.gain, AM_G[0], AM_G[1]);
+  }
+
+  /** Vigilante: si el filtro o la ganancia de la AMRAP se salen de lo que usa (no debería pasar), a neutro al momento. */
+  function amGuard() {
+    if (!graph || !ctx) return;
+    try {
+      const f = Number(graph.amLp.frequency.value);
+      const g = Number(graph.amGain.gain.value);
+      if (Number.isFinite(f) && Number.isFinite(g) && f >= AM_LP[0] - 50 && g >= AM_G[0] * 0.9 && g <= AM_G[1] * 1.1) return;
+      const c = ctx.currentTime;
+      for (const [p, v] of [[graph.amLp.frequency, LP_OPEN], [graph.amGain.gain, 1]]) {
+        p.cancelScheduledValues(c);
+        p.setValueAtTime(v, c);
+      }
+      if (am) { amCancelFx(soon(), true); am = null; }
+      amGuards++;
+      amNote('vigilante: a neutro', { lp: Math.round(f), g: Math.round(g * 1000) / 1000 });
+    } catch { /* nada */ }
+  }
+
+  const amNear = (x, y, tol) => (x === Infinity && y === Infinity) || Math.abs(x - y) <= tol;
+
+  function amNote(what, extra) {
+    amLog.push({ t: Math.round(nowT() * 10) / 10, what, ...(extra || {}) });
+    if (amLog.length > 24) amLog.shift();
+  }
+
+  /** Filtro y ganancia (lineal, antes de la dinámica) de cada momento: 'work' | 'rest' | 'max' | 'rise' | 'neutral'. */
+  function amState(kind, restZone = 'jog', soft = false) {
+    if (kind === 'max') return { kind, lp: LP_OPEN, g: dbToGain(AM.maxDb) };
+    if (kind === 'rise') return { kind, lp: AM.riseLp, g: dbToGain(AM.riseDb) };
+    if (kind === 'rest' && soft) {
+      // la pista ya está en un parón (energía baja): se retira poco, para no dejar huecos entre bombos
+      const b = amState('rest', restZone, false);
+      return { kind, lp: Math.max(b.lp, AM.softLp), g: Math.max(b.g, dbToGain(AM.softDb)), soft: true };
+    }
+    if (kind === 'rest') {
+      if (amLite()) return { kind, lp: AM.liteLp, g: dbToGain(AM.liteDb) };
+      if (restZone === 'run' || restZone === 'fast' || restZone === 'sprint') return { kind, lp: AM.restLpRun, g: dbToGain(AM.restDbRun) };
+      if (plan?.energy === 'max') return { kind, lp: AM.restLpMax, g: dbToGain(AM.restDbMax) };
+      return { kind, lp: AM.restLp, g: dbToGain(AM.restDb) };
+    }
+    return { kind: kind === 'neutral' ? 'neutral' : 'work', lp: LP_OPEN, g: 1 };
+  }
+
+  /** Rampa del filtro y la ganancia de la AMRAP hasta `to` en t1 (desde `from` en t0, o desde lo que haya en t0). */
+  function amRamp(to, t0, t1, from = null) {
+    const f = graph.amLp.frequency;
+    const g = graph.amGain.gain;
+    if (from) { setAt(f, from.lp, t0); setAt(g, from.g, t0); }
+    expAt(f, to.lp, Math.max(t0 + 0.005, t1));
+    rampAt(g, to.g, Math.max(t0 + 0.005, t1));
+    if (am) am.ramps.push({ t0, t1: Math.max(t0 + 0.005, t1), to });
+  }
+
+  /** Instante del tiempo (pulso) de la pista que suena más cercano a c, si está a menos de medio tiempo. */
+  function amBeat(c) {
+    const v = audible();
+    if (!v) return c;
+    const g = trackGrid(v.track);
+    const p = v.p0 + (c - v.c0) * v.rate;
+    const k = Math.round((p - g.barOffset) / g.spb);
+    const q = c + (g.barOffset + k * g.spb - p) / v.rate;
+    return Math.abs(q - c) <= g.spb / v.rate / 2 + 1e-3 ? q : c;
+  }
+
+  function amBar() {
+    const v = audible();
+    return v ? trackGrid(v.track).barSec / v.rate : 2;
+  }
+
+  /** ¿La pista que suena está en un parón (energía baja los próximos 4 compases) en el instante c? Con histéresis. */
+  function amSoftAt(c, was = false) {
+    try {
+      const v = audible();
+      if (!v) return was;
+      const e = energyAt(v.track, vPos(v, c), 4);
+      if (!(e >= 0)) return false;
+      return e < (was ? 0.55 : 0.45);
+    } catch { return false; }
+  }
+
+  /** Cambios de fase previstos (s de clase) con la velocidad de ahora, el inicio de los últimos 30 s y el final del tope. */
+  function amTimeline(info, T) {
+    const capEnd = T + Math.max(0, num(info.capLeft));
+    const cap = Math.max(num(info.cap, info.capLeft), num(info.capLeft));
+    const lastT = capEnd - Math.min(AM.lastSec, cap / 3);
+    const workSpd = info.phase === 'work' ? num(info.speed) : info.nextPhase === 'work' ? num(info.nextSpeed) : num(info.speed);
+    const restSpd = info.phase === 'rest' ? num(info.speed) : info.nextPhase === 'rest' ? num(info.nextSpeed) : 0;
+    const workLen = workSpd > 0 && num(info.workM) > 0 ? (num(info.workM) * 3.6) / workSpd : Infinity;
+    const restLen = num(info.restSec) > 0 ? num(info.restSec) : num(info.restM) > 0 && restSpd > 0 ? (num(info.restM) * 3.6) / restSpd : 0;
+    const hasRest = restLen > 0 || info.phase === 'rest' || info.nextPhase === 'rest';
+    const bounds = [];
+    let ph = info.phase === 'rest' ? 'rest' : 'work';
+    let t = T + Math.max(0, num(info.phaseLeftSec, Infinity));
+    for (let k = 0; k < AM.maxBounds && Number.isFinite(t) && t < capEnd - 0.05 && t < T + AM.horizon; k++) {
+      const to = ph === 'work' && hasRest ? 'rest' : 'work';
+      bounds.push({ T: t, to });
+      t += to === 'work' ? workLen : restLen > 0 ? restLen : Infinity;
+      ph = to;
+    }
+    return { capEnd, lastT, bounds };
+  }
+
+  /** Quita los efectos de la AMRAP que aún no han sonado (y el riser en curso si `riserToo`): fuera en 30 ms. */
+  function amCancelFx(a, riserToo = false, keep = null) {
+    if (!am) return;
+    for (const e of am.fx) {
+      if (e.end <= a || e === keep) continue;
+      const future = e.t0 > a + 0.005;
+      if (!future && !(riserToo && e.am === 'riser')) continue;
+      amFreeze(e.out.gain, 0, 1);
+      rampAt(e.out.gain, 0, a + 0.03);
+      for (const x of e.srcs) { try { x.stop(a + 0.04); } catch { /* ya tenía parada: el fundido la calla */ } }
+      e.end = Math.min(e.end, a + 0.05);
+      e.cut = true;
+    }
+    am.fx = am.fx.filter((e) => !e.cut && e.end > a);
+  }
+
+  function amTag(e, kind, t0) {
+    if (!e) return;
+    e.am = kind;
+    e.t0 = e.t0 ?? t0;
+    am.fx.push(e);
+  }
+
+  /** ¿Cabe un riser en [t0, t1] sin pisar una frase? (pre-aviso del cambio de fase, «últimos 30 s», o la voz de ahora) */
+  function amRiserOk(t0, t1, lastC, a) {
+    const lead = clamp(num(amOpts.lead, 10), 3, 30);
+    const pre0 = t1 - lead;
+    if (t0 < pre0 + AM.preVoiceSec && t1 > pre0) return false;
+    if (t0 < lastC + 3.5 && t1 > lastC - 1.5) return false;
+    if (speaking && t0 < a + 4) return false;
+    return true;
+  }
+
+  /** Vuelve a la mezcla de siempre (filtro abierto, 0 dB) en `sec` y olvida la AMRAP. */
+  function amReset(sec = AM.leaveSec, why = 'neutro') {
+    if (!graph || !ctx) { am = null; return; }
+    try {
+      const a = soon();
+      amCancelFx(a, true);
+      amFreezeAll();
+      const was = am;
+      am = null;
+      amRamp(amState('neutral'), a, a + Math.max(0.02, sec));
+      if (was) amNote(why);
+    } catch { am = null; }
+  }
+
+  /** Lo programa todo desde ahora: la fase en curso, los cambios previstos, los últimos 30 s y el final del tope. */
+  function amSchedule(info, tl, restZone, lite, fx, T) {
+    amPlans++;
+    const a = soon();
+    const toC = (x) => base + x;
+    const prev = am && am.idx === info.index ? am : null;
+    const fq = graph.amLp.frequency;
+    const gn = graph.amGain.gain;
+    const nowKind = T >= tl.lastT ? 'max' : info.phase === 'rest' ? 'rest' : 'work';
+    const soft = nowKind === 'rest' && amSoftAt(a, !!prev?.soft);
+    const cur = amState(nowKind, restZone, soft);
+    // el riser que suena ahora vale si su golpe es justo ahora (llegó el cambio) o sigue siendo el siguiente cambio
+    const b0c = tl.bounds[0] ? toC(tl.bounds[0].T) : Infinity;
+    const keepR = prev?.fx.find((e) => e.am === 'riser' && e.t0 <= a && e.end > a
+      && ((nowKind === 'work' && Math.abs(e.tb - a) < 0.6) || (tl.bounds[0]?.to === 'work' && Math.abs(e.tb - b0c) < 0.35)));
+    // ¿sonó ya (o está sonando) el golpe de este cambio? (si el cambio llega antes de lo previsto, golpea ahora)
+    // (el golpe de este cambio a punto de sonar —el cambio llegó un pelo antes de lo previsto— se deja: cae en el pulso)
+    const keepHit = nowKind === 'work' ? prev?.fx.find((e) => e.am === 'impact' && !e.cut && e.t0 > a && e.t0 - a < 0.6) : null;
+    const hitDone = !!keepHit || !!prev?.fx.some((e) => e.am === 'impact' && !e.cut && e.t0 <= a + 0.005 && a - e.t0 < 0.8);
+    if (am && !prev) amCancelFx(a, true);
+    if (prev) amCancelFx(a, !keepR, keepHit);
+    const old = prev?.ramps || [];
+    am = {
+      idx: info.index, phase: info.phase, kindNow: nowKind, soft, restZone, lite, fx: prev ? prev.fx : [], ramps: [], dirty: false,
+      capEnd: tl.capEnd, capC: toC(tl.capEnd), lastC: toC(tl.lastT),
+      b0: tl.bounds[0]?.T ?? Infinity, b1: tl.bounds[1]?.T ?? Infinity, info, fxOn: fx, at: a,
+    };
+    // 1 · Ahora. Si la transición que ya suena lleva a lo que toca, se deja terminar; si no, desde el valor de este instante
+    const same = (r) => r.to.lp === cur.lp && r.to.g === cur.g;
+    const fl = old.find((r) => r.t0 <= a + 0.02 && a < r.t1 && same(r));
+    let tAt;
+    if (fl) {
+      for (const p of [fq, gn]) { try { p.cancelScheduledValues(fl.t1 + 1e-4); } catch { /* nada */ } }
+      am.ramps.push(fl);
+      tAt = fl.t1;
+    } else {
+      amFreezeAll();
+      const changed = prev ? prev.kindNow !== nowKind : nowKind !== 'work';
+      let d = prev && prev.kindNow === nowKind && !!prev.soft !== soft ? 1 : 0.25;
+      if (changed) d = nowKind === 'rest' ? (lite ? AM.liteRetireSec : AM.retireSec) : nowKind === 'max' ? AM.maxRampSec : lite ? AM.liteOpenSec : 0.12;
+      amRamp(cur, a, a + d);
+      tAt = a + d;
+      if (changed && nowKind === 'work' && prev && fx && !hitDone) amTag(hit(a), 'impact', a);
+    }
+    if (prev?.kindNow !== nowKind || !prev) amNote(nowKind === 'rest' ? (soft ? 'retira (parón)' : 'retira') : nowKind === 'max' ? 'a tope' : 'abre', { ronda: info.round });
+    else if (nowKind === 'rest' && !!prev.soft !== soft) amNote(soft ? 'parón: se retira menos' : 'fin del parón: se retira');
+    // 2 · Cambios de fase previstos antes de los últimos 30 s
+    let st = cur;
+    const lastC = am.lastC;
+    const capC = am.capC;
+    const bar = amBar();
+    const plan2 = [];
+    if (nowKind !== 'max') {
+      for (const b of tl.bounds) {
+        const raw = toC(b.T);
+        if (raw > lastC - 0.2) break;
+        const tb = Math.max(amBeat(raw), tAt + 0.02);
+        if (tb > lastC - 0.2 || tb < a + 0.05) continue;
+        if (b.to === 'rest') {
+          // retirarse justo antes de ir a tope no tiene sentido: se queda abierta
+          if (tb > lastC - AM.retireSec - 1) continue;
+          const to = amState('rest', restZone, amSoftAt(tb));
+          const d = lite ? AM.liteRetireSec : AM.retireSec;
+          amRamp(to, tb, tb + d, st);
+          st = to;
+          tAt = tb + d;
+          plan2.push({ T: Math.round((tb - base) * 10) / 10, to: 'rest' });
+        } else if (st.kind === 'rest') {
+          const to = amState('work');
+          if (lite) {
+            const t0 = Math.max(tAt + 0.01, tb - 0.6);
+            amRamp(to, t0, tb + AM.liteOpenSec - 0.6, st);
+            tAt = tb + AM.liteOpenSec - 0.6;
+          } else {
+            const rl = clamp(AM.riseBars * bar, AM.riseMinSec, AM.riseMaxSec);
+            const t0 = Math.max(tAt + 0.01, tb - rl);
+            if (tb - t0 >= 0.3) {
+              amRamp(amState('rise'), t0, tb - 0.005, st);
+              amRamp(to, tb - 0.005, tb + AM.openSec);
+              // (si el riser que ya suena va a este mismo cambio, sigue; no se programa otro)
+              const kept = keepR && Math.abs(keepR.tb - tb) < 0.4;
+              if (!kept && fx) {
+                // el grabado (platillo invertido) si cabe entero sin pisar ninguna frase; si no, el sintetizado
+                const rl2 = riserLen();
+                const tr = tb - rl2;
+                let e = null;
+                if (rl2 > 0 && tr > a + 0.05 && amRiserOk(tr, tb, lastC, a)) e = playSfx('riser', tb, { peakAt: tb, notBefore: a + 0.05 });
+                if (!e && amRiserOk(t0, tb, lastC, a)) e = riser(t0, tb);
+                if (e) { amTag(e, 'riser', e.t0 ?? t0); e.tb = tb; }
+              }
+            } else amRamp(to, tb, tb + AM.openSec, st);
+            if (fx) amTag(hit(tb), 'impact', tb);
+            tAt = tb + AM.openSec;
+          }
+          st = to;
+          plan2.push({ T: Math.round((tb - base) * 10) / 10, to: 'work' });
+        } else {
+          // ronda nueva sin recuperación: solo el golpe
+          if (fx) amTag(hit(tb), 'impact', tb);
+          plan2.push({ T: Math.round((tb - base) * 10) / 10, to: 'work' });
+        }
+      }
+      // 3 · Últimos 30 s: a tope (abierta y +1,5 dB antes de la dinámica)
+      if (lastC < capC) {
+        const t0 = Math.max(tAt + 0.01, lastC - AM.maxRampSec);
+        const to = amState('max');
+        amRamp(to, t0, Math.max(t0 + 0.05, lastC), st);
+        st = to;
+        tAt = Math.max(t0 + 0.05, lastC);
+      }
+    }
+    // 4 · Final del tope: el golpe («¡Tiempo!») y vuelta a la mezcla de siempre
+    if (capC > tAt) {
+      const tc = Math.max(tAt + 0.01, amBeat(capC));
+      if (effects) amTag(hit(tc), 'impact', tc);
+      amRamp(amState('neutral'), tc, tc + AM.endRelease, st);
+      am.endC = tc + AM.endRelease;
+    } else am.endC = tAt;
+    am.plan = plan2;
+  }
+
+  /**
+   * Dato del motor de la clase (getState().amrap; null fuera de un bloque AMRAP). `Tclass`: el instante de la clase de
+   * ese estado (getState().totalElapsed); sin él, el reloj de la música. Con el del propio estado, lo previsto no baila
+   * con el retraso entre el tic del motor y este momento (en segundo plano los tics llegan a destiempo). Nunca lanza.
+   */
+  function amSync(info, Tclass = null) {
+    try {
+      if (destroyed || !graph || !ctx || !plan) return false;
+      amGuard();
+      if (!info || typeof info !== 'object' || !(num(info.capLeft) > 0)) {
+        if (am) {
+          // terminado por su tope: lo programado ya lo devuelve todo a neutro; a destiempo, a neutro ahora
+          if (soon() >= am.capC - 0.6) am = null; else amReset(AM.leaveSec, 'salida');
+        }
+        return false;
+      }
+      if (state !== 'playing' || !enabled || !ctxRunning()) return false;
+      const T = Number.isFinite(Tclass) && Math.abs(Tclass - nowT()) < 3 ? Tclass : nowT();
+      const tl = amTimeline(info, T);
+      const restZone = info.phase === 'rest' ? info.zone : info.nextPhase === 'rest' ? info.nextZone : am?.restZone || 'jog';
+      const lite = amLite();
+      const fx = effects && !lite;
+      const b0 = tl.bounds[0]?.T ?? Infinity;
+      const b1 = tl.bounds[1]?.T ?? Infinity;
+      const kindNow = T >= tl.lastT ? 'max' : info.phase === 'rest' ? 'rest' : 'work';
+      if (am && am.idx === info.index && !am.dirty && am.phase === info.phase && am.kindNow === kindNow && am.lite === lite
+        && am.fxOn === fx && amNear(am.capEnd, tl.capEnd, 0.4) && amNear(am.b0, b0, b0 - T < 4 ? 0.35 : 0.25) && amNear(am.b1, b1, 0.6)
+        // (en la recuperación, si la pista entra o sale de un parón, se ajusta lo que se retira)
+        && !(kindNow === 'rest' && b0 - T > 4.5 && soon() > am.at + 2 && amSoftAt(soon(), !!am.soft) !== !!am.soft)) {
+        am.info = info;
+        return true;
+      }
+      amSchedule(info, tl, restZone, lite, fx, T);
+      return true;
+    } catch {
+      // la AMRAP nunca rompe la música: a la mezcla de siempre
+      try { amReset(0.3, 'error'); } catch { am = null; }
+      return false;
+    }
+  }
+
+  /** Congela lo de la AMRAP en el valor de ahora (pausa, salto): se reprograma con el próximo dato. */
+  function amHold(a) {
+    if (!am || !graph) return;
+    amCancelFx(a, true);
+    amFreezeAll();
+    am.ramps = [];
+    am.dirty = true;
   }
 
   /* ───────────── API ───────────── */
@@ -1430,6 +1977,12 @@ export function createMusicEngine(opts = {}) {
       cueCache.clear();
       listen();
       if (!ensureGraph() || !plan) return Promise.resolve(false);
+      // inicios de bloque AMRAP (campana) y los efectos grabados (en segundo plano: sin ellos, los sintetizados)
+      if (!plan.amrapStarts) {
+        try { Object.defineProperty(plan, 'amrapStarts', { value: plan.cues.filter((c) => c.amrap && c.kind === 'segment').map((c) => num(c.atSec)), enumerable: false }); } catch { /* plan congelado */ }
+      }
+      bellDone.clear();
+      loadSfx();
       if (state === 'playing') { seek(nowT()); return Promise.resolve(true); }
       if (state === 'paused') { abortMix(ctx.currentTime, false); held = null; pendingSync = true; return Promise.resolve(true); }
       cursor = 0;
@@ -1467,6 +2020,8 @@ export function createMusicEngine(opts = {}) {
       for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, KILL_MIN);
       cur = null;
       held = null;
+      if (am || graph.amGain.gain.value !== 1) amReset(0.05, 'arranque');
+      bellDone.clear();
       state = 'playing';
       base = c - T;
       endFading = false;
@@ -1498,6 +2053,7 @@ export function createMusicEngine(opts = {}) {
       const v = live(cur);
       // Lo que manda queda apuntado para retomarlo justo ahí (la memoria de la pausa)
       held = v ? { track: v.track, buf: v.buf, rate: v.rate, pos: vPos(v, a), ride: !!v.ride && a < v.ride.to } : null;
+      amHold(a);
       stopFx(a);
       for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, PAUSE_FADE);
       fadeMaster(a, 0, PAUSE_FADE);
@@ -1556,6 +2112,7 @@ export function createMusicEngine(opts = {}) {
       const c = ctx.currentTime;
       base = c - T;
       seeks++;
+      amHold(soon());
       if (endFading && T < plan.totalSec - (plan.endFadeSec || END_FADE_SEC)) {
         endFading = false;
         fadeMaster(soon(), 1, 0.3);
@@ -1604,6 +2161,8 @@ export function createMusicEngine(opts = {}) {
         }
       }
       pump();
+      // AMRAP: el estado del motor de la clase trae la fase en curso (null fuera de un bloque)
+      if (engineState && typeof engineState === 'object' && 'amrap' in engineState) amSync(engineState.amrap, Number(totalSec));
     } catch { /* nada */ }
   }
 
@@ -1628,6 +2187,7 @@ export function createMusicEngine(opts = {}) {
         stopFx(a);
         for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, 0.6);
         fadeMaster(a, 0, 0.6);
+        amReset(0.6, 'música apagada');
         cur = null;
         held = null;
         // sin música no se guarda nada decodificado (las voces que se apagan conservan su buffer hasta el final)
@@ -1667,6 +2227,7 @@ export function createMusicEngine(opts = {}) {
         stopFx(a + sec);
         for (let i = voices.length - 1; i >= 0; i--) killFade(voices[i], a, Math.max(KILL_MIN, sec));
         fadeMaster(a, 0, Math.max(KILL_MIN, sec));
+        if (am) amReset(Math.max(KILL_MIN, sec), 'fin');
       }
       cur = null;
       held = null;
@@ -1789,6 +2350,16 @@ export function createMusicEngine(opts = {}) {
         sr: x.buf?.sampleRate || 0, ride: x.ride ? { ...x.ride } : null,
       })),
       buffers: store.stats(), deckMem: Object.fromEntries(deckMem), subst: Object.fromEntries(subst),
+      // AMRAP en directo: fase, lo previsto y el filtro/ganancia en este instante (lpHz, gainDb antes de la dinámica)
+      amrap: {
+        on: !!am, idx: am?.idx ?? null, plans: amPlans, guards: amGuards, phase: am?.phase || null, now: am?.kindNow || null, lite: amLite(), fx: !!am?.fxOn,
+        capEnd: am ? Math.round(am.capEnd * 10) / 10 : null, plan: am?.plan ? am.plan.map((x) => ({ ...x })) : [],
+        pending: am ? am.fx.filter((e) => !e.cut && e.end > c).map((e) => ({ kind: e.am, at: Math.round((e.t0 - base) * 10) / 10 })) : [],
+        lpHz: graph ? Math.round(graph.amLp.frequency.value) : null,
+        gainDb: graph ? Math.round(gainDb(graph.amGain.gain.value) * 10) / 10 : null,
+        log: amLog.slice(),
+      },
+      sfx: { loaded: [...sfx.keys()], used: { ...sfxUsed }, log: sfxLog.slice() },
       dyn: graph ? { glue: grOf(graph.glue), limiter: grOf(graph.limiter) } : null,
       // ganancias en este instante (diagnóstico: ¿se queda el fundido o el agache en 0?)
       live: graph ? { fade: graph.fade.gain.value, duck: graph.duck.gain.value, music: graph.music.gain.value, speaking: !!speaking } : null,
@@ -1831,10 +2402,50 @@ export function createMusicEngine(opts = {}) {
     held = null;
     cur = null;
     mix = null;
+    am = null;
   }
 
-  return {
+  /** AMRAP: dato explícito del bloque en curso (getState().amrap o null). true si hay una AMRAP en marcha. */
+  function amrap(info) {
+    return amSync(info);
+  }
+
+  /**
+   * AMRAP: evento del motor de la clase ('amrapPhase' | 'amrapEnd'). Un cambio de fase reprograma al momento con el
+   * estado nuevo (info = getState().amrap); un bloque saltado o acabado antes de su tope vuelve a neutro en 0,35 s.
+   */
+  function amrapEvent(type, data = {}, info = undefined) {
+    try {
+      if (destroyed) return;
+      if (type === 'amrapEnd') {
+        if (am && (data?.skipped || data?.early || soon() < am.capC - 0.6)) amReset(AM.leaveSec, 'salida');
+        else if (am) { amNote('tiempo'); am = null; }
+        return;
+      }
+      if (type === 'amrapPhase') {
+        if (am) am.dirty = true;
+        if (info !== undefined) amSync(info);
+      }
+    } catch { /* nada */ }
+  }
+
+  /** AMRAP: { lite } versión sencilla (movimiento reducido, dispositivo justo) · { lead } s del pre-aviso del coach. */
+  function setAmrapOptions(o = {}) {
+    if (!o || typeof o !== 'object') return;
+    const lite = o.lite != null ? !!o.lite : amOpts.lite;
+    const lead = Number.isFinite(Number(o.lead)) ? Number(o.lead) : amOpts.lead;
+    if (lite === amOpts.lite && lead === amOpts.lead) return;
+    amOpts = { lite, lead };
+    if (am) am.dirty = true;
+  }
+
+  const api = {
     unlock, load, start, pause, resume, seek, update, setVolume, setEnabled, setEffects, setDucking, stop,
-    nowPlaying, beatPhase, getAnalyser, status, destroy, skipTrack,
+    nowPlaying, beatPhase, getAnalyser, status, destroy, skipTrack, amrap, amrapEvent, setAmrapOptions,
   };
+  // Solo con ?debugdj=1 en la dirección: el motor queda en window.__brMusic para verlo en el navegador (status())
+  try {
+    if (/[?&]debugdj=1\b/.test(globalThis.location?.search || '')) { globalThis.__brMusic = api; globalThis.__brMusicGraph = () => graph; }
+  } catch { /* sin ventana */ }
+  return api;
 }

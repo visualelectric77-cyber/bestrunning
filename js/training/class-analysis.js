@@ -85,7 +85,9 @@ function segmentSpans(segments) {
   return (Array.isArray(segments) ? segments : []).map((g) => {
     const a = t;
     t += num(g?.sec);
-    return { a, b: t, sec: num(g?.sec), zone: g?.zone, speed: num(g?.speed) };
+    // Un bloque AMRAP cambia de fase y de velocidad sin parar (la marcas tú): ni ritmo del plan, ni deriva, ni
+    // recuperación que medir. Zona propia 'amrap', que ninguna de esas medidas usa.
+    return { a, b: t, sec: num(g?.sec), zone: g?.amrap ? 'amrap' : g?.zone, speed: num(g?.speed) };
   });
 }
 

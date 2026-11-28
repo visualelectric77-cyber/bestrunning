@@ -60,6 +60,15 @@ const GROUPS = {
   hralarm: ['Pulso muy alto. Baja el ritmo ahora.'],
   hrok: ['Pulso perfecto. Mantén este ritmo.', 'Vas en tu zona. Muy bien.'],
   hron: ['Hoy te guío por tu pulso.'],
+  // «¿Cómo vas?» en clase (js/training/checkin.js): la pregunta y el «Bien» (Sobrado y Al límite dicen la velocidad nueva)
+  checkin: ['¿Cómo vas? Tócalo en la pantalla.'],
+  checkok: ['Perfecto. Sigue así.'],
+  // AMRAP («tantas rondas como puedas», js/training/amrap.js): al empezar el bloque, recordatorio de marcar la velocidad
+  // en la app (los metros son velocidad de la clase × tiempo), final y récord. Los cambios de fase usan up/down/now_*.
+  amrapgo: ['¡Empieza la AMRAP! Tantas rondas como puedas. Pon la velocidad que aguantes y márcala en la pantalla.'],
+  amrapapp: ['Si cambias la cinta, cámbiala también en la app: así cuentan tus metros.'],
+  amrapend: ['¡Tiempo! Se acabó la AMRAP. Mira tus rondas en la pantalla.'],
+  amraprecord: ['¡Récord! Más rondas que nunca en esta AMRAP.'],
   // Lo que antes solo salía escrito (no da tiempo a leerlo corriendo): día cargado, el tramo que viene cambiado por
   // tu pulso (antes del pre-aviso, que ya dice la velocidad), consejo en modo «solo aviso» y pulso perdido
   hrday: ['Hoy tu pulso va más alto de lo normal. Si no te encuentras bien, baja el ritmo.'],

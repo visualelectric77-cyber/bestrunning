@@ -18,6 +18,23 @@ const WINDOW_DAYS = 35;
 const MAX_SESSIONS = 8;          // las últimas 8 clases «duras por pulso»
 const HARD_SEC = 300;            // ≥ 5 min en Z4–Z5 = el pulso dice que fue dura
 const SCORE = { easy: 2, ok: 1, hard: 0, max: -2, fail: -3 };
+// Con la escala del 1 al 10 (js/training/rpe.js) se usa el número: 1–3 → +2, 4–5 → +1, 6–7 → 0, 8 → −1, 9 → −2,
+// 10 → −3. Las sesiones de antes llevan 3, 5, 7, 9 o 10 según su sensación, así que puntúan igual que antes.
+// Y lo que contestaste a «¿Cómo vas?» en clase (js/training/checkin.js): cada «Sobrado» suma 1 y cada «Al límite»
+// resta 2 (como mucho ±2 por clase).
+const checkScore = (h) => {
+  const list = Array.isArray(h.checkins) ? h.checkins : [];
+  const v = list.reduce((a, c) => a + (c?.[2] === 'up' ? 1 : c?.[2] === 'down' ? -2 : 0), 0);
+  return Math.max(-2, Math.min(2, v));
+};
+const scoreOf = (h) => {
+  if (h.feeling === 'fail') return SCORE.fail;
+  // El número exacto solo si lo eligió en la escala (rpeScale: 10); en las de antes, el rpe lo puso la cara
+  const n = h.rpeScale === 10 ? Math.round(Number(h.rpe)) : NaN;
+  const base = !(n >= 1 && n <= 10) ? SCORE[h.feeling]
+    : n <= 3 ? 2 : n <= 5 ? 1 : n <= 7 ? 0 : n === 8 ? -1 : n === 9 ? -2 : -3;
+  return base + checkScore(h);
+};
 const DRIFT_FROM_MIN = 25;       // la deriva empieza a contar pasada la media hora larga
 const DRIFT_PPM_MIN = 0.25;      // ppm por minuto (la deriva típica ronda 0,5 ppm/min: la mitad, por prudencia)
 const DRIFT_MAX = 6;
@@ -46,7 +63,7 @@ export function effortTolerance(history, { now = Date.now() } = {}) {
   if (!list.length) return { ppm: 0, n: 0, score: 0 };
   // Lo más reciente manda: si la última dura fue «Al límite» o «No pude», sin margen
   const last = list[list.length - 1].feeling;
-  const score = list.reduce((a, h) => a + SCORE[h.feeling], 0);
+  const score = list.reduce((a, h) => a + scoreOf(h), 0);
   const ppm = last === 'max' || last === 'fail' ? 0 : clamp(score * TOL_STEP, 0, TOL_MAX);
   return { ppm, n: list.length, score };
 }
