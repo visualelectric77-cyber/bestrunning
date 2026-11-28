@@ -25,6 +25,13 @@ ok(readiness({ resting: series(56, 52), hrv: series(50, 50), wristTemp: [[day(0)
 ok(readiness({ resting: [], hrv: [], wristTemp: [[day(0), 0.9]] }, today)?.level === 'red', 'solo temperatura alta: rojo');
 ok(readiness({ resting: series(52, 52), hrv: series(50, 50), wristTemp: [[day(0), 0.1]], respiratory: series(14, 14) }, today)?.level === 'green', 'temperatura normal: verde');
 ok(readiness({ resting: series(52, 52), hrv: series(50, 50), respiratory: Array.from({ length: 35 }, (_, k) => [day(k), k < 3 ? 17.5 : 14]) }, today)?.level === 'red', 'respiración +3,5: rojo');
+// Temperatura de muñeca algo alta pero pulso en reposo por debajo de la base y VFC por encima
+ok(readiness({ resting: series(46, 52), hrv: series(54, 50), wristTemp: [[day(0), 0.5]], respiratory: series(14, 14) }, today)?.level === 'green', 'temperatura +0,5 sola, con reposo y VFC buenos: verde');
+ok(readiness({ resting: series(52, 52), hrv: series(50, 50), wristTemp: [[day(0), 0.5]], respiratory: series(14, 14) }, today)?.level === 'green', 'temperatura +0,5 con reposo y VFC en su línea: verde');
+ok(readiness({ resting: series(55, 52), hrv: series(54, 50), wristTemp: [[day(0), 0.5]], respiratory: series(14, 14) }, today)?.level !== 'green', 'temperatura +0,5 con el reposo subiendo: sigue frenando');
+ok(readiness({ resting: series(52, 52), hrv: series(46, 50), wristTemp: [[day(0), 0.5]] }, today)?.level !== 'green', 'temperatura +0,5 con la VFC bajando: sigue frenando');
+ok(readiness({ resting: series(46, 52), hrv: series(54, 50), wristTemp: [[day(0), 0.8]] }, today)?.level !== 'green', 'temperatura +0,8: cuenta aunque lo demás vaya bien');
+ok(readiness({ resting: [], hrv: [], wristTemp: [[day(0), 0.5]] }, today)?.level === 'amber', 'solo temperatura +0,5, sin más datos: ámbar como siempre');
 void flat;
 console.log(bad ? `✗ ${n - bad} OK, ${bad} fallos` : `✓ fatiga e IA: ${n} comprobaciones`);
 process.exitCode = bad ? 1 : 0;

@@ -22,6 +22,7 @@ import { attachPlayer, isNative, post as nativePost, nativeStatus } from '../int
 import { aiTaskAvailable, aiRequest, numbersAreGrounded, cachedHealthMetrics } from '../integrations/ai.js';
 import { readiness } from '../training/readiness.js';
 import { readinessTarget, recoverySpeed, WORK_ZONES } from '../training/hr-shape.js';
+import { effortTolerance, withEffortMargin } from '../training/effort-learn.js';
 import {
   calibrateClass, nextSpeed, seriesSpeed, liveSpeed, pulseTrend, dynModelFrom, effectiveSpeed, REAL_HOLD_DEV,
   CALM_ZONES, jogFloor, calmCaps, REC_MAX_SEC,
@@ -3072,12 +3073,25 @@ export function mount(el, { params = {}, query = {} } = {}) {
 
   /** Zona de pulso objetivo del tramo; en los de trabajo, ajustada a tu recuperación de hoy (semáforo de Salud). */
   function segHrTarget(seg) {
-    const t = hrTargetForZone(seg.zone, getState().profile || {});
+    const prof = getState().profile || {};
+    const t = hrTargetForZone(seg.zone, prof);
     if (!WORK_ZONES.includes(seg.zone)) return t;
     if (cache.dayLevel === undefined) {
       try { cache.dayLevel = readiness(cachedHealthMetrics(), todayKey())?.level || null; } catch { cache.dayLevel = null; }
     }
-    return readinessTarget(t, cache.dayLevel);
+    const rt = readinessTarget(t, cache.dayLevel);
+    // Margen aprendido de tu sensación y por la deriva del pulso en las clases largas (js/training/effort-learn.js):
+    // en los tramos de calidad, el techo sube si tus clases duras por pulso las sueles marcar «Cómodo»
+    if (cache.effortTol === undefined) {
+      try { cache.effortTol = effortTolerance(getState().history || []); } catch { cache.effortTol = null; }
+    }
+    try {
+      const el = Number(engine?.getState?.().totalElapsed) || 0;
+      return withEffortMargin(rt, seg, {
+        tol: cache.effortTol, elapsedSec: el, hrMax: prof.hrMax || hrMaxFromAge(prof.age || 46),
+        baseMax: t.max, hrMaxKnown: Number(prof.hrMax) > 0, pushy: isHardEffort(prof),
+      });
+    } catch { return rt; }
   }
 
   /** Preparación: qué tramos se han ajustado a tu pulso («Trotar 9,2 (+0,3) · Trotar 8,2 (−0,6)»), hasta 4. */
@@ -4610,6 +4624,8 @@ export function mount(el, { params = {}, query = {} } = {}) {
     session.music = { tracks: playedTracks(s.totalElapsed) };
     const coachAdj = Object.fromEntries(Object.entries(hrCoachAdj).filter(([, v]) => v));
     if (Object.keys(coachAdj).length) session.hrCoachAdj = coachAdj;
+    // El margen de pulso que te dio tu sensación en esta clase (para ver luego si acertó)
+    if (cache.effortTol?.ppm > 0) session.hrTol = cache.effortTol.ppm;
     if (workout.isTest) {
       let stageStart = 0;
       for (const g of workout.segments) { if (Number(g.stage) > 0) break; stageStart += Number(g.sec) || 0; }

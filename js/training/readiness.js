@@ -58,7 +58,12 @@ export function readiness(metrics, today) {
 
   const rLevel = !resting ? 0 : resting.delta >= 6 ? 2 : resting.delta >= 3 ? 1 : 0;
   const vLevel = !hrv ? 0 : hrv.pct <= -20 ? 2 : hrv.pct <= -10 ? 1 : 0;
-  const tLevel = temp == null ? 0 : temp >= 0.7 ? 2 : temp >= 0.4 ? 1 : 0;
+  let tLevel = temp == null ? 0 : temp >= 0.7 ? 2 : temp >= 0.4 ? 1 : 0;
+  // Temperatura de muñeca algo alta pero el resto dice que te has recuperado bien (pulso en reposo en tu base o por
+  // debajo y VFC en tu línea o por encima): sola no basta para frenarte. Antes salía «Hoy, con cabeza» y el modo pulso
+  // recortaba los tramos duros a quien iba bien. Desde 0,7 °C, o si el pulso en reposo o la respiración acompañan,
+  // sigue contando como siempre.
+  if (tLevel === 1 && resting && resting.delta <= 0 && hrv && hrv.pct >= 0 && !(resp >= 1.5)) tLevel = 0;
   const pLevel = resp == null ? 0 : resp >= 3 ? 2 : resp >= 1.5 ? 1 : 0;
   const ones = [rLevel, vLevel, tLevel, pLevel].filter((x) => x === 1).length;
   const score = Math.max(rLevel, vLevel, tLevel, pLevel) + (ones >= 2 ? 1 : 0);
